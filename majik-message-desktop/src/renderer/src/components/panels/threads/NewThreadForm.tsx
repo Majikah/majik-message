@@ -4,6 +4,7 @@ import styled from 'styled-components'
 import type { MajikMessageDatabase } from '../../majik-context-wrapper/majik-message-database'
 import type { MajikContact } from '@majikah/majik-message'
 import { MajikContactListSelector } from '../../MajikContactListSelector'
+import CustomInputField from '@renderer/components/foundations/CustomInputField'
 
 /* ---------------------------------------------
  * Styled Components
@@ -20,7 +21,7 @@ const Root = styled.div`
 
 interface NewThreadFormProps {
   majik: MajikMessageDatabase
-  onUpdate?: (participants: MajikContact[]) => void
+  onUpdate?: (participants: MajikContact[], subject?: string) => void
 }
 
 /* ---------------------------------------------
@@ -39,6 +40,8 @@ const NewThreadForm: React.FC<NewThreadFormProps> = ({ majik, onUpdate }) => {
     return [myAccount]
   })
 
+  const [threadLabel, setThreadLabel] = useState<string | undefined>(undefined)
+
   const handleRecipientsUpdate = (updated: MajikContact[]): void => {
     if (updated.length === 0) {
       if (!myAccount) {
@@ -52,17 +55,26 @@ const NewThreadForm: React.FC<NewThreadFormProps> = ({ majik, onUpdate }) => {
       }
     }
     setRecipients(updated)
-    onUpdate?.(updated)
+    onUpdate?.(updated, threadLabel)
   }
 
   const handleRecipientsClear = (): void => {
     if (!myAccount) {
       setRecipients([])
-      onUpdate?.([])
+      onUpdate?.([], threadLabel)
     } else {
       setRecipients([myAccount])
-      onUpdate?.([myAccount])
+      onUpdate?.([myAccount], threadLabel)
     }
+  }
+
+  const handleChangeThreadLabel = (input: string | undefined): void => {
+    if (!input?.trim()) {
+      setThreadLabel(undefined)
+      return
+    }
+    setThreadLabel(input)
+    onUpdate?.(recipients, threadLabel)
   }
 
   const contacts = useMemo(() => {
@@ -80,6 +92,15 @@ const NewThreadForm: React.FC<NewThreadFormProps> = ({ majik, onUpdate }) => {
         onUpdate={handleRecipientsUpdate}
         onClearAll={handleRecipientsClear}
         allowEmpty={false}
+      />
+      <CustomInputField
+        label="Topic or Label"
+        regex="letters"
+        maxChar={150}
+        capitalize="first"
+        sensitive
+        currentValue={threadLabel || ''}
+        onChange={handleChangeThreadLabel}
       />
     </Root>
   )

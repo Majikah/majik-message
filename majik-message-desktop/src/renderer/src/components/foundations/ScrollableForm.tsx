@@ -11,7 +11,7 @@ const RootContainer = styled.div`
   flex-direction: column;
   justify-content: center;
 
-  height: inherit;
+  height: auto;
   user-select: none;
 `
 
@@ -21,6 +21,7 @@ const ScrollContainer = styled.div`
   touch-action: pan-y; // Allows drag scroll
   display: flex;
   flex-direction: column;
+  height: 100%;
 
   padding: 1rem 50px;
   max-height: calc(85vh - 180px);
@@ -50,6 +51,8 @@ interface ScrollableFormProps {
   onClickProceed: () => void
   isDisabledCancel?: boolean
   isDisabledProceed?: boolean
+  hideButtonA?: boolean
+  hideButtonB?: boolean
   onDebug?: () => void
 }
 
@@ -62,6 +65,8 @@ const ScrollableForm: React.FC<ScrollableFormProps> = ({
   onClickProceed,
   isDisabledCancel = false,
   isDisabledProceed = false,
+  hideButtonA = false,
+  hideButtonB = false,
   onDebug
 }) => {
   return (
@@ -76,6 +81,8 @@ const ScrollableForm: React.FC<ScrollableFormProps> = ({
         isDisabledButtonA={isDisabledCancel}
         isDisabledButtonB={isDisabledProceed}
         strictMode={true}
+        hideButtonA={hideButtonA}
+        hideButtonB={hideButtonB}
       />
       {isDevEnvironment() && !!onDebug && (
         <ButtonPrimaryConfirm onClick={onDebug}>View Class Instance</ButtonPrimaryConfirm>

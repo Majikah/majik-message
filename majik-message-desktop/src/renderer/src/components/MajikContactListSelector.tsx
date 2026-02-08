@@ -21,6 +21,7 @@ interface MajikContactListSelectorProps {
   emptyActionButton?: () => void
   emptyActionText?: string
   allowEmpty?: boolean
+  disabled?: boolean
 }
 
 const arraysEqual = (a: MajikContact[], b: MajikContact[]): boolean =>
@@ -34,7 +35,8 @@ export function MajikContactListSelector({
   onClearAll,
   emptyActionButton,
   emptyActionText = 'Add New Contact',
-  allowEmpty = true
+  allowEmpty = true,
+  disabled = false
 }: MajikContactListSelectorProps): JSX.Element {
   const [list, setList] = useState<MajikContact[]>(value)
   const [showDropdown, setShowDropdown] = useState(false)
@@ -158,6 +160,7 @@ export function MajikContactListSelector({
   }, [normalizedQuery, fuse, searchableContacts])
 
   const handleSelect = (contact: MajikContact): void => {
+    if (disabled) return
     if (list.some((c) => c.id === contact.id)) {
       toast.error('This contact is already added.')
       return
@@ -172,6 +175,7 @@ export function MajikContactListSelector({
 
   const handleRemove = (index: number, e: React.MouseEvent): void => {
     e.stopPropagation()
+    if (disabled) return
     const updated = list.filter((_, i) => i !== index)
     if (!allowEmpty && updated.length === 0) {
       toast.error('Recipient cannot be empty.')
@@ -182,12 +186,14 @@ export function MajikContactListSelector({
   }
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>): void => {
+    if (disabled) return
     setQuery(e.target.value)
     setShowDropdown(true)
     setHighlightedIndex(0)
   }
 
   const handleInputFocus = (): void => {
+    if (disabled) return
     if (contacts.length === 0) {
       toast.error('No contacts available.', {
         description: 'You currently do not have available contacts to choose from.',
@@ -201,6 +207,7 @@ export function MajikContactListSelector({
   }
 
   const handleKeyDown = (e: React.KeyboardEvent): void => {
+    if (disabled) return
     if (e.key === 'Backspace' && query === '' && list.length > 0) {
       e.preventDefault()
       // Determine if we can remove the last item
@@ -263,7 +270,7 @@ export function MajikContactListSelector({
         {list.map((contact, index) => (
           <Tag key={contact.id}>
             <span data-private>{getContactLabelSync(contact)}</span>
-            <RemoveButton onClick={(e) => handleRemove(index, e)}>✕</RemoveButton>
+            {!disabled && <RemoveButton onClick={(e) => handleRemove(index, e)}>✕</RemoveButton>}
           </Tag>
         ))}
 
@@ -274,8 +281,13 @@ export function MajikContactListSelector({
           onChange={handleInputChange}
           onFocus={handleInputFocus}
           onKeyDown={handleKeyDown}
+          disabled={disabled}
           placeholder={
-            list.length === 0 ? 'Type to search contacts...' : 'Type name or public key...'
+            disabled
+              ? ''
+              : list.length === 0
+                ? 'Type to search contacts...'
+                : 'Type name or public key...'
           }
         />
       </InputContainer>

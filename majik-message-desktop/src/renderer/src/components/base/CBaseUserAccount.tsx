@@ -497,7 +497,7 @@ const CBaseUserAccount: React.FC<CBaseUserAccountProps> = ({
                 <title>Registered Online</title>
               </BadgeCheckIcon>
             ) : (
-              <WifiSlashIcon size={18} color={theme.colors.textPrimary}>
+              <WifiSlashIcon size={18} color={theme.colors.primary}>
                 <title>Local Only</title>
               </WifiSlashIcon>
             )}

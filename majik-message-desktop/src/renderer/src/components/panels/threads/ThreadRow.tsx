@@ -3,10 +3,11 @@ import styled from 'styled-components'
 import { EnvelopeIcon, EnvelopeOpenIcon, StarIcon, TrashIcon } from '@phosphor-icons/react'
 import moment from 'moment'
 
-import type {
-  MajikMessagePublicKey,
-  MajikMessageThreadID,
-  MajikMessageThreadSummary
+import {
+  MessageEnvelope,
+  type MajikMessagePublicKey,
+  type MajikMessageThreadID,
+  type MajikMessageThreadSummary
 } from '@majikah/majik-message'
 import type { MajikMessageDatabase } from '@renderer/components/majik-context-wrapper/majik-message-database'
 import StyledIconButton from '@renderer/components/foundations/StyledIconButton'
@@ -147,30 +148,6 @@ const ActionButtons = styled.div`
   }
 `
 
-const ActionButton = styled.button`
-  background: none;
-  border: none;
-  padding: 6px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: ${({ theme }) => theme.colors.textSecondary};
-  border-radius: 4px;
-  transition:
-    background-color 0.2s ease,
-    color 0.2s ease;
-
-  &:hover {
-    background-color: #e5e7eb;
-    color: #111827;
-  }
-
-  ${RootContainer}:hover & {
-    color: ${({ theme }) => theme.colors.primaryBackground};
-  }
-`
-
 interface ThreadRowProps {
   majik: MajikMessageDatabase
   thread: MajikMessageThreadSummary
@@ -192,6 +169,9 @@ const ThreadRow: React.FC<ThreadRowProps> = ({
 }) => {
   const [isStarred, setIsStarred] = useState(thread.starred)
   const [participantLabels, setParticipantLabels] = React.useState<string[]>([])
+  const [isHovered, setIsHovered] = useState(false)
+
+  const [text, setText] = useState<string>('')
 
   useEffect(() => {
     let cancelled = false
@@ -226,6 +206,38 @@ const ThreadRow: React.FC<ThreadRowProps> = ({
     }
   }, [majik, thread.participants, currentUserPublicKey])
 
+  useEffect(() => {
+    let mounted = true
+
+    let envelope: MessageEnvelope
+
+    if (!thread.latest_message?.message) return
+
+    try {
+      envelope = MessageEnvelope.fromMatchedString(thread.latest_message?.message)
+    } catch {
+      return
+    }
+
+    if (!envelope) {
+      return
+    }
+
+    majik
+      .decryptEnvelope(envelope, true)
+      .then((msg) => {
+        if (mounted) setText(msg)
+      })
+      .catch(() => {
+        if (mounted) setText('[Unable to decrypt message]')
+      })
+
+    return () => {
+      mounted = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [thread.latest_message?.message])
+
   const handleStarClick = (e: React.MouseEvent): void => {
     e.stopPropagation()
     setIsStarred(!isStarred)
@@ -252,14 +264,19 @@ const ThreadRow: React.FC<ThreadRowProps> = ({
 
   // Get subject from metadata or use a default
   const subject = thread.latest_message?.id
-    ? thread.latest_message?.metadata?.subject || '(No Subject)'
+    ? thread.subject || thread?.latest_message?.metadata?.subject || '(No Subject)'
     : 'No messages available yet'
 
   // Format timestamp
   const relativeTime = moment(thread.latest_message_timestamp).fromNow()
 
   return (
-    <RootContainer $isUnread={thread.has_unread} onClick={handleRowClick}>
+    <RootContainer
+      $isUnread={thread.has_unread}
+      onClick={handleRowClick}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+    >
       <StarButton
         $isStarred={isStarred}
         onClick={handleStarClick}
@@ -274,7 +291,7 @@ const ThreadRow: React.FC<ThreadRowProps> = ({
 
       <ContentSection>
         <SubjectLine $isUnread={thread.has_unread}>{subject}</SubjectLine>
-        <MessagePreview>{thread.latest_message?.message}</MessagePreview>
+        <MessagePreview>{isHovered ? text : thread.latest_message?.message}</MessagePreview>
       </ContentSection>
 
       <MetaSection>

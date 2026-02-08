@@ -8,6 +8,7 @@ import {
 } from '@phosphor-icons/react'
 import ThreadRow from './ThreadRow'
 import {
+  MajikMessageThread,
   type MajikContact,
   type MajikMessageThreadID,
   type MajikMessageThreadSummary
@@ -21,6 +22,8 @@ import { toast } from 'sonner'
 import NewThreadForm from './NewThreadForm'
 import { isDevEnvironment } from '@renderer/utils/utils'
 import StyledIconButton from '@renderer/components/foundations/StyledIconButton'
+import DynamicSlidingDialogue from '@renderer/components/functional/DynamicSlidingDialogue'
+import ThreadViewer from './ThreadViewer'
 
 const RootContainer = styled.div`
   width: 100%;
@@ -52,36 +55,40 @@ const PaginationContainer = styled.div`
   display: flex;
   align-items: center;
   gap: 12px;
+  width: 100%;
+  justify-content: flex-end;
+  margin 10px 0px;
 `
-
 const PageInfo = styled.span`
   font-size: 14px;
-  color: #6b7280;
+  color: ${({ theme }) => theme.colors.textSecondary};
   font-weight: 500;
 `
 
 const PaginationButton = styled.button<{ $disabled?: boolean }>`
   background: none;
-  border: 1px solid ${(props) => (props.$disabled ? '#e5e7eb' : '#d1d5db')};
+  border: 1px solid ${({ theme }) => theme.colors.secondaryBackground};
   padding: 6px;
   cursor: ${(props) => (props.$disabled ? 'not-allowed' : 'pointer')};
   display: flex;
   align-items: center;
   justify-content: center;
-  color: ${(props) => (props.$disabled ? '#d1d5db' : '#374151')};
+  color: ${({ theme, $disabled }) =>
+    $disabled ? theme.colors.secondaryBackground : theme.colors.textSecondary};
   border-radius: 4px;
   transition: all 0.2s ease;
 
   &:hover {
-    background-color: ${(props) => (props.$disabled ? 'transparent' : '#f3f4f6')};
-    border-color: ${(props) => (props.$disabled ? '#e5e7eb' : '#9ca3af')};
+    background-color: ${({ theme, $disabled }) =>
+      $disabled ? 'transparent' : theme.colors.textSecondary};
+    border-color: ${({ theme, $disabled }) =>
+      $disabled ? theme.colors.secondaryBackground : theme.colors.primary};
   }
 
   &:active {
     transform: ${(props) => (props.$disabled ? 'none' : 'scale(0.95)')};
   }
 `
-
 const ThreadsList = styled.div`
   width: 100%;
 `
@@ -125,12 +132,17 @@ const EmailThreads: React.FC<EmailThreadsProps> = ({
   const { majikah } = useMajikah()
 
   const [fetchedThreads, setFetchedThreads] = useState<MajikMessageThreadSummary[]>([])
+  const [totalThreads, setTotalThreads] = useState<number>(0)
 
   const [recipients, setRecipients] = useState<MajikContact[]>(() => {
     const myAccount = majik.getActiveAccount()
     if (!myAccount) return []
     return [myAccount]
   })
+
+  const [threadLabel, setThreadLabel] = useState<string | undefined>(undefined)
+
+  const [selectedThread, setSelectedThread] = useState<MajikMessageThread | null>(null)
 
   const [loading, setIsLoading] = useState(false)
   const [page, setPage] = useState(1)
@@ -150,6 +162,8 @@ const EmailThreads: React.FC<EmailThreadsProps> = ({
       const threads = fetchResponse.threads
 
       setFetchedThreads(threads)
+
+      setTotalThreads(fetchResponse.total_threads)
 
       setAllowNextPage(fetchResponse.canNextPage)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -205,7 +219,7 @@ const EmailThreads: React.FC<EmailThreadsProps> = ({
 
     if (isDevEnvironment()) console.log('Recipients: ', messageRecipients)
 
-    const createThreadResponse = await majik.createThread(messageRecipients)
+    const createThreadResponse = await majik.createThread(messageRecipients, threadLabel)
 
     if (
       createThreadResponse !== null &&
@@ -241,12 +255,69 @@ const EmailThreads: React.FC<EmailThreadsProps> = ({
     })
   }
 
-  const handleRecipientsUpdate = (input: MajikContact[]): void => {
+  const handleThreadFormUpdate = (input: MajikContact[], subject?: string): void => {
     setRecipients(input)
+    setThreadLabel(subject)
+  }
+
+  const processSelectThread = async (threadID: MajikMessageThreadID): Promise<string> => {
+    if (isDevEnvironment()) console.log('Loading thread: ', threadID)
+
+    if (!threadID.trim()) {
+      throw new Error('Please select a valid thread.')
+    }
+
+    const activeAccount = majik.currentIdentity
+    if (!activeAccount) {
+      throw new Error('No active account found')
+    }
+
+    const fetchedThread = await majik.getThread(threadID)
+
+    if (fetchedThread !== null && fetchedThread.thread) {
+      const parsedThread = MajikMessageThread.fromJSON(fetchedThread.thread)
+      setSelectedThread(parsedThread)
+      return `Thread loaded successfully!`
+    } else {
+      return `Oh no... There's a problem while loading this thread.`
+    }
+  }
+
+  const handleSelectThread = async (threadID: MajikMessageThreadID): Promise<void> => {
+    const activeAccount = majik.currentIdentity
+    if (!activeAccount) return
+
+    if (!threadID.trim()) {
+      toast.error('A valid thread ID is required.')
+      return
+    }
+
+    toast.promise(processSelectThread(threadID), {
+      loading: `Loading thread...`,
+      success: (outputMessage) => {
+        setTimeout(() => {
+          onThreadClick?.(threadID)
+        }, 1000)
+
+        return outputMessage
+      },
+      error: () => {
+        return `Oh no... There's a problem while loading this thread.`
+      }
+    })
+  }
+
+  const handleCloseThread = (): void => {
+    setSelectedThread(null)
   }
 
   const isPreviousDisabled = page <= 1
   const isNextDisabled = !allowNextPage
+
+  const mailsPerPage = 50 // or your API/page size
+
+  const startThread = totalThreads === 0 ? 0 : (page - 1) * mailsPerPage + 1
+  const endThread = Math.min(page * mailsPerPage, totalThreads)
 
   const isUserRestricted = useMemo(() => {
     return majik?.currentIdentity?.isRestricted() || false
@@ -283,7 +354,7 @@ const EmailThreads: React.FC<EmailThreadsProps> = ({
                   }
                 }}
               >
-                <NewThreadForm majik={majik} onUpdate={handleRecipientsUpdate} />
+                <NewThreadForm majik={majik} onUpdate={handleThreadFormUpdate} />
               </PopUpFormButton>
 
               <Controls>
@@ -294,33 +365,33 @@ const EmailThreads: React.FC<EmailThreadsProps> = ({
                   title="Reload Threads"
                   size={25}
                 />
-
-                <PaginationContainer>
-                  <PageInfo>
-                    {/* {totalThreads > 0 ? `${startThread}-${endThread} of ${totalThreads}` : 'No threads'} */}
-                  </PageInfo>
-                  <PaginationButton
-                    onClick={handlePreviousPage}
-                    $disabled={isPreviousDisabled}
-                    disabled={isPreviousDisabled}
-                    aria-label="Previous page"
-                  >
-                    <CaretLeftIcon size={16} />
-                  </PaginationButton>
-                  <PaginationButton
-                    onClick={handleNextPage}
-                    $disabled={isNextDisabled}
-                    disabled={isNextDisabled}
-                    aria-label="Next page"
-                  >
-                    <CaretRightIcon size={16} />
-                  </PaginationButton>
-                </PaginationContainer>
               </Controls>
             </div>
           </Row>
         </SectionTitleFrame>
       </Header>
+
+      <PaginationContainer>
+        <PageInfo>
+          {totalThreads > 0 ? `${startThread}-${endThread} of ${totalThreads}` : 'No threads'}
+        </PageInfo>
+        <PaginationButton
+          onClick={handlePreviousPage}
+          $disabled={isPreviousDisabled}
+          disabled={isPreviousDisabled}
+          aria-label="Previous page"
+        >
+          <CaretLeftIcon size={16} />
+        </PaginationButton>
+        <PaginationButton
+          onClick={handleNextPage}
+          $disabled={isNextDisabled}
+          disabled={isNextDisabled}
+          aria-label="Next page"
+        >
+          <CaretRightIcon size={16} />
+        </PaginationButton>
+      </PaginationContainer>
 
       <ThreadsList>
         {fetchedThreads.length === 0 ? (
@@ -340,11 +411,54 @@ const EmailThreads: React.FC<EmailThreadsProps> = ({
               onToggleStar={onToggleStar}
               onDelete={onDelete}
               onToggleRead={onToggleRead}
-              onClick={onThreadClick}
+              onClick={() => handleSelectThread(thread.id)}
             />
           ))
         )}
       </ThreadsList>
+      <PaginationContainer>
+        <PageInfo>
+          {totalThreads > 0 ? `${startThread}-${endThread} of ${totalThreads}` : 'No threads'}
+        </PageInfo>
+        <PaginationButton
+          onClick={handlePreviousPage}
+          $disabled={isPreviousDisabled}
+          disabled={isPreviousDisabled}
+          aria-label="Previous page"
+        >
+          <CaretLeftIcon size={16} />
+        </PaginationButton>
+        <PaginationButton
+          onClick={handleNextPage}
+          $disabled={isNextDisabled}
+          disabled={isNextDisabled}
+          aria-label="Next page"
+        >
+          <CaretRightIcon size={16} />
+        </PaginationButton>
+      </PaginationContainer>
+      <DynamicSlidingDialogue
+        scrollable={false}
+        isOpen={!!selectedThread?.validate()}
+        modal={{
+          title: 'View Messages',
+          description: 'Read and reply to messages in this thread'
+        }}
+        buttons={{
+          cancel: {
+            text: 'Close',
+            onClick: handleCloseThread
+          },
+          confirm: {
+            text: 'Save',
+            isDisabled: true,
+            hide: true
+          }
+        }}
+        onOpenChange={handleCloseThread}
+      >
+        {selectedThread && <ThreadViewer majik={majik} thread={selectedThread} />}
+      </DynamicSlidingDialogue>
     </RootContainer>
   )
 }

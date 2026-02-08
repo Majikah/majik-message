@@ -28,7 +28,7 @@ export interface MajikMessageMailJSON {
   id: MajikMessageMailID;
   thread_id: MajikMessageThreadID;
   account: MajikMessageAccountID;
-  message: string; 
+  message: string;
   sender: MajikMessagePublicKey;
   recipients: MajikMessagePublicKey[];
   timestamp: ISODateString;
@@ -144,6 +144,10 @@ export class MajikMessageMail {
 
   get recipients(): readonly MajikMessagePublicKey[] {
     return [...this._recipients];
+  }
+
+  get participants(): readonly MajikMessagePublicKey[] {
+    return [...this._recipients, this._sender];
   }
 
   get timestamp(): Date {
@@ -878,6 +882,53 @@ export class MajikMessageMail {
       }
       throw new MailOperationError(
         `Failed to mark as read: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`,
+      );
+    }
+  }
+
+  /**
+   * Marks this mail as unread by removing a recipient from the read_by list.
+   * @param recipientPublicKey - The public key of the recipient marking as unread
+   * @returns true if successfully unmarked, false if wasn't read
+   */
+  public markAsUnread(recipientPublicKey: MajikMessagePublicKey): boolean {
+    try {
+      if (
+        !recipientPublicKey ||
+        typeof recipientPublicKey !== "string" ||
+        recipientPublicKey.trim() === ""
+      ) {
+        throw new MailValidationError(
+          "Recipient public key must be a non-empty string",
+        );
+      }
+
+      const trimmedKey = recipientPublicKey.trim();
+
+      // Verify recipient is in recipients list
+      if (!this._recipients.includes(trimmedKey)) {
+        throw new MailOperationError(
+          `User ${trimmedKey} is not a recipient of this mail`,
+        );
+      }
+
+      // Check if not in read_by list (idempotent)
+      const readIndex = this._readBy.indexOf(trimmedKey);
+      if (readIndex === -1) {
+        return false; // Already unread
+      }
+
+      // Remove from read_by array
+      this._readBy.splice(readIndex, 1);
+      return true; // Successfully marked as unread
+    } catch (error) {
+      if (error instanceof MajikMailError) {
+        throw error;
+      }
+      throw new MailOperationError(
+        `Failed to mark as unread: ${
           error instanceof Error ? error.message : "Unknown error"
         }`,
       );

@@ -63,6 +63,7 @@ export interface MajikMessageThreadSummary {
   unread_count: number;
   has_unread: boolean;
   starred: boolean;
+  subject?: string;
 }
 
 export interface MajikMessageThreadJSON {
@@ -738,7 +739,7 @@ export class MajikMessageThread {
 
   // ==================== Metadata Management ====================
 
-  public updateMetadata(metadata: Partial<ThreadMetadata>): void {
+  public updateMetadata(metadata: Partial<ThreadMetadata>): this {
     try {
       if (this._status === ThreadStatus.MARKED_FOR_DELETION) {
         throw new OperationNotAllowedError(
@@ -751,6 +752,7 @@ export class MajikMessageThread {
         ...metadata,
         lastActivity: new Date().toISOString(),
       };
+      return this;
     } catch (error) {
       if (error instanceof MajikThreadError) {
         throw error;
