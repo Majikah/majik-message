@@ -11,7 +11,7 @@ export default defineConfig(({ mode }) => {
     preload: {},
     renderer: {
       optimizeDeps: {
-        exclude: ['@thezelijah/majik-message'] // Force Vite to not pre-bundle it
+        exclude: ['@majikah/majik-message'] // Force Vite to not pre-bundle it
       },
       publicDir: resolve(__dirname, 'src/renderer/public'),
       build: {
@@ -26,8 +26,8 @@ export default defineConfig(({ mode }) => {
       resolve: {
         alias: {
           '@renderer': resolve('src/renderer/src'),
-          '@thezelijah/majik-message': isProd
-            ? '@thezelijah/majik-message'
+          '@majikah/majik-message': isProd
+            ? '@majikah/majik-message'
             : resolve(__dirname, '../majik-message-sdk/src'),
           '@': resolve(__dirname, 'src/renderer/src')
         }

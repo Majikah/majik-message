@@ -8,7 +8,7 @@ import { toast } from "sonner";
 
 import TextEditPreviewInput from "../functional/TextEditPreviewInput";
 
-import { MajikContact, MessageEnvelope } from "@thezelijah/majik-message";
+import { MajikContact, MessageEnvelope } from "@majikah/majik-message";
 import { MajikContactListSelector } from "../MajikContactListSelector";
 import {
   SectionSubTitle,

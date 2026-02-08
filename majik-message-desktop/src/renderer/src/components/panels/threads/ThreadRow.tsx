@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import styled from 'styled-components'
 import { EnvelopeIcon, EnvelopeOpenIcon, StarIcon, TrashIcon } from '@phosphor-icons/react'
 import moment from 'moment'
@@ -7,30 +7,25 @@ import type {
   MajikMessagePublicKey,
   MajikMessageThreadID,
   MajikMessageThreadSummary
-} from '@thezelijah/majik-message'
-
-interface ThreadMailProps {
-  thread: MajikMessageThreadSummary
-  currentUserPublicKey: MajikMessagePublicKey
-  onToggleStar?: (threadId: MajikMessageThreadID) => void
-  onDelete?: (threadId: MajikMessageThreadID) => void
-  onToggleRead?: (threadId: MajikMessageThreadID) => void
-  onClick?: (threadId: MajikMessageThreadID) => void
-}
+} from '@majikah/majik-message'
+import type { MajikMessageDatabase } from '@renderer/components/majik-context-wrapper/majik-message-database'
+import StyledIconButton from '@renderer/components/foundations/StyledIconButton'
 
 const RootContainer = styled.div<{ $isUnread: boolean }>`
   width: 100%;
   display: flex;
   align-items: center;
   padding: 12px 16px;
-  border-bottom: 1px solid #e5e7eb;
-  background-color: ${(props) => (props.$isUnread ? '#f0f4ff' : '#ffffff')};
+  border-bottom: 1px solid ${({ theme }) => theme.colors.secondaryBackground};
+  background: ${({ theme, $isUnread }) =>
+    $isUnread ? theme.colors.secondaryBackground : 'transparent'};
   cursor: pointer;
   transition: background-color 0.2s ease;
   position: relative;
+  border-radius: 8px;
 
   &:hover {
-    background-color: #f9fafb;
+    background: ${({ theme }) => theme.gradients.primary};
 
     .action-buttons {
       opacity: 1;
@@ -54,17 +49,25 @@ const StarButton = styled.button<{ $isStarred: boolean }>`
   &:hover {
     color: ${(props) => (props.$isStarred ? '#f59e0b' : '#6b7280')};
   }
+
+  ${RootContainer}:hover & {
+    color: ${({ theme }) => theme.colors.primaryBackground};
+  }
 `
 
 const ParticipantsSection = styled.div<{ $hasUnread: boolean }>`
   min-width: 200px;
   max-width: 200px;
   font-weight: ${(props) => (props.$hasUnread ? '600' : '400')};
-  color: #111827;
+  color: ${({ theme }) => theme.colors.textPrimary};
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   margin-right: 16px;
+
+  ${RootContainer}:hover & {
+    color: ${({ theme }) => theme.colors.primaryBackground};
+  }
 `
 
 const ContentSection = styled.div`
@@ -79,18 +82,25 @@ const ContentSection = styled.div`
 const SubjectLine = styled.div<{ $isUnread: boolean }>`
   font-size: 14px;
   font-weight: ${(props) => (props.$isUnread ? '600' : '400')};
-  color: #111827;
+  color: ${({ theme }) => theme.colors.textPrimary};
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  ${RootContainer}:hover & {
+    color: ${({ theme }) => theme.colors.primaryBackground};
+  }
 `
 
 const MessagePreview = styled.div`
   font-size: 13px;
-  color: #6b7280;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  opacity: 0.7;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  ${RootContainer}:hover & {
+    color: ${({ theme }) => theme.colors.primaryBackground};
+  }
 `
 
 const MetaSection = styled.div`
@@ -101,7 +111,7 @@ const MetaSection = styled.div`
 `
 
 const UnreadBadge = styled.span`
-  background-color: #3b82f6;
+  background-color: ${({ theme }) => theme.colors.primary};
   color: white;
   font-size: 11px;
   font-weight: 600;
@@ -117,6 +127,10 @@ const Timestamp = styled.div<{ $isUnread: boolean }>`
   font-weight: ${(props) => (props.$isUnread ? '600' : '400')};
   min-width: 80px;
   text-align: right;
+  margin-right: 15px;
+  ${RootContainer}:hover & {
+    color: ${({ theme }) => theme.colors.primaryBackground};
+  }
 `
 
 const ActionButtons = styled.div`
@@ -128,6 +142,9 @@ const ActionButtons = styled.div`
   transition:
     opacity 0.2s ease,
     visibility 0.2s ease;
+  ${RootContainer}:hover & {
+    color: ${({ theme }) => theme.colors.primaryBackground};
+  }
 `
 
 const ActionButton = styled.button`
@@ -138,7 +155,7 @@ const ActionButton = styled.button`
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #6b7280;
+  color: ${({ theme }) => theme.colors.textSecondary};
   border-radius: 4px;
   transition:
     background-color 0.2s ease,
@@ -148,9 +165,24 @@ const ActionButton = styled.button`
     background-color: #e5e7eb;
     color: #111827;
   }
+
+  ${RootContainer}:hover & {
+    color: ${({ theme }) => theme.colors.primaryBackground};
+  }
 `
 
-const ThreadMail: React.FC<ThreadMailProps> = ({
+interface ThreadRowProps {
+  majik: MajikMessageDatabase
+  thread: MajikMessageThreadSummary
+  currentUserPublicKey: MajikMessagePublicKey
+  onToggleStar?: (threadId: MajikMessageThreadID) => void
+  onDelete?: (threadId: MajikMessageThreadID) => void
+  onToggleRead?: (threadId: MajikMessageThreadID) => void
+  onClick?: (threadId: MajikMessageThreadID) => void
+}
+
+const ThreadRow: React.FC<ThreadRowProps> = ({
+  majik,
   thread,
   currentUserPublicKey,
   onToggleStar,
@@ -159,6 +191,40 @@ const ThreadMail: React.FC<ThreadMailProps> = ({
   onClick
 }) => {
   const [isStarred, setIsStarred] = useState(thread.starred)
+  const [participantLabels, setParticipantLabels] = React.useState<string[]>([])
+
+  useEffect(() => {
+    let cancelled = false
+
+    const resolveParticipants = async (): Promise<void> => {
+      try {
+        // Filter out current user from participants
+        const otherParticipants = thread.participants.filter((p) => p !== currentUserPublicKey)
+        const labels = await Promise.all(
+          otherParticipants.map(async (pk) => {
+            try {
+              const contact = await majik.getContactByPublicKey(pk)
+              return contact?.meta.label?.trim() ? contact.meta.label : shortenPublicKey(pk)
+            } catch {
+              return shortenPublicKey(pk)
+            }
+          })
+        )
+
+        if (!cancelled) {
+          setParticipantLabels(labels)
+        }
+      } catch (err) {
+        console.error('Failed to resolve participant labels', err)
+      }
+    }
+
+    resolveParticipants()
+
+    return () => {
+      cancelled = true
+    }
+  }, [majik, thread.participants, currentUserPublicKey])
 
   const handleStarClick = (e: React.MouseEvent): void => {
     e.stopPropagation()
@@ -180,15 +246,14 @@ const ThreadMail: React.FC<ThreadMailProps> = ({
     onClick?.(thread.id)
   }
 
-  // Filter out current user from participants
-  const otherParticipants = thread.participants.filter((p) => p !== currentUserPublicKey)
-
   // Format participants display
   const participantsDisplay =
-    otherParticipants.length > 0 ? otherParticipants.join(', ') : 'No participants'
+    participantLabels.length > 0 ? participantLabels.join(', ') : 'No participants'
 
   // Get subject from metadata or use a default
-  const subject = thread.latest_message.metadata?.subject || '(No Subject)'
+  const subject = thread.latest_message?.id
+    ? thread.latest_message?.metadata?.subject || '(No Subject)'
+    : 'No messages available yet'
 
   // Format timestamp
   const relativeTime = moment(thread.latest_message_timestamp).fromNow()
@@ -209,7 +274,7 @@ const ThreadMail: React.FC<ThreadMailProps> = ({
 
       <ContentSection>
         <SubjectLine $isUnread={thread.has_unread}>{subject}</SubjectLine>
-        <MessagePreview>{thread.latest_message.message}</MessagePreview>
+        <MessagePreview>{thread.latest_message?.message}</MessagePreview>
       </ContentSection>
 
       <MetaSection>
@@ -221,18 +286,33 @@ const ThreadMail: React.FC<ThreadMailProps> = ({
       <Timestamp $isUnread={thread.has_unread}>{relativeTime}</Timestamp>
 
       <ActionButtons className="action-buttons">
-        <ActionButton
+        <StyledIconButton
           onClick={handleToggleReadClick}
           aria-label={thread.has_unread ? 'Mark as read' : 'Mark as unread'}
-        >
-          {thread.has_unread ? <EnvelopeOpenIcon size={18} /> : <EnvelopeIcon size={18} />}
-        </ActionButton>
-        <ActionButton onClick={handleDeleteClick} aria-label="Delete thread">
-          <TrashIcon size={18} />
-        </ActionButton>
+          icon={thread.has_unread ? EnvelopeOpenIcon : EnvelopeIcon}
+          title={thread.has_unread ? 'Mark as read' : 'Mark as unread'}
+          size={20}
+        />
+
+        <StyledIconButton
+          onClick={handleDeleteClick}
+          aria-label="Delete Thread"
+          icon={TrashIcon}
+          title="Delete Thread"
+          size={20}
+        />
       </ActionButtons>
     </RootContainer>
   )
 }
 
-export default ThreadMail
+export default ThreadRow
+
+/* --------------------------------
+ * Helpers
+ * -------------------------------- */
+
+function shortenPublicKey(pk: MajikMessagePublicKey, chars = 6): string {
+  const str = String(pk)
+  return `${str.slice(0, chars)}…${str.slice(-chars)}`
+}

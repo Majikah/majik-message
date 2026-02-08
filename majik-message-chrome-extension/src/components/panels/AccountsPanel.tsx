@@ -16,7 +16,7 @@ import {
   jsonToSeed,
   MnemonicJSON,
   seedStringToArray,
-} from "@thezelijah/majik-message";
+} from "@majikah/majik-message";
 import { SectionTitleFrame } from "../../globals/styled-components";
 import DynamicPlaceholder from "../foundations/DynamicPlaceholder";
 import { MajikMessageDatabase } from "../majik-context-wrapper/majik-message-database";
@@ -201,7 +201,7 @@ const AccountsPanel: React.FC<AccountsPanelProps> = ({
       await (majik as any).keyStore?.deleteIdentity?.(id).catch?.(() => {});
       // Try using KeyStore API directly if available
       try {
-        const { KeyStore } = await import("@thezelijah/majik-message");
+        const { KeyStore } = await import("@majikah/majik-message");
         await (KeyStore as any).deleteIdentity(id);
       } catch (e) {
         // ignore

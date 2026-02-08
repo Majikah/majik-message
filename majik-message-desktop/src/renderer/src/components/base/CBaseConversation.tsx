@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react'
 import styled from 'styled-components'
 
-import { MessageEnvelope, type MajikMessagePublicKey } from '@thezelijah/majik-message'
+import { MessageEnvelope, type MajikMessagePublicKey } from '@majikah/majik-message'
 import type { ConversationSummary } from '../majikah-session-wrapper/api-types'
 import type { MajikMessageDatabase } from '../majik-context-wrapper/majik-message-database'
 import moment from 'moment'

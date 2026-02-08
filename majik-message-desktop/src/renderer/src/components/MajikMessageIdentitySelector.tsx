@@ -10,7 +10,7 @@ import { CaretUpDownIcon, UserIcon } from '@phosphor-icons/react'
 import { Tooltip } from 'react-tooltip'
 import theme from '../globals/theme'
 import { useMajik } from './majik-context-wrapper/use-majik'
-import type { MajikMessageIdentity } from '@thezelijah/majik-message'
+import type { MajikMessageIdentity } from '@majikah/majik-message'
 import { toast } from 'sonner'
 import { useMajikah } from './majikah-session-wrapper/use-majikah'
 

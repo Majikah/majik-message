@@ -43,7 +43,7 @@ import type { MAJIK_API_RESPONSE, MultiRecipientPayload } from "./core/types";
 import { MajikMessageChat } from "./core/database/chat/majik-message-chat";
 import { MajikCompressor } from "./core/compressor/majik-compressor";
 import { MajikMessageIdentity } from "./core/database/system/identity";
-import { MajikKey } from "@thezelijah/majik-key";
+import { MajikKey } from "@majikah/majik-key";
 
 type MajikMessageEvents =
   | "message"
@@ -218,7 +218,6 @@ export class MajikMessage {
     passphrase: string,
     label?: string,
   ): Promise<{ id: string; fingerprint: string }> {
-
     const mJSON: MnemonicJSON = {
       id: backupBase64,
       seed: seedStringToArray(mnemonic),
@@ -245,7 +244,6 @@ export class MajikMessage {
       id: importedIdentity.id,
       fingerprint: importedIdentity.fingerprint,
     };
-
   }
 
   /**

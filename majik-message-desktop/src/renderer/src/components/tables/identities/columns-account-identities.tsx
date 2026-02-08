@@ -13,7 +13,7 @@ import {
 import { Checkbox } from '@/components/ui/checkbox'
 
 import styled from 'styled-components'
-import { MajikMessageIdentity } from '@thezelijah/majik-message'
+import { MajikMessageIdentity } from '@majikah/majik-message'
 import { parseDateFromISO } from '@renderer/utils/utils'
 
 const PublicKeyCell = styled.div`

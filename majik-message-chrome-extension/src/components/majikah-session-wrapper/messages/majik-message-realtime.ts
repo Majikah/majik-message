@@ -12,7 +12,7 @@ import {
   MessageEnvelope,
   type MajikMessageChatJSON,
   type MajikMessageIdentity,
-} from "@thezelijah/majik-message";
+} from "@majikah/majik-message";
 import type { API_WEBSOCKET_SEND_MESSAGE_BODY } from "../api-types";
 
 export type ChatEvents = {

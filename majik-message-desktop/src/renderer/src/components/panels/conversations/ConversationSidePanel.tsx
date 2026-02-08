@@ -14,7 +14,7 @@ import { SectionTitleFrame } from '@renderer/globals/styled-components'
 import { toast } from 'sonner'
 import { MajikMessageIdentitySelector } from '@renderer/components/MajikMessageIdentitySelector'
 
-import { MajikMessageChat } from '@thezelijah/majik-message'
+import { MajikMessageChat } from '@majikah/majik-message'
 import { NotePencilIcon } from '@phosphor-icons/react'
 import PopUpFormButton from '@renderer/components/foundations/PopUpFormButton'
 import NewMessageForm from '@renderer/components/NewMessageForm'

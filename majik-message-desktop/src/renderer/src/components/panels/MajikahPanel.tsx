@@ -14,7 +14,7 @@ import {
 import { useCallback, useEffect, useState } from 'react'
 import PopUpFormButton from '../foundations/PopUpFormButton'
 import { PlusIcon } from '@phosphor-icons/react'
-import type { MajikContact, MajikMessageIdentity } from '@thezelijah/majik-message'
+import type { MajikContact, MajikMessageIdentity } from '@majikah/majik-message'
 import { toast } from 'sonner'
 import { MajikContactSelector } from '../MajikContactSelector'
 import DynamicPlaceholder from '../foundations/DynamicPlaceholder'

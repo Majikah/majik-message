@@ -18,7 +18,7 @@ import {
   aesGcmDecrypt,
   IV_LENGTH,
 } from "./crypto-provider";
-import { MajikKey } from "@thezelijah/majik-key";
+import { MajikKey } from "@majikah/majik-key";
 
 /* -------------------------------
  * Types

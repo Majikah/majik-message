@@ -19,7 +19,7 @@ import {
   MajikContact,
   seedStringToArray,
   type MnemonicJSON
-} from '@thezelijah/majik-message'
+} from '@majikah/majik-message'
 import DynamicPlaceholder from './components/foundations/DynamicPlaceholder'
 import AccountsPanel from './components/panels/AccountsPanel'
 

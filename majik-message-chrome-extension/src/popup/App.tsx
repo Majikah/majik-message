@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 import ScannerPanel from "../components/panels/ScannerPanel";
 import UnlockModal from "../components/UnlockModal";
-import { KeyStore, MajikContact } from "@thezelijah/majik-message";
+import { KeyStore, MajikContact } from "@majikah/majik-message";
 
 import { toast, Toaster } from "sonner";
 import DynamicPlaceholder from "../components/foundations/DynamicPlaceholder";

@@ -34,7 +34,7 @@ import { createSupabaseBrowserClient } from "../../lib/supabase/supabase";
 import type {
   MajikContact,
   MajikMessageAccountID,
-} from "@thezelijah/majik-message";
+} from "@majikah/majik-message";
 import { APIKeyManager } from "../../utils/api-manager";
 
 /* ================================

@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import ContactsPanel from "../components/panels/ContactsPanel";
 import ScannerPanel from "../components/panels/ScannerPanel";
 import UnlockModal from "../components/UnlockModal";
-import { KeyStore, MajikContact } from "@thezelijah/majik-message";
+import { KeyStore, MajikContact } from "@majikah/majik-message";
 
 import AccountsPanel from "../components/panels/AccountsPanel";
 

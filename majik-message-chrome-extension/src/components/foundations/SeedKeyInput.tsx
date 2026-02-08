@@ -10,7 +10,7 @@ import React, { JSX, useEffect, useId, useState } from "react";
 import styled from "styled-components";
 import { Tooltip } from "react-tooltip";
 import CustomInputField from "./CustomInputField";
-import { KeyStore } from "@thezelijah/majik-message";
+import { KeyStore } from "@majikah/majik-message";
 
 /* -------------------------------
  * Styled Components

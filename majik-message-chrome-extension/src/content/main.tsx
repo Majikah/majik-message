@@ -2,7 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./views/App.tsx";
 
-import { MajikMessageJSON, MessageEnvelope } from "@thezelijah/majik-message";
+import { MajikMessageJSON, MessageEnvelope } from "@majikah/majik-message";
 import ReduxProvider from "../redux/ReduxProvider.tsx";
 import ThemeProviderWrapper from "../globals/ThemeProviderWrapper.tsx";
 import { base64EncodeUtf8 } from "../lib/majik-file-utils.ts";

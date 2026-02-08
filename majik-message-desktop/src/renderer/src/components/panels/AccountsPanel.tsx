@@ -19,7 +19,7 @@ import {
   MajikContact,
   seedStringToArray,
   type MnemonicJSON
-} from '@thezelijah/majik-message'
+} from '@majikah/majik-message'
 import type { MajikMessageDatabase } from '../majik-context-wrapper/majik-message-database'
 import DynamicPlaceholder from '../foundations/DynamicPlaceholder'
 
@@ -239,7 +239,7 @@ const AccountsPanel: React.FC<AccountsPanelProps> = ({ majik, onUpdate }) => {
       await (majik as any).keyStore?.deleteIdentity?.(id).catch?.(() => {})
       // Try using KeyStore API directly if available
       try {
-        const { KeyStore } = await import('@thezelijah/majik-message')
+        const { KeyStore } = await import('@majikah/majik-message')
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         await (KeyStore as any).deleteIdentity(id)
         // eslint-disable-next-line @typescript-eslint/no-unused-vars

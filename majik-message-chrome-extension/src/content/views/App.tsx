@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import "./App.css";
 
-import { KeyStore, MajikContact } from "@thezelijah/majik-message";
+import { KeyStore, MajikContact } from "@majikah/majik-message";
 import UnlockModal from "../../components/UnlockModal";
 import { toast, Toaster } from "sonner";
 import { useMajik } from "../../components/majik-context-wrapper/use-majik";

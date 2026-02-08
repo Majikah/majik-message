@@ -3,7 +3,7 @@ import styled from "styled-components";
 import { toast } from "sonner";
 import Fuse from "fuse.js";
 import { TrashIcon } from "@phosphor-icons/react";
-import type { MajikContact } from "@thezelijah/majik-message";
+import type { MajikContact } from "@majikah/majik-message";
 
 type SearchableContact = {
   contact: MajikContact;

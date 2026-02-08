@@ -12,7 +12,7 @@ import theme from '../../globals/theme'
 import { toast } from 'sonner'
 import { ButtonPrimaryConfirm } from '../../globals/buttons'
 import moment from 'moment'
-import type { EnvelopeCacheItem } from '@thezelijah/majik-message'
+import type { EnvelopeCacheItem } from '@majikah/majik-message'
 
 // Styled components
 const RootContainer = styled.div`

@@ -5,7 +5,7 @@ import {
   KeyStore,
   EnvelopeCache,
   MessageEnvelope,
-} from "@thezelijah/majik-message";
+} from "@majikah/majik-message";
 
 import { base64DecodeUtf8 } from "../lib/majik-file-utils";
 import { MajikMessageDatabase } from "../components/majik-context-wrapper/majik-message-database";

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { MajikMessagePublicKey } from '@thezelijah/majik-message'
+import type { MajikMessagePublicKey } from '@majikah/majik-message'
 import type {
   MajikMessageRealtimeChatClient,
   TypingPayload

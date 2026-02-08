@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import PopUpFormButton from '../foundations/PopUpFormButton'
 import { UserPlusIcon } from '@phosphor-icons/react'
 import CustomInputField from '../foundations/CustomInputField'
-import { MajikContact, MessageEnvelope } from '@thezelijah/majik-message'
+import { MajikContact, MessageEnvelope } from '@majikah/majik-message'
 
 import { toast } from 'sonner'
 

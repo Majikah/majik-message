@@ -1,6 +1,6 @@
 import styled from 'styled-components'
 import { useEffect, useState, useCallback } from 'react'
-import { type EnvelopeCacheItem } from '@thezelijah/majik-message'
+import { type EnvelopeCacheItem } from '@majikah/majik-message'
 import DynamicPlaceholder from '../foundations/DynamicPlaceholder'
 
 import { toast } from 'sonner'

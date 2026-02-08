@@ -18,7 +18,7 @@ import type { MajikMessageDatabase } from "./majik-context-wrapper/majik-message
 // import { ChoiceButton } from "../globals/buttons";
 import ConfirmationButton from "./foundations/ConfirmationButton";
 import { MajikMessageAccountSelector } from "./MajikMessageAccountSelector";
-import type { MajikContact } from "@thezelijah/majik-message";
+import type { MajikContact } from "@majikah/majik-message";
 
 const ModalContainer = styled.div`
   display: flex;
@@ -46,7 +46,6 @@ const ScrollContainer = styled.div`
   touch-action: pan-y; // Allows drag scroll
   display: flex;
   flex-direction: column;
-
 
   max-height: calc(85vh - 180px);
   overflow-y: auto;

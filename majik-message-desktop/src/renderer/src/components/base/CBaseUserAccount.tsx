@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import styled, { css } from 'styled-components'
-import { MajikContact } from '@thezelijah/majik-message'
+import { MajikContact } from '@majikah/majik-message'
 import { isDevEnvironment } from '../../utils/utils'
 import DeleteButton from '../foundations/DeleteButton'
 import StyledIconButton from '../foundations/StyledIconButton'

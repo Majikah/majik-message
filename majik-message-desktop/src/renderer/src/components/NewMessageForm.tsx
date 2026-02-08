@@ -6,7 +6,7 @@ import { toast } from 'sonner'
 import { ButtonPrimaryConfirm } from '@renderer/globals/buttons'
 import { downloadBlob, isDevEnvironment } from '@renderer/utils/utils'
 import type { MajikMessageDatabase } from './majik-context-wrapper/majik-message-database'
-import type { MajikContact, MajikMessagePublicKey } from '@thezelijah/majik-message'
+import type { MajikContact, MajikMessagePublicKey } from '@majikah/majik-message'
 import { MajikContactListSelector } from './MajikContactListSelector'
 import { ChatInputBox } from './functional/ChatInputBox'
 
@@ -21,7 +21,6 @@ const Root = styled.div`
 
   color: ${({ theme }) => theme.colors.textPrimary};
   gap: 25px;
-  overflow: hidden;
 `
 
 const Body = styled.div`

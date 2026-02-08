@@ -6,18 +6,21 @@ import {
   CaretRightIcon,
   ArrowClockwiseIcon
 } from '@phosphor-icons/react'
-import ThreadMail from './ThreadMail'
-import type {
-  MajikMessageMail,
-  MajikMessageThreadID,
-  MajikMessageThreadSummary
-} from '@thezelijah/majik-message'
+import ThreadRow from './ThreadRow'
+import {
+  type MajikContact,
+  type MajikMessageThreadID,
+  type MajikMessageThreadSummary
+} from '@majikah/majik-message'
 import { SectionTitleFrame } from '@renderer/globals/styled-components'
 import PopUpFormButton from '@renderer/components/foundations/PopUpFormButton'
 import UserAuth from '@renderer/components/foundations/UserAuth'
 import { useMajikah } from '@renderer/components/majikah-session-wrapper/use-majikah'
 import type { MajikMessageDatabase } from '@renderer/components/majik-context-wrapper/majik-message-database'
 import { toast } from 'sonner'
+import NewThreadForm from './NewThreadForm'
+import { isDevEnvironment } from '@renderer/utils/utils'
+import StyledIconButton from '@renderer/components/foundations/StyledIconButton'
 
 const RootContainer = styled.div`
   width: 100%;
@@ -43,30 +46,6 @@ const Controls = styled.div`
   display: flex;
   align-items: center;
   gap: 16px;
-`
-
-const ReloadButton = styled.button`
-  background: none;
-  border: 1px solid #d1d5db;
-  padding: 8px 12px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: #374151;
-  border-radius: 6px;
-  font-size: 14px;
-  font-weight: 500;
-  transition: all 0.2s ease;
-
-  &:hover {
-    background-color: #f3f4f6;
-    border-color: #9ca3af;
-  }
-
-  &:active {
-    transform: scale(0.98);
-  }
 `
 
 const PaginationContainer = styled.div`
@@ -110,13 +89,13 @@ const ThreadsList = styled.div`
 const EmptyState = styled.div`
   padding: 60px 20px;
   text-align: center;
-  color: #6b7280;
+  color: ${({ theme }) => theme.colors.textSecondary};
 `
 
 const EmptyStateTitle = styled.h3`
   font-size: 18px;
   font-weight: 600;
-  color: #374151;
+  color: ${({ theme }) => theme.colors.textSecondary};
   margin: 0 0 8px 0;
 `
 
@@ -125,13 +104,10 @@ const EmptyStateMessage = styled.p`
   margin: 0;
 `
 
-const PAGINATION_LIMIT = 50
-
 interface EmailThreadsProps {
   majik: MajikMessageDatabase
   onUpdate?: (updatedInstance: MajikMessageDatabase) => void
   onPageChange?: (page: number) => void
-  onReload?: () => void
   onToggleStar?: (threadId: MajikMessageThreadID) => void
   onDelete?: (threadId: MajikMessageThreadID) => void
   onToggleRead?: (threadId: MajikMessageThreadID) => void
@@ -141,7 +117,6 @@ interface EmailThreadsProps {
 const EmailThreads: React.FC<EmailThreadsProps> = ({
   majik,
   onPageChange,
-  onReload,
   onToggleStar,
   onDelete,
   onToggleRead,
@@ -151,17 +126,17 @@ const EmailThreads: React.FC<EmailThreadsProps> = ({
 
   const [fetchedThreads, setFetchedThreads] = useState<MajikMessageThreadSummary[]>([])
 
+  const [recipients, setRecipients] = useState<MajikContact[]>(() => {
+    const myAccount = majik.getActiveAccount()
+    if (!myAccount) return []
+    return [myAccount]
+  })
+
   const [loading, setIsLoading] = useState(false)
-  const [pageIndex, setPageIndex] = useState(0)
-  const [allowNextPage] = useState(false)
+  const [page, setPage] = useState(1)
+  const [allowNextPage, setAllowNextPage] = useState(false)
 
   const isRefreshingRef = useRef(false)
-
-  const [newMessageText, setNewMessageText] = useState<string>('')
-
-  const [isCreatingMessage, setIsCreatingMessage] = useState<boolean>(false)
-
-  const messagesRef = useRef<{ insertMessage: (message: MajikMessageMail) => Promise<void> }>(null)
 
   const refreshThreads = useCallback(async () => {
     if (!majikah?.isAuthenticated) return
@@ -171,12 +146,12 @@ const EmailThreads: React.FC<EmailThreadsProps> = ({
 
     try {
       setIsLoading(true)
-      //   const fetchResponse = await majik.getConversations()
-      //   const conversations = fetchResponse.conversations
+      const fetchResponse = await majik.getThreads()
+      const threads = fetchResponse.threads
 
-      //   setFetchedThreads(conversations)
+      setFetchedThreads(threads)
 
-      // setAllowNextPage(conversations.length > 0)
+      setAllowNextPage(fetchResponse.canNextPage)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (error: any) {
       if (error?.name !== 'AbortError') {
@@ -185,7 +160,6 @@ const EmailThreads: React.FC<EmailThreadsProps> = ({
     } finally {
       isRefreshingRef.current = false
       setIsLoading(false)
-      setIsCreatingMessage(false)
     }
   }, [majik, majikah.isAuthenticated])
 
@@ -193,14 +167,10 @@ const EmailThreads: React.FC<EmailThreadsProps> = ({
     refreshThreads()
   }, [refreshThreads])
 
-  const handleMessageTextUpdate = (text: string): void => {
-    setNewMessageText(text || '')
-  }
-
   const handlePreviousPage = (): void => {
-    if (pageIndex > 1) {
-      const newPage = pageIndex - 1
-      setPageIndex(newPage)
+    if (page > 1) {
+      const newPage = page - 1
+      setPage(newPage)
       onPageChange?.(newPage)
     }
   }
@@ -208,16 +178,74 @@ const EmailThreads: React.FC<EmailThreadsProps> = ({
   const handleNextPage = (): void => {
     if (!allowNextPage) return
 
-    const newPage = pageIndex + 1
-    setPageIndex(newPage)
+    const newPage = page + 1
+    setPage(newPage)
     onPageChange?.(newPage)
   }
 
-  const handleReload = (): void => {
-    onReload?.()
+  const processCreateThread = async (): Promise<string> => {
+    if (isDevEnvironment()) console.log('Creating thread for: ', recipients)
+
+    if (!recipients || recipients.length <= 1) {
+      throw new Error('Assign recipients first.')
+    }
+
+    const activeAccount = majik.currentIdentity
+    if (!activeAccount) {
+      throw new Error('No active account found')
+    }
+
+    const currentUserPublicKey = activeAccount.publicKey
+
+    const messageRecipients = (
+      await Promise.all(
+        recipients.filter((r) => r.isMajikahRegistered()).map(async (r) => r.getPublicKeyBase64())
+      )
+    ).filter((pk) => pk !== currentUserPublicKey)
+
+    if (isDevEnvironment()) console.log('Recipients: ', messageRecipients)
+
+    const createThreadResponse = await majik.createThread(messageRecipients)
+
+    if (
+      createThreadResponse !== null &&
+      createThreadResponse.success &&
+      createThreadResponse.message
+    ) {
+      refreshThreads()
+      return `Thread created successfully! ${createThreadResponse.message}`
+    } else {
+      return `Oh no... There's a problem while creating the thread.`
+    }
   }
 
-  const isPreviousDisabled = pageIndex <= 1
+  const handleCreateThread = async (): Promise<void> => {
+    const activeAccount = majik.currentIdentity
+    if (!activeAccount) return
+
+    if (!recipients || recipients.length <= 1) {
+      toast.error('Assign recipients first.')
+      return
+    }
+
+    toast.promise(processCreateThread(), {
+      loading: `Creating thread...`,
+      success: (outputMessage) => {
+        setTimeout(() => {}, 1000)
+
+        return outputMessage
+      },
+      error: () => {
+        return `Oh no... There's a problem while creating the thread.`
+      }
+    })
+  }
+
+  const handleRecipientsUpdate = (input: MajikContact[]): void => {
+    setRecipients(input)
+  }
+
+  const isPreviousDisabled = page <= 1
   const isNextDisabled = !allowNextPage
 
   const isUserRestricted = useMemo(() => {
@@ -241,39 +269,32 @@ const EmailThreads: React.FC<EmailThreadsProps> = ({
                 text="New Thread"
                 disabled={isUserRestricted}
                 modal={{
-                  title: 'New Message',
-                  description: 'Send a new message to your contacts.'
+                  title: 'New Thread',
+                  description: 'Create a new thread'
                 }}
                 buttons={{
                   cancel: {
                     text: 'Cancel'
                   },
                   confirm: {
-                    text: 'Send',
-                    // isDisabled: !newMessageText?.trim(),
-                    hide: true
+                    text: 'Create',
+                    onClick: handleCreateThread,
+                    isDisabled: loading
                   }
                 }}
-                // isOpen={isCreatingMessage}
-                // onOpenChange={(open) => setIsCreatingMessage(open)}
               >
-                {/* <NewMessageForm
-                  majik={majik}
-                  onSend={refreshThreads}
-                  onUpdate={handleMessageTextUpdate}
-                /> */}
-                <></>
+                <NewThreadForm majik={majik} onUpdate={handleRecipientsUpdate} />
               </PopUpFormButton>
 
-              {/* <PopUpFormButton scrollable={true} icon={PlusIcon} text="Create Account">
-                       <></>
-                     </PopUpFormButton> */}
-
               <Controls>
-                <ReloadButton onClick={handleReload} aria-label="Reload threads">
-                  <ArrowClockwiseIcon size={16} />
-                  Reload
-                </ReloadButton>
+                <StyledIconButton
+                  onClick={refreshThreads}
+                  aria-label="Reload Threads"
+                  icon={ArrowClockwiseIcon}
+                  title="Reload Threads"
+                  size={25}
+                />
+
                 <PaginationContainer>
                   <PageInfo>
                     {/* {totalThreads > 0 ? `${startThread}-${endThread} of ${totalThreads}` : 'No threads'} */}
@@ -311,8 +332,9 @@ const EmailThreads: React.FC<EmailThreadsProps> = ({
           </EmptyState>
         ) : (
           fetchedThreads.map((thread) => (
-            <ThreadMail
+            <ThreadRow
               key={thread.id}
+              majik={majik}
               thread={thread}
               currentUserPublicKey={majik.currentIdentity!.publicKey}
               onToggleStar={onToggleStar}

@@ -1,5 +1,5 @@
 import styled, { keyframes } from 'styled-components'
-import type { MajikMessagePublicKey } from '@thezelijah/majik-message'
+import type { MajikMessagePublicKey } from '@majikah/majik-message'
 import { useEffect, useState } from 'react'
 import type { MajikMessageDatabase } from '@renderer/components/majik-context-wrapper/majik-message-database'
 

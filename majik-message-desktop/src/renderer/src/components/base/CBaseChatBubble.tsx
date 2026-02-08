@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import styled, { css } from 'styled-components'
-import { MajikMessageChat, MessageEnvelope } from '@thezelijah/majik-message'
+import { MajikMessageChat, MessageEnvelope } from '@majikah/majik-message'
 
 import DeleteButton from '../foundations/DeleteButton'
 import StyledIconButton from '../foundations/StyledIconButton'

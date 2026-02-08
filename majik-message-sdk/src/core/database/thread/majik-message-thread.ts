@@ -57,8 +57,8 @@ export interface MajikMessageThreadSummary {
   id: MajikMessageThreadID;
   participants: MajikMessagePublicKey[];
   participant_count: number;
-  latest_message: MajikMessageMailJSON;
-  latest_message_timestamp: ISODateString;
+  latest_message: MajikMessageMailJSON | null;
+  latest_message_timestamp: ISODateString | null;
   total_messages: number;
   unread_count: number;
   has_unread: boolean;
@@ -368,14 +368,14 @@ export class MajikMessageThread {
         );
       }
 
-      // Validate owner public key
+      // Validate owner account ID
       if (
         !this._owner ||
         typeof this._owner !== "string" ||
         this._owner.trim().length === 0
       ) {
         throw new ValidationError(
-          "owner public key is required and must be a non-empty string",
+          "owner account ID is required and must be a non-empty string",
         );
       }
 
@@ -387,12 +387,6 @@ export class MajikMessageThread {
         throw new ValidationError("participants must be a non-empty array");
       }
 
-      // Check if owner's public key is in participants
-      if (!this._participants.includes(this._owner)) {
-        throw new ValidationError(
-          "Owner public key must be included in participants",
-        );
-      }
       // Validate timestamp
       if (
         !(this._timestamp instanceof Date) ||

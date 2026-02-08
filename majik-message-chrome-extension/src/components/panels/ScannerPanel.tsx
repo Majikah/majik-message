@@ -1,6 +1,6 @@
 import styled from "styled-components";
 import { useEffect, useState, useCallback } from "react";
-import { EnvelopeCacheItem, MajikContact } from "@thezelijah/majik-message";
+import { EnvelopeCacheItem, MajikContact } from "@majikah/majik-message";
 import DynamicPlaceholder from "../foundations/DynamicPlaceholder";
 
 import { toast } from "sonner";

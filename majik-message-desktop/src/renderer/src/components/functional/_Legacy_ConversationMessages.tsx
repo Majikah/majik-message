@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import { MajikMessageChat, type MajikMessagePublicKey } from '@thezelijah/majik-message'
+import { MajikMessageChat, type MajikMessagePublicKey } from '@majikah/majik-message'
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import styled from 'styled-components'
 import type { MajikMessageDatabase } from '../majik-context-wrapper/majik-message-database'

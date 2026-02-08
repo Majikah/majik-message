@@ -1,6 +1,5 @@
 // MajikMessageDatabase.ts
 
-
 import type { MajikUser } from "@thezelijah/majik-user";
 import {
   arrayBufferToBase64,
@@ -15,7 +14,7 @@ import {
   type MajikMessageAccountID,
   type MajikMessageConfig,
   type MajikMessagePublicKey,
-} from "@thezelijah/majik-message";
+} from "@majikah/majik-message";
 import type { AxiosError, AxiosInstance } from "axios";
 import axios from "axios";
 import type {
