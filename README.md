@@ -5,7 +5,7 @@
 
 **Majik Message** is a secure messaging platform built on cryptographic identity. Your account *is* your encryption keys—no phone numbers, no passwords, just your 12-word seed phrase and complete privacy.
 
-![npm](https://img.shields.io/npm/v/@majikah/majik-message) ![npm downloads](https://img.shields.io/npm/dm/@majikah/majik-message) ![npm bundle size](https://img.shields.io/bundlephobia/min/%40thezelijah%2Fmajik-message) [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0) ![TypeScript](https://img.shields.io/badge/TypeScript-Ready-blue)
+![npm](https://img.shields.io/npm/v/@majikah/majik-message) ![npm downloads](https://img.shields.io/npm/dm/@majikah/majik-message) ![npm bundle size](https://img.shields.io/bundlephobia/min/%40majikah%2Fmajik-message) [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0) ![TypeScript](https://img.shields.io/badge/TypeScript-Ready-blue)
 
 
 
@@ -28,8 +28,6 @@ Also available on [Microsoft Store](https://apps.microsoft.com/detail/9pmjgvzzjs
 
 
 Also available on [Google Chrome Web Store](https://chromewebstore.google.com/detail/dhlafmkpgjagkhiokoighjaakajbckck) for free.
-
-
 
 
 
@@ -94,6 +92,8 @@ Also available on [Google Chrome Web Store](https://chromewebstore.google.com/de
     - [Anyone Seeking Digital Autonomy](#anyone-seeking-digital-autonomy)
   - [Pricing](#pricing)
   - [Part of the Majikah Ecosystem](#part-of-the-majikah-ecosystem)
+  - [Related Projects](#related-projects)
+    - [Majik Key](#majik-key)
   - [Contributing](#contributing)
   - [License](#license)
   - [Author](#author)
@@ -284,7 +284,7 @@ If decryption fails (due to tampering or incorrect keys), an authentication erro
 
 Choose your platform:
 
-- **Desktop (Windows)**: [Microsoft Store](https://apps.microsoft.com/detail/9PMJGVZZJSPN) or [GitHub Releases](https://github.com/jedlsf/majik-message/releases)
+- **Desktop (Windows)**: [Microsoft Store](https://apps.microsoft.com/detail/9PMJGVZZJSPN) or [GitHub Releases](https://github.com/Majikah/majik-message/releases)
 - **Web App**: [message.majikah.solutions](https://message.majikah.solutions)
 - **Chrome Extension**: [Chrome Web Store](https://chromewebstore.google.com/detail/majik-message/dhlafmkpgjagkhiokoighjaakajbckck)
 
@@ -529,6 +529,18 @@ All Majikah products share the same core principles: cryptographic identity, zer
 
 ---
 
+## Related Projects
+
+### [Majik Key](https://majikah.solutions/sdk/majik-key)
+**Majik Key** is a seed phrase account library for creating, managing, and parsing mnemonic-based cryptographic accounts (Majik Keys). Generate deterministic key pairs from BIP39 seed phrases with simple, developer-friendly APIs.
+
+![npm](https://img.shields.io/npm/v/@majikah/majik-key) ![npm downloads](https://img.shields.io/npm/dm/@majikah/majik-key) ![npm bundle size](https://img.shields.io/bundlephobia/min/%40majikah%2Fmajik-key) [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0) ![TypeScript](https://img.shields.io/badge/TypeScript-Ready-blue)
+
+[Read Docs](https://majikah.solutions/sdk/majik-key/docs)
+[Official Repository](https://github.com/Majikah/majik-key)
+[SDK Library](https://www.npmjs.com/package/@majikah/majik-key)
+
+---
 
 ## Contributing
 
@@ -549,7 +561,7 @@ Made with 💙 by [@thezelijah](https://github.com/jedlsf)
 
 - **Developer**: Josef Elijah Fabian
 - **GitHub**: [https://github.com/jedlsf](https://github.com/jedlsf)
-- **Project Repository**: [https://github.com/jedlsf/majik-message](https://github.com/jedlsf/majik-message)
+- **Project Repository**: [https://github.com/Majikah/majik-message](https://github.com/Majikah/majik-message)
 
 ---
 
