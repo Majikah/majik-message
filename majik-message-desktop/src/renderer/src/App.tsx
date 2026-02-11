@@ -406,8 +406,8 @@ function App(): JSX.Element {
       route: '/threads',
       name: 'Threads',
       icon: PaperPlaneIcon,
-      element: <EmailThreads majik={majik} onUpdate={handleRefreshInstance} />,
-      notification: <NotificationDot />
+      element: <EmailThreads majik={majik} onUpdate={handleRefreshInstance} />
+      // notification: <NotificationDot />
     },
     {
       id: 'contacts',

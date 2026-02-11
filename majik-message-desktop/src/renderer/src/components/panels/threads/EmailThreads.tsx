@@ -31,6 +31,7 @@ const RootContainer = styled.div`
   border-radius: 8px;
   padding: 8px;
   overflow: hidden;
+  gap: 10px;
 `
 
 const Header = styled.div`
@@ -57,7 +58,7 @@ const PaginationContainer = styled.div`
   gap: 12px;
   width: 100%;
   justify-content: flex-end;
-  margin 10px 0px;
+  margin: 10px 0px;
 `
 const PageInfo = styled.span`
   font-size: 14px;
@@ -116,7 +117,6 @@ interface EmailThreadsProps {
   onUpdate?: (updatedInstance: MajikMessageDatabase) => void
   onPageChange?: (page: number) => void
   onToggleStar?: (threadId: MajikMessageThreadID) => void
-  onDelete?: (threadId: MajikMessageThreadID) => void
   onToggleRead?: (threadId: MajikMessageThreadID) => void
   onThreadClick?: (threadId: MajikMessageThreadID) => void
 }
@@ -125,7 +125,6 @@ const EmailThreads: React.FC<EmailThreadsProps> = ({
   majik,
   onPageChange,
   onToggleStar,
-  onDelete,
   onToggleRead,
   onThreadClick
 }) => {
@@ -311,6 +310,185 @@ const EmailThreads: React.FC<EmailThreadsProps> = ({
     setSelectedThread(null)
   }
 
+  const processDeleteThread = async (thread: MajikMessageThread): Promise<string> => {
+    const activeAccount = majik.currentIdentity
+    if (!activeAccount) {
+      throw new Error('No active account found')
+    }
+
+    if (!thread?.validate()) {
+      throw new Error('Invalid thread')
+    }
+
+    if (thread.hasDeletionApproval(activeAccount.publicKey)) {
+      throw new Error("You've already requested to delete this thread.")
+    }
+
+    const deleteResponse = await majik.deleteThread(thread)
+
+    if (deleteResponse !== null && deleteResponse.success) {
+      return deleteResponse.message || `Your deletion request has been recorded successfully!`
+    } else {
+      return `Oh no... There's a problem while requesting to delete this thread.`
+    }
+  }
+
+  const handleDeleteThread = async (thread: MajikMessageThread): Promise<void> => {
+    const activeAccount = majik.currentIdentity
+    if (!activeAccount) return
+
+    if (!thread?.validate()) {
+      toast.error('Invalid thread provided.')
+      return
+    }
+
+    toast.promise(processDeleteThread(thread), {
+      loading: `Requesting to delete this thread...`,
+      success: (outputMessage) => {
+        setTimeout(() => {
+          refreshThreads()
+        }, 1000)
+        handleCloseThread()
+        return outputMessage
+      },
+      error: () => {
+        return `Oh no... There's a problem while requesting to delete this thread.`
+      }
+    })
+  }
+
+  const processCancelDeleteThread = async (thread: MajikMessageThread): Promise<string> => {
+    const activeAccount = majik.currentIdentity
+    if (!activeAccount) {
+      throw new Error('No active account found')
+    }
+
+    if (!thread?.validate()) {
+      throw new Error('Invalid thread')
+    }
+
+    if (!thread.hasDeletionApproval(activeAccount.publicKey)) {
+      throw new Error("You haven't requested to delete this thread yet.")
+    }
+
+    const deleteResponse = await majik.revokeDeleteThread(thread)
+
+    if (deleteResponse !== null && deleteResponse.success) {
+      return deleteResponse.message || `Your deletion request has been revoked successfully!`
+    } else {
+      return `Oh no... There's a problem while revoking your request to delete this thread.`
+    }
+  }
+
+  const handleCancelDeleteThread = async (thread: MajikMessageThread): Promise<void> => {
+    const activeAccount = majik.currentIdentity
+    if (!activeAccount) return
+
+    if (!thread?.validate()) {
+      toast.error('Invalid thread provided.')
+      return
+    }
+
+    toast.promise(processCancelDeleteThread(thread), {
+      loading: `Revoking your request to delete this thread...`,
+      success: (outputMessage) => {
+        setTimeout(() => {
+          refreshThreads()
+        }, 1000)
+        handleCloseThread()
+        return outputMessage
+      },
+      error: () => {
+        return `Oh no... There's a problem while revoking your request to delete this thread.`
+      }
+    })
+  }
+
+  const processDeleteThreadByID = async (threadID: MajikMessageThreadID): Promise<string> => {
+    const activeAccount = majik.currentIdentity
+    if (!activeAccount) {
+      throw new Error('No active account found')
+    }
+
+    if (!threadID?.trim()) {
+      throw new Error('Invalid thread ID')
+    }
+
+    const deleteResponse = await majik.manageThreadDeletionByID(threadID)
+
+    if (deleteResponse !== null && deleteResponse.success) {
+      return deleteResponse.message || `Your deletion request has been recorded successfully!`
+    } else {
+      return `Oh no... There's a problem while requesting to delete this thread.`
+    }
+  }
+
+  const handleDeleteThreadByID = async (threadID: MajikMessageThreadID): Promise<void> => {
+    const activeAccount = majik.currentIdentity
+    if (!activeAccount) return
+
+    if (!threadID?.trim()) {
+      toast.error('Invalid thread ID provided.')
+      return
+    }
+
+    toast.promise(processDeleteThreadByID(threadID), {
+      loading: `Requesting to delete this thread...`,
+      success: (outputMessage) => {
+        setTimeout(() => {
+          refreshThreads()
+        }, 1000)
+        handleCloseThread()
+        return outputMessage
+      },
+      error: () => {
+        return `Oh no... There's a problem while requesting to delete this thread.`
+      }
+    })
+  }
+
+  const processCancelDeleteThreadByID = async (threadID: MajikMessageThreadID): Promise<string> => {
+    const activeAccount = majik.currentIdentity
+    if (!activeAccount) {
+      throw new Error('No active account found')
+    }
+
+    if (!threadID?.trim()) {
+      throw new Error('Invalid thread ID')
+    }
+    const deleteResponse = await majik.manageThreadDeletionByID(threadID, true)
+
+    if (deleteResponse !== null && deleteResponse.success) {
+      return deleteResponse.message || `Your deletion request has been revoked successfully!`
+    } else {
+      return `Oh no... There's a problem while revoking your request to delete this thread.`
+    }
+  }
+
+  const handleCancelDeleteThreadByID = async (threadID: MajikMessageThreadID): Promise<void> => {
+    const activeAccount = majik.currentIdentity
+    if (!activeAccount) return
+
+    if (!threadID?.trim()) {
+      toast.error('Invalid thread ID provided.')
+      return
+    }
+
+    toast.promise(processCancelDeleteThreadByID(threadID), {
+      loading: `Revoking your request to delete this thread...`,
+      success: (outputMessage) => {
+        setTimeout(() => {
+          refreshThreads()
+        }, 1000)
+        handleCloseThread()
+        return outputMessage
+      },
+      error: () => {
+        return `Oh no... There's a problem while revoking your request to delete this thread.`
+      }
+    })
+  }
+
   const isPreviousDisabled = page <= 1
   const isNextDisabled = !allowNextPage
 
@@ -371,27 +549,29 @@ const EmailThreads: React.FC<EmailThreadsProps> = ({
         </SectionTitleFrame>
       </Header>
 
-      <PaginationContainer>
-        <PageInfo>
-          {totalThreads > 0 ? `${startThread}-${endThread} of ${totalThreads}` : 'No threads'}
-        </PageInfo>
-        <PaginationButton
-          onClick={handlePreviousPage}
-          $disabled={isPreviousDisabled}
-          disabled={isPreviousDisabled}
-          aria-label="Previous page"
-        >
-          <CaretLeftIcon size={16} />
-        </PaginationButton>
-        <PaginationButton
-          onClick={handleNextPage}
-          $disabled={isNextDisabled}
-          disabled={isNextDisabled}
-          aria-label="Next page"
-        >
-          <CaretRightIcon size={16} />
-        </PaginationButton>
-      </PaginationContainer>
+      {fetchedThreads.length > 0 && (
+        <PaginationContainer>
+          <PageInfo>
+            {totalThreads > 0 ? `${startThread}-${endThread} of ${totalThreads}` : 'No threads'}
+          </PageInfo>
+          <PaginationButton
+            onClick={handlePreviousPage}
+            $disabled={isPreviousDisabled}
+            disabled={isPreviousDisabled}
+            aria-label="Previous page"
+          >
+            <CaretLeftIcon size={16} />
+          </PaginationButton>
+          <PaginationButton
+            onClick={handleNextPage}
+            $disabled={isNextDisabled}
+            disabled={isNextDisabled}
+            aria-label="Next page"
+          >
+            <CaretRightIcon size={16} />
+          </PaginationButton>
+        </PaginationContainer>
+      )}
 
       <ThreadsList>
         {fetchedThreads.length === 0 ? (
@@ -409,34 +589,38 @@ const EmailThreads: React.FC<EmailThreadsProps> = ({
               thread={thread}
               currentUserPublicKey={majik.currentIdentity!.publicKey}
               onToggleStar={onToggleStar}
-              onDelete={onDelete}
               onToggleRead={onToggleRead}
               onClick={() => handleSelectThread(thread.id)}
+              onDelete={handleDeleteThreadByID}
+              onCancelDelete={handleCancelDeleteThreadByID}
             />
           ))
         )}
       </ThreadsList>
-      <PaginationContainer>
-        <PageInfo>
-          {totalThreads > 0 ? `${startThread}-${endThread} of ${totalThreads}` : 'No threads'}
-        </PageInfo>
-        <PaginationButton
-          onClick={handlePreviousPage}
-          $disabled={isPreviousDisabled}
-          disabled={isPreviousDisabled}
-          aria-label="Previous page"
-        >
-          <CaretLeftIcon size={16} />
-        </PaginationButton>
-        <PaginationButton
-          onClick={handleNextPage}
-          $disabled={isNextDisabled}
-          disabled={isNextDisabled}
-          aria-label="Next page"
-        >
-          <CaretRightIcon size={16} />
-        </PaginationButton>
-      </PaginationContainer>
+      {fetchedThreads.length > 0 && (
+        <PaginationContainer>
+          <PageInfo>
+            {totalThreads > 0 ? `${startThread}-${endThread} of ${totalThreads}` : 'No threads'}
+          </PageInfo>
+          <PaginationButton
+            onClick={handlePreviousPage}
+            $disabled={isPreviousDisabled}
+            disabled={isPreviousDisabled}
+            aria-label="Previous page"
+          >
+            <CaretLeftIcon size={16} />
+          </PaginationButton>
+          <PaginationButton
+            onClick={handleNextPage}
+            $disabled={isNextDisabled}
+            disabled={isNextDisabled}
+            aria-label="Next page"
+          >
+            <CaretRightIcon size={16} />
+          </PaginationButton>
+        </PaginationContainer>
+      )}
+
       <DynamicSlidingDialogue
         scrollable={false}
         isOpen={!!selectedThread?.validate()}
@@ -457,7 +641,14 @@ const EmailThreads: React.FC<EmailThreadsProps> = ({
         }}
         onOpenChange={handleCloseThread}
       >
-        {selectedThread && <ThreadViewer majik={majik} thread={selectedThread} />}
+        {selectedThread && (
+          <ThreadViewer
+            majik={majik}
+            thread={selectedThread}
+            onDelete={handleDeleteThread}
+            onRevokeDelete={handleCancelDeleteThread}
+          />
+        )}
       </DynamicSlidingDialogue>
     </RootContainer>
   )

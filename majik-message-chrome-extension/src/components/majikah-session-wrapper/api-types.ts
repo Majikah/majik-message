@@ -14,6 +14,7 @@ export interface API_RESPONSE_STANDARD {
   success: boolean;
   response?: Response;
   data?: any;
+  message?: string;
 }
 
 export interface API_RESPONSE_SUCCESS {
@@ -158,7 +159,12 @@ export type API_ERROR_CODE =
   | "INVALID_USER_DATA"
   | "UPDATE_FAILED"
   | "RESET_PASSWORD_FAILED"
-  | "RESEND_OTP_FAILED";
+  | "RESEND_OTP_FAILED"
+  | "INVALID_ENVIRONMENT"
+  | "RECOVERY_SESSION_FAILED"
+  | "INVALID_RECOVERY_LINK"
+  | "PASSWORD_UPDATE_FAILED";
+
 
 /* ================================
  * Identity Types
@@ -381,3 +387,5 @@ export interface API_WEBSOCKET_SEND_MESSAGE_BODY {
   type: "chat_message";
   data: MajikMessageChatJSON;
 }
+
+

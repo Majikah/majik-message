@@ -187,11 +187,13 @@ const MetadataValue = styled.span`
 
 const ReadStatus = styled.div<{ $isRead: boolean }>`
   font-size: 11px;
-  color: ${(props) => (props.$isRead ? '#10b981' : '#6b7280')};
+  color: ${({ theme, $isRead }) =>
+    $isRead ? theme.colors.textSecondary : theme.colors.primaryBackground};
   font-weight: 500;
   padding: 2px 8px;
   border-radius: 12px;
-  background-color: ${(props) => (props.$isRead ? '#d1fae5' : '#f3f4f6')};
+  background-color: ${({ theme, $isRead }) =>
+    $isRead ? theme.colors.secondaryBackground : theme.colors.primary};
 `
 
 const UnreadBadge = styled.span`

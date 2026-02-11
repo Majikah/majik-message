@@ -25,4 +25,8 @@ dist-ssr
 *.sw?
 .env
 
+src/components/majik-context-wrapper
+src/components/majikah-session-wrapper
+
+
 

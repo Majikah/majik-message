@@ -16,3 +16,6 @@ majik-message-desktop/package-lock.json
 
 
 majik-message-chrome-extension/.env
+
+majik-message-chrome-extension/src/components/majik-context-wrapper
+majik-message-chrome-extension/src/components/majikah-session-wrapper

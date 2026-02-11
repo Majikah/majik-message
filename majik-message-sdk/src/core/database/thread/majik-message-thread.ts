@@ -25,7 +25,7 @@ export interface ThreadMetadata {
 }
 
 export interface DeletionApproval {
-  publicKey: string;
+  publicKey: MajikMessagePublicKey;
   approvalHash: string;
   timestamp: Date;
 }
@@ -64,6 +64,8 @@ export interface MajikMessageThreadSummary {
   has_unread: boolean;
   starred: boolean;
   subject?: string;
+  status: ThreadStatus;
+  deletion_requested: boolean;
 }
 
 export interface MajikMessageThreadJSON {
@@ -158,7 +160,7 @@ export class MajikMessageThread {
     return this._userID;
   }
 
-  get owner(): MajikMessagePublicKey {
+  get owner(): MajikMessageAccountID {
     return this._owner;
   }
 
@@ -339,7 +341,7 @@ export class MajikMessageThread {
   }
 
   private static generateApprovalHash(
-    publicKey: string,
+    publicKey: MajikMessagePublicKey,
     threadID: string,
     timestamp: Date,
   ): string {
@@ -489,7 +491,15 @@ export class MajikMessageThread {
 
   // ==================== Deletion Approval System ====================
 
-  public requestDeletion(publicKey: string): void {
+  public hasDeletionApproval(publicKey: MajikMessagePublicKey): boolean {
+    if (!this.isParticipant(publicKey)) return false;
+
+    return this._deletionApprovals.some(
+      (approval) => approval.publicKey === publicKey,
+    );
+  }
+
+  public requestDeletion(publicKey: MajikMessagePublicKey): void {
     try {
       // Validate public key is a participant
       if (!this._participants.includes(publicKey)) {
@@ -505,12 +515,7 @@ export class MajikMessageThread {
         );
       }
 
-      // Check if already approved
-      const existingApproval = this._deletionApprovals.find(
-        (approval) => approval.publicKey === publicKey,
-      );
-
-      if (existingApproval) {
+      if (this.hasDeletionApproval(publicKey)) {
         throw new OperationNotAllowedError(
           "This participant has already approved deletion",
         );
@@ -565,7 +570,7 @@ export class MajikMessageThread {
     }
   }
 
-  public revokeDeletionRequest(publicKey: string): void {
+  public revokeDeletionRequest(publicKey: MajikMessagePublicKey): void {
     try {
       const approvalIndex = this._deletionApprovals.findIndex(
         (approval) => approval.publicKey === publicKey,
@@ -833,11 +838,11 @@ export class MajikMessageThread {
 
   // ==================== Utility Methods ====================
 
-  public isOwner(publicKey: string): boolean {
+  public isOwner(publicKey: MajikMessagePublicKey): boolean {
     return this._owner === publicKey;
   }
 
-  public isParticipant(publicKey: string): boolean {
+  public isParticipant(publicKey: MajikMessagePublicKey): boolean {
     return this._participants.includes(publicKey);
   }
 
@@ -880,13 +885,6 @@ export class MajikMessageThread {
       ) {
         throw new ValidationError(
           "messageCount must be a non-negative integer",
-        );
-      }
-
-      // Cannot finalize a thread marked for deletion
-      if (this._status === ThreadStatus.MARKED_FOR_DELETION) {
-        throw new OperationNotAllowedError(
-          "Cannot export final stats for a thread marked for deletion",
         );
       }
 

@@ -77,7 +77,7 @@ const ConfirmationButton: React.FC<ConfirmationButtonProps> = ({
           size={25}
           onClick={() => setOpen(true)}
           disabled={disabled}
-          title={text}
+          title={`${text}: ${descriptionText}`}
         />
       ) : (
         <Button

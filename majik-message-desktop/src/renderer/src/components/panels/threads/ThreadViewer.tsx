@@ -4,8 +4,10 @@ import {
   ArrowClockwiseIcon,
   CaretLeftIcon,
   CaretRightIcon,
+  HandPalmIcon,
   NotePencilIcon,
-  PlusIcon
+  PlusIcon,
+  TrashIcon
 } from '@phosphor-icons/react'
 import ThreadMail from './ThreadMail'
 import { MajikMessageMail, type MajikMessageThread } from '@majikah/majik-message'
@@ -22,6 +24,7 @@ import PopUpFormButton from '@renderer/components/foundations/PopUpFormButton'
 import NewMailForm from './NewMailForm'
 import CustomInputField from '@renderer/components/foundations/CustomInputField'
 import { isDevEnvironment } from '@renderer/utils/utils'
+import ConfirmationButton from '@renderer/components/foundations/ConfirmationButton'
 
 const RootContainer = styled.div`
   width: 100%;
@@ -59,7 +62,7 @@ const PaginationContainer = styled.div`
   gap: 12px;
   width: 100%;
   justify-content: flex-end;
-  margin 10px 0px;
+  margin: 10px 0px;
 `
 
 const PageInfo = styled.span`
@@ -190,6 +193,8 @@ interface ThreadViewerProps {
   onPageChange?: (page: number) => void
   onReload?: () => void
   onToggleStar?: (mailId: string) => void
+  onDelete?: (thread: MajikMessageThread) => void
+  onRevokeDelete?: (thread: MajikMessageThread) => void
 }
 
 export const ThreadViewer: React.FC<ThreadViewerProps> = ({
@@ -197,7 +202,9 @@ export const ThreadViewer: React.FC<ThreadViewerProps> = ({
   thread,
   onPageChange,
   onReload,
-  onToggleStar
+  onToggleStar,
+  onDelete,
+  onRevokeDelete
 }) => {
   const { majikah } = useMajikah()
   const bottomRef = useRef<HTMLDivElement | null>(null)
@@ -381,7 +388,7 @@ export const ThreadViewer: React.FC<ThreadViewerProps> = ({
     }
 
     toast.promise(processRenameThread(), {
-      loading: `Loading thread...`,
+      loading: `Updating thread...`,
       success: (outputMessage) => {
         setTimeout(() => {}, 1000)
 
@@ -391,6 +398,14 @@ export const ThreadViewer: React.FC<ThreadViewerProps> = ({
         return `Oh no... There's a problem while updating this thread.`
       }
     })
+  }
+
+  const handleDeleteThread = (): void => {
+    onDelete?.(thread)
+  }
+
+  const handleCancelDeleteThread = (): void => {
+    onRevokeDelete?.(thread)
   }
 
   const handleBatchMarkRead = useCallback(
@@ -671,6 +686,31 @@ export const ThreadViewer: React.FC<ThreadViewerProps> = ({
                   title="Reload Threads"
                   size={25}
                 />
+
+                {!thread.hasDeletionApproval(majik.currentIdentity!.publicKey) ? (
+                  <ConfirmationButton
+                    onClick={handleDeleteThread}
+                    aria-label="Delete Thread"
+                    disabled={thread.hasDeletionApproval(majik.currentIdentity!.publicKey)}
+                    icon={TrashIcon}
+                    strict={true}
+                    text="Delete Thread"
+                    requiredText={majikah.user!.email}
+                    alertTextTitle="Request Thread Deletion"
+                    descriptionText="This will send a deletion request for this thread. The thread will only be permanently deleted once all participants have approved the request."
+                  />
+                ) : (
+                  <ConfirmationButton
+                    onClick={handleCancelDeleteThread}
+                    aria-label="Cancel Deletion"
+                    disabled={!thread.hasDeletionApproval(majik.currentIdentity!.publicKey)}
+                    icon={HandPalmIcon}
+                    strict={true}
+                    text="Cancel Deletion"
+                    alertTextTitle="Revoke Deletion Request"
+                    descriptionText="This will revoke your approval to delete this thread. The thread will remain active unless all other participants have also approved deletion."
+                  />
+                )}
               </Controls>
             </div>
           </Row>

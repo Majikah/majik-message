@@ -22,6 +22,9 @@ import {
 } from '@majikah/majik-message'
 import type { MajikMessageDatabase } from '../majik-context-wrapper/majik-message-database'
 import DynamicPlaceholder from '../foundations/DynamicPlaceholder'
+import { launchTutorialAccounts } from '@renderer/lib/shepherd-js/tutorials/tutorial-accounts'
+import { useShepherd } from '@renderer/lib/shepherd-js/use-shepherd'
+import GuideHelper from '../functional/GuideHelper'
 
 const Container = styled.div`
   width: inherit;
@@ -69,6 +72,7 @@ interface AccountsPanelProps {
 // ======== Main Component ========
 
 const AccountsPanel: React.FC<AccountsPanelProps> = ({ majik, onUpdate }) => {
+  const tour = useShepherd()
   const [label, setLabel] = useState<string>('')
   const [passphrase, setPassphrase] = useState<string>('')
   const [mnemonic, setMnemonic] = useState<string>('')
@@ -413,6 +417,10 @@ const AccountsPanel: React.FC<AccountsPanelProps> = ({ majik, onUpdate }) => {
 
   return (
     <Container>
+      <GuideHelper
+        docsPath="docs/dashboard/overview"
+        startTour={() => launchTutorialAccounts(tour)}
+      />
       <SectionTitleFrame>
         <Row>
           <h2>Accounts</h2>

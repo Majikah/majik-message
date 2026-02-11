@@ -1,0 +1,55 @@
+import React from 'react'
+import styled from 'styled-components'
+import StyledIconButton from '../foundations/StyledIconButton'
+import { BookOpenTextIcon, QuestionIcon } from '@phosphor-icons/react'
+
+const RootContainer = styled.div`
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  justify-content: flex-end;
+
+  @media (max-width: 768px) {
+  }
+`
+
+type GuideHelperProps = {
+  docsPath?: string
+  startTour?: () => void
+}
+
+const GuideHelper: React.FC<GuideHelperProps> = ({ docsPath, startTour }) => {
+  const handleReadDocs = (): void => {
+    if (!docsPath || docsPath.trim() === '') return
+
+    window.open(`/${docsPath}`, '_blank')
+  }
+
+  return (
+    <RootContainer>
+      {!!startTour && startTour !== undefined ? (
+        <StyledIconButton
+          icon={BookOpenTextIcon}
+          size={20}
+          onClick={startTour}
+          tooltip="Start Tutorial"
+          disabled={!startTour}
+        />
+      ) : null}
+
+      {!!docsPath && docsPath.trim() !== '' ? (
+        <StyledIconButton
+          icon={QuestionIcon}
+          size={20}
+          onClick={handleReadDocs}
+          tooltip="Read Docs"
+          disabled={!docsPath}
+        />
+      ) : null}
+    </RootContainer>
+  )
+}
+
+export default GuideHelper
