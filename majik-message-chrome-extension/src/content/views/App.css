@@ -1,0 +1,14 @@
+.popup-container {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  margin: 1.25rem;
+  z-index: 100;
+  display: flex;
+  align-items: flex-end;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  user-select: none;
+
+}
+
+
