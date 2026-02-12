@@ -9,6 +9,9 @@ import CBaseUserAccount from '../base/CBaseUserAccount'
 import { SectionTitleFrame } from '../../globals/styled-components'
 import type { MajikMessageDatabase } from '../majik-context-wrapper/majik-message-database'
 import DynamicPlaceholder from '../foundations/DynamicPlaceholder'
+import GuideHelper from '../functional/GuideHelper'
+import { launchTutorialContacts } from '@renderer/lib/shepherd-js/tutorials/tutorial-contacts'
+import { useShepherd } from '@renderer/lib/shepherd-js/use-shepherd'
 
 const Container = styled.div`
   width: inherit;
@@ -47,6 +50,7 @@ interface ContactsPanelProps {
 }
 
 const ContactsPanel: React.FC<ContactsPanelProps> = ({ majik, onUpdate }) => {
+  const tour = useShepherd()
   const [refreshKey, setRefreshKey] = useState<number>(0)
   const [inviteKey, setInviteKey] = useState<string>('')
 
@@ -168,12 +172,17 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({ majik, onUpdate }) => {
   }, [majik, refreshKey])
 
   return (
-    <Container>
+    <Container id="section-contacts">
+      <GuideHelper
+        docsPath="https://majikah.solutions/products/majik-message/docs/contacts-documentation"
+        startTour={() => launchTutorialContacts(tour)}
+      />
       <SectionTitleFrame>
         <Row>
           <h2>Contacts</h2>
           <div style={{ display: 'flex', flexDirection: 'row' }}>
             <PopUpFormButton
+              id="button-popup-contacts-add"
               icon={UserPlusIcon}
               text="Add Contact"
               modal={{

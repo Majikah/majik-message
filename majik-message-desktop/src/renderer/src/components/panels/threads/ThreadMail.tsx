@@ -362,11 +362,11 @@ export const ThreadMail: React.FC<ThreadMailProps> = ({
           </StarButton> */}
 
           <SenderInfo>
-            <SenderName $isUnread={!hasUserRead && !isOwn}>
+            <SenderName $isUnread={!hasUserRead && !isOwn} data-private>
               {senderName}
               {!hasUserRead && !isOwn && <UnreadBadge>New</UnreadBadge>}
             </SenderName>
-            <MessagePreview>{text}</MessagePreview>
+            <MessagePreview data-private>{text}</MessagePreview>
           </SenderInfo>
 
           <Timestamp>{relativeTime}</Timestamp>
@@ -396,14 +396,16 @@ export const ThreadMail: React.FC<ThreadMailProps> = ({
           </StarButton> */}
 
           <SenderDetails>
-            <SenderNameExpanded>{senderName}</SenderNameExpanded>
-            <SenderEmail>{senderKey}</SenderEmail>
-            {recipientNames && <Recipients>to {recipientNames}</Recipients>}
+            <SenderNameExpanded data-private>{senderName}</SenderNameExpanded>
+            <SenderEmail data-private>{senderKey}</SenderEmail>
+            {recipientNames && <Recipients data-private>to {recipientNames}</Recipients>}
           </SenderDetails>
         </HeaderLeft>
 
         <HeaderRight>
-          <Timestamp title={fullTime}>{relativeTime}</Timestamp>
+          <Timestamp title={fullTime} data-private>
+            {relativeTime}
+          </Timestamp>
           {!isOwn && (
             <ReadStatus $isRead={hasUserRead}>{hasUserRead ? 'Read' : 'Unread'}</ReadStatus>
           )}
@@ -415,7 +417,7 @@ export const ThreadMail: React.FC<ThreadMailProps> = ({
           {subject && (
             <MetadataRow>
               <MetadataLabel>Subject:</MetadataLabel>
-              <MetadataValue>{subject}</MetadataValue>
+              <MetadataValue data-private>{subject}</MetadataValue>
             </MetadataRow>
           )}
           {priority && (
@@ -427,7 +429,7 @@ export const ThreadMail: React.FC<ThreadMailProps> = ({
           {attachments.length > 0 && (
             <MetadataRow>
               <MetadataLabel>Attachments:</MetadataLabel>
-              <MetadataValue>{attachments.join(', ')}</MetadataValue>
+              <MetadataValue data-private>{attachments.join(', ')}</MetadataValue>
             </MetadataRow>
           )}
         </MetadataSection>

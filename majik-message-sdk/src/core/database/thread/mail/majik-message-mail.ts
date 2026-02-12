@@ -790,7 +790,7 @@ export class MajikMessageMail {
           previousHash = thread.hash;
 
           // Verify previousMailID is undefined for first item
-          if (currentMail.previousMailID !== undefined) {
+          if (!!currentMail.previousMailID?.trim()) {
             errors.push(
               `First mail item (${currentMail.id}) should not have a previousMailID`,
             );

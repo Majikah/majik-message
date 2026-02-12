@@ -151,7 +151,12 @@ export const TabRouter: React.FC<TabRouterProps> = ({ tabs, position = 'top' }):
       const isActive = tab.id === activeTab.id
 
       return (
-        <TabButton key={tab.id} $active={isActive} onClick={() => navigate(tab.route)}>
+        <TabButton
+          key={tab.id}
+          $active={isActive}
+          onClick={() => navigate(tab.route)}
+          id={`tab-${tab.id}`}
+        >
           {tab.icon && (
             <IconContainer $active={isActive}>
               <tab.icon size={24} />

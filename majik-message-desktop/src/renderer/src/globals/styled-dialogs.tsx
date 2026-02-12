@@ -17,8 +17,11 @@ export const DialogOverlay = styled(AlertDialog.Overlay)<{ $zOffset?: number }>`
   z-index: ${({ theme, $zOffset }) => theme.zIndex.overlay + ($zOffset || 0)};
 `
 
-// Styled dialog content
-export const DialogContent = styled(AlertDialog.Content)<{ $zOffset?: number }>`
+type DialogContentProps = React.ComponentPropsWithoutRef<typeof AlertDialog.Content> & {
+  $zOffset?: number
+}
+
+export const DialogContent = styled(AlertDialog.Content)<DialogContentProps>`
   background: ${({ theme }) => theme.colors.primaryBackground};
   backdrop-filter: blur(50px);
   border-radius: 16px;

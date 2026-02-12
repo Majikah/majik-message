@@ -26,6 +26,7 @@ const ModalContainer = styled.div`
 `
 
 interface PopUpFormButtonProps {
+  id?: string
   text?: string
   disabled?: boolean
   icon?: React.ComponentType
@@ -54,6 +55,7 @@ interface PopUpFormButtonProps {
 }
 
 const PopUpFormButton: React.FC<PopUpFormButtonProps> = ({
+  id,
   text = 'Confirm',
   disabled = false,
   icon,
@@ -102,9 +104,10 @@ const PopUpFormButton: React.FC<PopUpFormButtonProps> = ({
           onClick={() => setOpen(true)}
           disabled={disabled}
           title={`${text}: ${modal.description}`}
+          id={id}
         />
       ) : (
-        <Button onClick={() => setOpen(true)} disabled={disabled}>
+        <Button onClick={() => setOpen(true)} disabled={disabled} id={id}>
           {text}
         </Button>
       )}

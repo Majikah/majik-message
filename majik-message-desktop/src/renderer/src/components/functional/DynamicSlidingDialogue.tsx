@@ -91,7 +91,12 @@ const DynamicSlidingDialogue: React.FC<DynamicSlidingDialogueProps> = ({
       <Drawer.Root open={open} onOpenChange={setOpen} direction="right">
         <Drawer.Portal>
           <StyledDialogOverlay className="DialogOverlay" />
-          <StyledDialogContent className="DialogContent" $width={width}>
+          <StyledDialogContent
+            className="DialogContent"
+            $width={width}
+            onPointerDownOutside={(e) => e.preventDefault()}
+            onInteractOutside={(e) => e.preventDefault()}
+          >
             <StyledDialogTitle className="DialogTitle">{modal.title}</StyledDialogTitle>
             <StyledDialogDescription className="DialogDescription">
               {modal.description}

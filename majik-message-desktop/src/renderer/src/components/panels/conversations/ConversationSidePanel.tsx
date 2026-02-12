@@ -24,6 +24,9 @@ import UserAuth from '@renderer/components/foundations/UserAuth'
 import { MajikMessageRealtimeChatClientProvider } from '@renderer/components/majikah-session-wrapper/messages/MajikMessageRealtimeChatClientProvider'
 import { ConversationMessages } from '@renderer/components/functional/ConversationMessages'
 import { RealtimeChatInput } from '@renderer/components/functional/RealtimeChatInput'
+import GuideHelper from '@renderer/components/functional/GuideHelper'
+import { launchTutorialChats } from '@renderer/lib/shepherd-js/tutorials/tutorial-chats'
+import { useShepherd } from '@renderer/lib/shepherd-js/use-shepherd'
 
 // Styled Components
 const RootContainer = styled.div`
@@ -113,6 +116,7 @@ interface ConversationSidePanelProps {
 // Main Component
 const ConversationSidePanel: React.FC<ConversationSidePanelProps> = ({ majik }) => {
   const { majikah } = useMajikah()
+  const tour = useShepherd()
 
   const [fetchedConversations, setFetchedConversations] = useState<ConversationSummary[]>([])
 
@@ -186,12 +190,17 @@ const ConversationSidePanel: React.FC<ConversationSidePanelProps> = ({ majik }) 
 
   return (
     <RootContainer>
-      <LeftPane>
+      <LeftPane id="section-chats">
+        <GuideHelper
+          docsPath="https://majikah.solutions/products/majik-message/docs/chats-realtime-documentation"
+          startTour={() => launchTutorialChats(tour)}
+        />
         <SectionTitleFrame>
           <Row>
             <h2>Chats</h2>
             <div style={{ display: 'flex', flexDirection: 'row' }}>
               <PopUpFormButton
+                id="button-new-conversation"
                 icon={NotePencilIcon}
                 text="New Message"
                 disabled={isUserRestricted}
@@ -260,7 +269,7 @@ const ConversationSidePanel: React.FC<ConversationSidePanelProps> = ({ majik }) 
           )}
         </ListWrapper>
       </LeftPane>
-      <RightPane>
+      <RightPane id="section-chats-messages">
         {selectedConversation ? (
           <ChatContainer>
             <MajikMessageRealtimeChatClientProvider
@@ -280,7 +289,9 @@ const ConversationSidePanel: React.FC<ConversationSidePanelProps> = ({ majik }) 
             </MajikMessageRealtimeChatClientProvider>
           </ChatContainer>
         ) : (
-          <DynamicPlaceholder>Select a conversation to view messages.</DynamicPlaceholder>
+          <ChatContainer>
+            <DynamicPlaceholder>Select a conversation to view messages.</DynamicPlaceholder>
+          </ChatContainer>
         )}
       </RightPane>
     </RootContainer>

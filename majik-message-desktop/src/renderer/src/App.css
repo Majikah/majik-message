@@ -356,6 +356,12 @@ iframe {
   }
 }
 
+.custom-tour-step,
+.shepherd-modal-overlay {
+  z-index: 999999999 !important; /* higher than your drawer/dialog */
+  pointer-events: auto; /* ensure steps are clickable */
+}
+
 .custom-tour-step {
   background-color: #f2e0cb !important;
   color: #272525;

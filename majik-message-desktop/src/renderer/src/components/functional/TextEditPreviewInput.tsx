@@ -355,6 +355,7 @@ const TextEditPreviewInput: React.FC<TextEditPreviewInputProps> = ({
           mode={mode}
           onClick={handleToggle}
           title="Click to toggle between Encrypt and Decrypt"
+          id="button-toggle-mode"
         >
           {mode === 'encrypt' ? 'Encrypt Mode' : 'Decrypt Mode'}
         </Toggle>
@@ -370,8 +371,9 @@ const TextEditPreviewInput: React.FC<TextEditPreviewInputProps> = ({
               mode === 'encrypt' ? 'Type any message here…' : 'Paste encrypted text here…'
             }
             data-private="lipsum"
+            id="panel-input-text"
           />
-          <ButtonRowA>
+          <ButtonRowA id="panel-input-actions">
             <ExportButton onClick={handleClipboardImport}>Paste</ExportButton>
             <ExportButton onClick={handleTextImport}>Import .txt</ExportButton>
             <ExportButton onClick={handleJsonImport}>Import .json</ExportButton>
@@ -380,8 +382,8 @@ const TextEditPreviewInput: React.FC<TextEditPreviewInputProps> = ({
 
         <Section>
           <Label>{labels.output}</Label>
-          <TextArea readOnly value={output} data-private="lipsum" />
-          <ButtonRowB>
+          <TextArea readOnly value={output} data-private="lipsum" id="panel-output-text" />
+          <ButtonRowB id="panel-output-actions">
             <ExportButton onClick={handleCopy}>Copy</ExportButton>
             <ExportButton onClick={handleDownloadTxt}>Download .txt</ExportButton>
             <ExportButton onClick={handleDownloadJson}>Download .json</ExportButton>

@@ -14,6 +14,7 @@ import type {
 import type { MajikMessageDatabase } from '@renderer/components/majik-context-wrapper/majik-message-database'
 import MajikContactListSelector from '@renderer/components/MajikContactListSelector'
 import { ChatInputBox } from '@renderer/components/functional/ChatInputBox'
+import CustomInputField from '@renderer/components/foundations/CustomInputField'
 
 /* ---------------------------------------------
  * Styled Components
@@ -54,16 +55,18 @@ const ExportButton = styled(ButtonPrimaryConfirm)`
 interface NewMailFormProps {
   majik: MajikMessageDatabase
   thread: MajikMessageThread
-  onUpdate?: (message: string) => void
-  onSend?: (message: string) => void
+  onUpdate?: (message: string, subject?: string) => void
+  onSend?: (message: string, subject?: string) => void
+  reply?: boolean
 }
 
 /* ---------------------------------------------
  * Component
  * ------------------------------------------- */
 const NewMailForm: React.FC<NewMailFormProps> = ({ majik, thread, onUpdate, onSend }) => {
-  const [input, setInput] = useState('')
-  const [output, setOutput] = useState('')
+  const [input, setInput] = useState<string>('')
+  const [output, setOutput] = useState<string>('')
+  const [subject, setSubject] = useState<string | undefined>(undefined)
 
   const [myAccount] = useState<MajikContact | null>(() => {
     const userAccount = majik.getActiveAccount()
@@ -72,6 +75,14 @@ const NewMailForm: React.FC<NewMailFormProps> = ({ majik, thread, onUpdate, onSe
   })
 
   const [recipients, setRecipients] = useState<MajikContact[]>([])
+
+  const handleSetSubject = (inputSubject: string | undefined): void => {
+    if (!inputSubject?.trim()) {
+      setSubject(undefined)
+    } else {
+      setSubject(inputSubject)
+    }
+  }
 
   const handleRecipientsUpdate = (updated: MajikContact[]): void => {
     if (updated.length === 0) {
@@ -140,11 +151,11 @@ const NewMailForm: React.FC<NewMailFormProps> = ({ majik, thread, onUpdate, onSe
   const handleEncryptMessage = async (input: string): Promise<void> => {
     if (!input?.trim()) {
       setInput('')
-      onUpdate?.('')
+      onUpdate?.('', subject)
       return
     }
     setInput(input)
-    onUpdate?.(input)
+    onUpdate?.(input, subject)
 
     if (!myAccount) {
       toast.error('No active account found.', { id: 'toast-error-no-account' })
@@ -180,15 +191,15 @@ const NewMailForm: React.FC<NewMailFormProps> = ({ majik, thread, onUpdate, onSe
       throw new Error('Assign recipients first.')
     }
 
-    const sendMessageResponse = await majik.createThreadMail(thread, text)
+    const sendMessageResponse = await majik.createThreadMail(thread, text, subject)
 
     if (
       sendMessageResponse !== null &&
       sendMessageResponse.success &&
       sendMessageResponse.message
     ) {
-      onSend?.(text)
-      return `Message sent successfully! ${sendMessageResponse.message}`
+      onSend?.(text, subject)
+      return sendMessageResponse?.message || `Message sent successfully!`
     } else {
       return `Oh no... There's a problem while sending the message.`
     }
@@ -265,6 +276,14 @@ const NewMailForm: React.FC<NewMailFormProps> = ({ majik, thread, onUpdate, onSe
         onClearAll={handleRecipientsClear}
         allowEmpty={false}
         disabled={true}
+      />
+      <CustomInputField
+        label="Subject"
+        sensitive={true}
+        onChange={handleSetSubject}
+        maxChar={80}
+        capitalize="sentence"
+        currentValue={subject}
       />
 
       <Body>

@@ -16,6 +16,9 @@ import DynamicPlaceholder from '../foundations/DynamicPlaceholder'
 
 import { ChoiceButton } from '@renderer/globals/buttons'
 import { useNavigate } from 'react-router-dom'
+import GuideHelper from '../functional/GuideHelper'
+import { launchTutorialMessages } from '@renderer/lib/shepherd-js/tutorials/tutorial-messages'
+import { useShepherd } from '@renderer/lib/shepherd-js/use-shepherd'
 
 const Container = styled.div`
   width: inherit;
@@ -54,6 +57,7 @@ interface MessagePanelProps {
 
 const MessagePanel: React.FC<MessagePanelProps> = ({ majik }) => {
   const navigate = useNavigate()
+  const tour = useShepherd()
   const [refreshKey, setRefreshKey] = useState<number>(0)
   const [inviteKey, setInviteKey] = useState<string>('')
 
@@ -183,12 +187,17 @@ const MessagePanel: React.FC<MessagePanelProps> = ({ majik }) => {
   }, [majik, refreshKey])
 
   return (
-    <Container>
+    <Container id="section-messages">
+      <GuideHelper
+        docsPath="https://majikah.solutions/products/majik-message/docs/message-local-documentation"
+        startTour={() => launchTutorialMessages(tour)}
+      />
       <SectionTitleFrame>
         <Row>
           Message
           <div style={{ display: 'flex', flexDirection: 'row' }}>
             <PopUpFormButton
+              id="button-popup-messages-add-contact"
               icon={UserPlusIcon}
               text="Add Contact"
               modal={{

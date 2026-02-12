@@ -416,9 +416,9 @@ const AccountsPanel: React.FC<AccountsPanelProps> = ({ majik, onUpdate }) => {
   }, [majik, refreshKey])
 
   return (
-    <Container>
+    <Container id="section-accounts">
       <GuideHelper
-        docsPath="docs/dashboard/overview"
+        docsPath="https://majikah.solutions/products/majik-message/docs/accounts-documentation"
         startTour={() => launchTutorialAccounts(tour)}
       />
       <SectionTitleFrame>
@@ -426,6 +426,7 @@ const AccountsPanel: React.FC<AccountsPanelProps> = ({ majik, onUpdate }) => {
           <h2>Accounts</h2>
           <div style={{ display: 'flex', flexDirection: 'row' }}>
             <PopUpFormButton
+              id="button-popup-accounts-import"
               scrollable
               icon={ImportIcon}
               text="Import"
@@ -472,6 +473,7 @@ const AccountsPanel: React.FC<AccountsPanelProps> = ({ majik, onUpdate }) => {
             </PopUpFormButton>
 
             <PopUpFormButton
+              id="button-popup-accounts-create"
               scrollable
               icon={PlusIcon}
               text="Create Account"

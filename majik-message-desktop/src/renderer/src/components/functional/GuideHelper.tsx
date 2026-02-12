@@ -24,7 +24,10 @@ const GuideHelper: React.FC<GuideHelperProps> = ({ docsPath, startTour }) => {
   const handleReadDocs = (): void => {
     if (!docsPath || docsPath.trim() === '') return
 
-    window.open(`/${docsPath}`, '_blank')
+    const url =
+      docsPath.startsWith('http://') || docsPath.startsWith('https://') ? docsPath : `/${docsPath}`
+
+    window.open(url, '_blank')
   }
 
   return (

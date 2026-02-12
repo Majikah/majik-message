@@ -838,8 +838,8 @@ export class MajikMessageThread {
 
   // ==================== Utility Methods ====================
 
-  public isOwner(publicKey: MajikMessagePublicKey): boolean {
-    return this._owner === publicKey;
+  public isOwner(accountID: MajikMessageAccountID): boolean {
+    return this._owner === accountID;
   }
 
   public isParticipant(publicKey: MajikMessagePublicKey): boolean {
@@ -848,6 +848,14 @@ export class MajikMessageThread {
 
   public toString(): string {
     return JSON.stringify(this.toJSON(), null, 2);
+  }
+
+  public isClosed(): boolean {
+    return this._status === ThreadStatus.CLOSED;
+  }
+
+  public canBeClosed(): boolean {
+    return this._status === ThreadStatus.ONGOING;
   }
 
   /**

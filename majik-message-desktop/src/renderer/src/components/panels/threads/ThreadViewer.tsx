@@ -4,6 +4,7 @@ import {
   ArrowClockwiseIcon,
   CaretLeftIcon,
   CaretRightIcon,
+  CheckIcon,
   HandPalmIcon,
   NotePencilIcon,
   PlusIcon,
@@ -18,13 +19,18 @@ import { toast } from 'sonner'
 
 import UserAuth from '@renderer/components/foundations/UserAuth'
 import { MajikMessageIdentitySelector } from '@renderer/components/MajikMessageIdentitySelector'
-import { SectionTitleFrame } from '@renderer/globals/styled-components'
+import { SectionSubTitle, SectionTitleFrame } from '@renderer/globals/styled-components'
 import StyledIconButton from '@renderer/components/foundations/StyledIconButton'
 import PopUpFormButton from '@renderer/components/foundations/PopUpFormButton'
 import NewMailForm from './NewMailForm'
 import CustomInputField from '@renderer/components/foundations/CustomInputField'
 import { isDevEnvironment } from '@renderer/utils/utils'
 import ConfirmationButton from '@renderer/components/foundations/ConfirmationButton'
+import GuideHelper from '@renderer/components/functional/GuideHelper'
+import { launchTutorialThreadsMessages } from '@renderer/lib/shepherd-js/tutorials/tutorial-threads'
+import { useShepherd } from '@renderer/lib/shepherd-js/use-shepherd'
+import DynamicPlaceholder from '@renderer/components/foundations/DynamicPlaceholder'
+import CustomToggleSwitch from '@renderer/components/foundations/CustomToggleSwitch'
 
 const RootContainer = styled.div`
   width: 100%;
@@ -48,6 +54,10 @@ const ThreadTitle = styled.h2`
   font-weight: 600;
   color: ${({ theme }) => theme.colors.textPrimary || '#111827'};
   margin: 0;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1; /* Max 2 lines before ellipsis */
+  overflow: hidden;
+  text-overflow: ellipsis;
 `
 
 const Controls = styled.div`
@@ -187,6 +197,18 @@ const Row = styled.div`
   gap: 8px;
 `
 
+const ThreadStatus = styled.span`
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  background-color: ${({ theme }) => theme.colors.secondaryBackground};
+  color: ${({ theme }) => theme.colors.textPrimary};
+  border-radius: 6px;
+  font-size: 0.875rem;
+  white-space: nowrap;
+`
+
 interface ThreadViewerProps {
   majik: MajikMessageDatabase
   thread: MajikMessageThread
@@ -195,6 +217,7 @@ interface ThreadViewerProps {
   onToggleStar?: (mailId: string) => void
   onDelete?: (thread: MajikMessageThread) => void
   onRevokeDelete?: (thread: MajikMessageThread) => void
+  onMarkClosed?: () => void
 }
 
 export const ThreadViewer: React.FC<ThreadViewerProps> = ({
@@ -204,9 +227,11 @@ export const ThreadViewer: React.FC<ThreadViewerProps> = ({
   onReload,
   onToggleStar,
   onDelete,
-  onRevokeDelete
+  onRevokeDelete,
+  onMarkClosed
 }) => {
   const { majikah } = useMajikah()
+  const tour = useShepherd()
   const bottomRef = useRef<HTMLDivElement | null>(null)
   const scrollAreaRef = useRef<HTMLDivElement | null>(null)
   const isInitialMount = useRef<boolean>(true)
@@ -217,6 +242,8 @@ export const ThreadViewer: React.FC<ThreadViewerProps> = ({
   const [loading, setIsLoading] = useState<boolean>(false)
   const [page, setPage] = useState<number>(1)
   const [allowNextPage, setAllowNextPage] = useState<boolean>(false)
+
+  const [deleteOnClose, setDeleteOnClose] = useState<boolean>(false)
 
   const isRefreshingRef = useRef(false)
 
@@ -396,6 +423,54 @@ export const ThreadViewer: React.FC<ThreadViewerProps> = ({
       },
       error: () => {
         return `Oh no... There's a problem while updating this thread.`
+      }
+    })
+  }
+
+  const processCloseThread = async (): Promise<string> => {
+    if (isDevEnvironment()) console.log('Closing thread: ', thread.id)
+
+    const activeAccount = majik.currentIdentity
+    if (!activeAccount) {
+      throw new Error('No active account found')
+    }
+
+    if (!thread?.validate()) {
+      throw new Error('Invalid thread')
+    }
+
+    const closeResponse = await majik.markThreadAsClosed(thread, deleteOnClose)
+
+    if (closeResponse !== null && closeResponse.success) {
+      return closeResponse.message || `Thread closed successfully!`
+    } else {
+      return `Oh no... There's a problem while closing this thread.`
+    }
+  }
+
+  const handleCloseThread = async (): Promise<void> => {
+    const activeAccount = majik.currentIdentity
+    if (!activeAccount) return
+
+    if (!thread?.validate()) {
+      toast.error('Invalid thread provided.')
+      return
+    }
+
+    if (!thread?.canBeClosed()) {
+      toast.error('This thread cannot be closed.')
+      return
+    }
+
+    toast.promise(processCloseThread(), {
+      loading: `Closing thread...`,
+      success: (outputMessage) => {
+        setTimeout(() => {}, 1000)
+        onMarkClosed?.()
+        return outputMessage
+      },
+      error: () => {
+        return `Oh no... There's a problem while closing this thread.`
       }
     })
   }
@@ -613,24 +688,29 @@ export const ThreadViewer: React.FC<ThreadViewerProps> = ({
     return (
       <RootContainer>
         <Header>
-          <ThreadTitle>{thread?.metadata?.subject}</ThreadTitle>
+          <ThreadTitle data-private>{thread?.metadata?.subject}</ThreadTitle>
         </Header>
-        <LoadingState>Loading messages...</LoadingState>
+        <DynamicPlaceholder loading={true}>Loading messages...</DynamicPlaceholder>
       </RootContainer>
     )
   }
 
   return (
     <RootContainer>
+      <GuideHelper
+        docsPath="https://majikah.solutions/products/majik-message/docs/threads-documentation"
+        startTour={() => launchTutorialThreadsMessages(tour)}
+      />
       <Header>
         <SectionTitleFrame>
           <Row>
-            <h2>Mail Messages</h2>
+            <h2>Messages</h2>
             <div style={{ display: 'flex', flexDirection: 'row', gap: 15 }}>
               <PopUpFormButton
+                id="button-new-thread-message"
                 icon={PlusIcon}
                 text="New Message"
-                disabled={isUserRestricted}
+                disabled={isUserRestricted || thread.isClosed()}
                 modal={{
                   title: 'New Message',
                   description: 'Create a new mail message for this thread'
@@ -649,9 +729,10 @@ export const ThreadViewer: React.FC<ThreadViewerProps> = ({
               </PopUpFormButton>
 
               <PopUpFormButton
+                id="button-rename-thread"
                 icon={NotePencilIcon}
                 text="Rename Thread"
-                disabled={isUserRestricted}
+                disabled={isUserRestricted || thread.isClosed()}
                 modal={{
                   title: 'Rename Thread',
                   description: 'Rename or set a label/topic for this thread'
@@ -680,15 +761,42 @@ export const ThreadViewer: React.FC<ThreadViewerProps> = ({
 
               <Controls>
                 <StyledIconButton
+                  id="button-refresh-thread-messages"
                   onClick={handleReload}
                   aria-label="Reload Messages"
                   icon={ArrowClockwiseIcon}
-                  title="Reload Threads"
+                  title="Reload Messages"
                   size={25}
                 />
+                {fetchedMails.length > 0 && (
+                  <ConfirmationButton
+                    id="button-close-thread"
+                    onClick={handleCloseThread}
+                    aria-label="Mark Thread as Closed"
+                    disabled={
+                      !thread.isOwner(majik.currentIdentity!.id) ||
+                      thread.isClosed() ||
+                      fetchedMails.length <= 0
+                    }
+                    icon={CheckIcon}
+                    strict={true}
+                    text="Mark Thread as Closed"
+                    requiredText={majikah.user!.email}
+                    alertTextTitle="Mark Thread as Closed"
+                    descriptionText="No new messages can be added and the thread cannot be changed, but it will still be visible. It can still be requested for deletion later."
+                  >
+                    <CustomToggleSwitch
+                      label="Delete Thread"
+                      helper="When enabled, closing the thread will permanently delete it. All participants will receive an email with a download link to the complete message history."
+                      currentToggle={deleteOnClose}
+                      onToggle={setDeleteOnClose}
+                    />
+                  </ConfirmationButton>
+                )}
 
                 {!thread.hasDeletionApproval(majik.currentIdentity!.publicKey) ? (
                   <ConfirmationButton
+                    id="button-delete-thread-form"
                     onClick={handleDeleteThread}
                     aria-label="Delete Thread"
                     disabled={thread.hasDeletionApproval(majik.currentIdentity!.publicKey)}
@@ -701,6 +809,7 @@ export const ThreadViewer: React.FC<ThreadViewerProps> = ({
                   />
                 ) : (
                   <ConfirmationButton
+                    id="button-delete-thread-form"
                     onClick={handleCancelDeleteThread}
                     aria-label="Cancel Deletion"
                     disabled={!thread.hasDeletionApproval(majik.currentIdentity!.publicKey)}
@@ -716,8 +825,14 @@ export const ThreadViewer: React.FC<ThreadViewerProps> = ({
           </Row>
         </SectionTitleFrame>
       </Header>
+      <SectionSubTitle>
+        <Row>
+          <ThreadTitle data-private>{thread?.metadata?.subject}</ThreadTitle>
+          <ThreadStatus>{thread.status.toUpperCase()}</ThreadStatus>
+        </Row>
+      </SectionSubTitle>
 
-      <ScrollArea ref={scrollAreaRef}>
+      <ScrollArea ref={scrollAreaRef} id="section-thread-messages">
         {fetchedMails.length === 0 ? (
           <EmptyState>
             <EmptyStateTitle>No messages</EmptyStateTitle>

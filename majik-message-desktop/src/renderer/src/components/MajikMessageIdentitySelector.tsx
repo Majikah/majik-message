@@ -189,7 +189,11 @@ export function MajikMessageIdentitySelector({
 
   return (
     <>
-      <OptionContainer data-tooltip-id={`rtip-identity-selector`} data-tooltip-content={tooltip}>
+      <OptionContainer
+        data-tooltip-id={`rtip-identity-selector`}
+        data-tooltip-content={tooltip}
+        id={'selector-active-identity'}
+      >
         <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
           <DropdownMenuTrigger asChild>
             <UserSelectorRow>

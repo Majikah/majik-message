@@ -30,7 +30,6 @@ Also available on [Microsoft Store](https://apps.microsoft.com/detail/9pmjgvzzjs
 Also available on [Google Chrome Web Store](https://chromewebstore.google.com/detail/dhlafmkpgjagkhiokoighjaakajbckck) for free.
 
 
-
 ---
 
 - [Majik Message](#majik-message)
@@ -42,6 +41,7 @@ Also available on [Google Chrome Web Store](https://chromewebstore.google.com/de
     - [Offline Operation](#offline-operation)
     - [Realtime Messaging (Free for Everyone)](#realtime-messaging-free-for-everyone)
     - [Group Messaging](#group-messaging)
+    - [Persistent Message Threads](#persistent-message-threads)
     - [Message Expiration Timer](#message-expiration-timer)
     - [Encrypted Message Export](#encrypted-message-export)
     - [Solo Messages for Personal Storage](#solo-messages-for-personal-storage)
@@ -53,6 +53,7 @@ Also available on [Google Chrome Web Store](https://chromewebstore.google.com/de
       - [For Solo Messages (sender-only):](#for-solo-messages-sender-only)
       - [For Group Messages (2+ recipients):](#for-group-messages-2-recipients)
     - [Receiving and Decrypting a Message](#receiving-and-decrypting-a-message)
+    - [Thread Message Integrity](#thread-message-integrity)
   - [Platform Availability](#platform-availability)
     - [Desktop App](#desktop-app)
     - [Web App](#web-app)
@@ -71,6 +72,11 @@ Also available on [Google Chrome Web Store](https://chromewebstore.google.com/de
       - [Encrypting Messages](#encrypting-messages)
       - [Decrypting Messages](#decrypting-messages)
       - [Managing Accounts](#managing-accounts)
+      - [Threads (Persistent Messaging)](#threads-persistent-messaging)
+        - [Creating a Thread](#creating-a-thread)
+        - [Adding Messages to a Thread](#adding-messages-to-a-thread)
+        - [Managing Threads](#managing-threads)
+        - [Threads Validation:](#threads-validation)
     - [Chrome Extension](#chrome-extension-1)
       - [Encrypting Text on Any Webpage](#encrypting-text-on-any-webpage)
       - [Decrypting Text on Any Webpage](#decrypting-text-on-any-webpage)
@@ -168,6 +174,17 @@ Secure group conversations with up to 25 participants:
 - Same security guarantees as one-on-one messaging
 - Typing indicators and read receipts work in group chats
 
+### Persistent Message Threads
+
+Cryptographic hash-chain history for important conversations:
+
+- Immutable message records with cryptographic integrity
+- Each message cryptographically linked to the previous (blockchain-style)
+- Tamper-resistant conversation history
+- Messages cannot be edited or deleted individually
+- Thread validation tool to verify message integrity
+- Perfect for contracts, formal communications, and audit trails
+
 ### Message Expiration Timer
 
 Set custom expiration times for sensitive conversations. Messages automatically delete after the specified duration, reducing your digital footprint.
@@ -256,6 +273,17 @@ This ensures only authorized recipients can decrypt the message, and the ephemer
 6. The message is decrypted using AES-256-GCM with the derived key and the provided IV
 
 If decryption fails (due to tampering or incorrect keys), an authentication error is thrown and the message is rejected.
+
+### Thread Message Integrity
+
+Threads use blockchain-style message chaining:
+
+1. Each message is encrypted using the same end-to-end encryption as regular messages
+2. A cryptographic hash is computed from the message content
+3. This hash is linked to the hash of the previous message in the thread
+4. The chain of hashes creates an immutable, verifiable history
+5. Any tampering breaks the hash chain and is immediately detectable
+6. Downloaded thread logs can be independently verified at any time
 
 ---
 
@@ -380,6 +408,54 @@ Or share your own invite key:
 - **Export backup**: Hover over account → Export
 - **Import account**: Accounts tab → Import Account button
 
+#### Threads (Persistent Messaging)
+
+##### Creating a Thread
+
+1. Navigate to the **Threads** tab in the top navigation
+2. Click the **plus (+) icon** (New Thread button)
+3. Select participants from your contact directory
+   - All participants must be registered online
+   - Participants cannot be changed after creation
+4. Optionally set a thread topic/subject
+5. Click **Create**
+
+##### Adding Messages to a Thread
+
+1. Open the thread from the Threads tab
+2. Click the **plus (+) icon** in the Thread Viewer
+3. Enter an optional subject and your message content
+4. Click **Send** to add to the thread
+   - Messages are encrypted and permanently stored
+   - Messages cannot be edited or deleted after sending
+
+##### Managing Threads
+
+**Rename Thread Topic:**
+- Any participant can rename the thread at any time
+- Click the **pencil/edit icon** in Thread Viewer
+- Enter new topic and click **Apply Changes**
+
+**Close Thread (Owner Only):**
+- Click the **check icon** in Thread Viewer
+- Choose whether to auto-delete after closing
+- Closed threads cannot accept new messages
+
+**Request Deletion:**
+- Any participant can request thread deletion
+- Requires approval from all participants
+- Owner can delete immediately by closing with auto-delete enabled
+- All participants receive encrypted backup before deletion
+
+**Verify Thread Integrity:**
+- Visit [https://message.majikah.solutions/threads/validate](https://message.majikah.solutions/threads/validate)
+- Import downloaded thread log JSON file
+- System validates blockchain hash chain
+- Tampered messages are detected and flagged
+
+##### Threads Validation: 
+[https://message.majikah.solutions/threads/validate](https://message.majikah.solutions/threads/validate)
+
 ### Chrome Extension
 
 #### Encrypting Text on Any Webpage
@@ -413,6 +489,7 @@ Enable automatic detection and decryption:
 4. Enter your account password when prompted
 
 Once enabled, any page you load will be automatically scanned for encrypted content.
+
 
 ---
 
@@ -452,6 +529,7 @@ All cryptographic operations use the **@stablelib** library suite for consistent
 | Feature            | Status                    |
 | ------------------ | ------------------------- |
 | Text Messages      | ✓ Supported               |
+| Persistent Threads | ✓ Blockchain-style-hashing    |
 | Group Chats        | ✓ Up to 25 participants   |
 | Typing Indicators  | ✓ Supported               |
 | Read Receipts      | ✓ Supported               |
@@ -468,6 +546,8 @@ All cryptographic operations use the **@stablelib** library suite for consistent
 - **Identity privacy**: No phone numbers or email addresses required
 - **Private keys**: Never transmitted; encrypted at rest with PBKDF2-derived passphrase
 - **Forward secrecy**: Ephemeral keys ensure past messages remain secure even if current keys are compromised
+- **Message integrity**: Thread messages use blockchain-style chaining to detect tampering
+- **Audit trails**: Downloadable, verifiable thread histories for compliance and records
 
 ### What Users Must Protect
 

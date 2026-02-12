@@ -24,6 +24,11 @@ import { isDevEnvironment } from '@renderer/utils/utils'
 import StyledIconButton from '@renderer/components/foundations/StyledIconButton'
 import DynamicSlidingDialogue from '@renderer/components/functional/DynamicSlidingDialogue'
 import ThreadViewer from './ThreadViewer'
+import DynamicPlaceholder from '@renderer/components/foundations/DynamicPlaceholder'
+import { launchTutorialThreads } from '@renderer/lib/shepherd-js/tutorials/tutorial-threads'
+import { useShepherd } from '@renderer/lib/shepherd-js/use-shepherd'
+import GuideHelper from '@renderer/components/functional/GuideHelper'
+import { MajikMessageIdentitySelector } from '@renderer/components/MajikMessageIdentitySelector'
 
 const RootContainer = styled.div`
   width: 100%;
@@ -46,6 +51,13 @@ const Row = styled.div`
   justify-content: space-between;
   gap: 8px;
 `
+
+const UpperSubheaderRow = styled(Row)`
+  align-items: flex-end;
+  justify-content: space-between;
+  margin: 15px 0px;
+`
+
 const Controls = styled.div`
   display: flex;
   align-items: center;
@@ -129,6 +141,7 @@ const EmailThreads: React.FC<EmailThreadsProps> = ({
   onThreadClick
 }) => {
   const { majikah } = useMajikah()
+  const tour = useShepherd()
 
   const [fetchedThreads, setFetchedThreads] = useState<MajikMessageThreadSummary[]>([])
   const [totalThreads, setTotalThreads] = useState<number>(0)
@@ -308,6 +321,11 @@ const EmailThreads: React.FC<EmailThreadsProps> = ({
 
   const handleCloseThread = (): void => {
     setSelectedThread(null)
+  }
+
+  const handleMarkThreadClosed = (): void => {
+    handleCloseThread()
+    refreshThreads()
   }
 
   const processDeleteThread = async (thread: MajikMessageThread): Promise<string> => {
@@ -506,14 +524,27 @@ const EmailThreads: React.FC<EmailThreadsProps> = ({
     return <UserAuth />
   }
 
+  if (loading) {
+    return (
+      <RootContainer>
+        <DynamicPlaceholder loading>Loading...</DynamicPlaceholder>
+      </RootContainer>
+    )
+  }
+
   return (
-    <RootContainer>
+    <RootContainer id="section-threads">
+      <GuideHelper
+        docsPath="https://majikah.solutions/products/majik-message/docs/threads-documentation"
+        startTour={() => launchTutorialThreads(tour)}
+      />
       <Header>
         <SectionTitleFrame>
           <Row>
             <h2>Threads</h2>
             <div style={{ display: 'flex', flexDirection: 'row', gap: 15 }}>
               <PopUpFormButton
+                id="button-new-thread"
                 icon={NotePencilIcon}
                 text="New Thread"
                 disabled={isUserRestricted}
@@ -542,6 +573,7 @@ const EmailThreads: React.FC<EmailThreadsProps> = ({
                   icon={ArrowClockwiseIcon}
                   title="Reload Threads"
                   size={25}
+                  id="button-refresh-thread"
                 />
               </Controls>
             </div>
@@ -549,29 +581,32 @@ const EmailThreads: React.FC<EmailThreadsProps> = ({
         </SectionTitleFrame>
       </Header>
 
-      {fetchedThreads.length > 0 && (
-        <PaginationContainer>
-          <PageInfo>
-            {totalThreads > 0 ? `${startThread}-${endThread} of ${totalThreads}` : 'No threads'}
-          </PageInfo>
-          <PaginationButton
-            onClick={handlePreviousPage}
-            $disabled={isPreviousDisabled}
-            disabled={isPreviousDisabled}
-            aria-label="Previous page"
-          >
-            <CaretLeftIcon size={16} />
-          </PaginationButton>
-          <PaginationButton
-            onClick={handleNextPage}
-            $disabled={isNextDisabled}
-            disabled={isNextDisabled}
-            aria-label="Next page"
-          >
-            <CaretRightIcon size={16} />
-          </PaginationButton>
-        </PaginationContainer>
-      )}
+      <UpperSubheaderRow>
+        <MajikMessageIdentitySelector />
+        {fetchedThreads.length > 0 && (
+          <PaginationContainer>
+            <PageInfo>
+              {totalThreads > 0 ? `${startThread}-${endThread} of ${totalThreads}` : 'No threads'}
+            </PageInfo>
+            <PaginationButton
+              onClick={handlePreviousPage}
+              $disabled={isPreviousDisabled}
+              disabled={isPreviousDisabled}
+              aria-label="Previous page"
+            >
+              <CaretLeftIcon size={16} />
+            </PaginationButton>
+            <PaginationButton
+              onClick={handleNextPage}
+              $disabled={isNextDisabled}
+              disabled={isNextDisabled}
+              aria-label="Next page"
+            >
+              <CaretRightIcon size={16} />
+            </PaginationButton>
+          </PaginationContainer>
+        )}
+      </UpperSubheaderRow>
 
       <ThreadsList>
         {fetchedThreads.length === 0 ? (
@@ -631,7 +666,8 @@ const EmailThreads: React.FC<EmailThreadsProps> = ({
         buttons={{
           cancel: {
             text: 'Close',
-            onClick: handleCloseThread
+            onClick: handleCloseThread,
+            hide: true
           },
           confirm: {
             text: 'Save',
@@ -647,6 +683,7 @@ const EmailThreads: React.FC<EmailThreadsProps> = ({
             thread={selectedThread}
             onDelete={handleDeleteThread}
             onRevokeDelete={handleCancelDeleteThread}
+            onMarkClosed={handleMarkThreadClosed}
           />
         )}
       </DynamicSlidingDialogue>

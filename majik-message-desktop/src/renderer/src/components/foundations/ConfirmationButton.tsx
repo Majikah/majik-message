@@ -30,9 +30,11 @@ const ModalContainer = styled.div`
   flex-direction: column;
 
   padding: 1rem 50px;
+  gap: 15px;
 `
 
 interface ConfirmationButtonProps {
+  id?: string
   onClick?: () => void
   onCancel?: () => void
   text?: string
@@ -42,9 +44,11 @@ interface ConfirmationButtonProps {
   alertTextTitle?: string
   requiredText?: string
   descriptionText?: string
+  children?: React.ReactNode
 }
 
 const ConfirmationButton: React.FC<ConfirmationButtonProps> = ({
+  id,
   onClick,
   onCancel,
   text = 'Confirm',
@@ -53,7 +57,8 @@ const ConfirmationButton: React.FC<ConfirmationButtonProps> = ({
   icon,
   alertTextTitle = 'Confirm Action',
   requiredText,
-  descriptionText
+  descriptionText,
+  children
 }) => {
   const [open, setOpen] = useState<boolean>(false)
 
@@ -78,6 +83,7 @@ const ConfirmationButton: React.FC<ConfirmationButtonProps> = ({
           onClick={() => setOpen(true)}
           disabled={disabled}
           title={`${text}: ${descriptionText}`}
+          id={id}
         />
       ) : (
         <Button
@@ -85,6 +91,7 @@ const ConfirmationButton: React.FC<ConfirmationButtonProps> = ({
           disabled={disabled}
           $strict={strict}
           variant="secondary"
+          id={id}
         >
           {text}
         </Button>
@@ -104,18 +111,22 @@ const ConfirmationButton: React.FC<ConfirmationButtonProps> = ({
                 </DialogDescription>
               </DialogHeader>
 
-              {requiredText && !!requiredText.trim() && (
+              {(requiredText && !!requiredText.trim()) || children ? (
                 <ModalContainer>
-                  <CustomInputField
-                    label="Confirmation Text"
-                    sensitive={true}
-                    required
-                    currentValue={inputText}
-                    onChange={(e) => setInputText(e.toUpperCase() || '')}
-                    helper={`Please type "${requiredText.toUpperCase()}" to confirm.`}
-                  />
+                  {requiredText && !!requiredText.trim() && (
+                    <CustomInputField
+                      label="Confirmation Text"
+                      sensitive={true}
+                      required
+                      currentValue={inputText}
+                      onChange={(e) => setInputText(e.toUpperCase() || '')}
+                      helper={`Please type "${requiredText.toUpperCase()}" to confirm.`}
+                    />
+                  )}
+
+                  {children}
                 </ModalContainer>
-              )}
+              ) : null}
 
               <DuoButton
                 textButtonA="Cancel"

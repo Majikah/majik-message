@@ -12,6 +12,7 @@ export const StyledDialogOverlay = styled(Drawer.Overlay)`
   width: 100vw;
   backdrop-filter: blur(5px);
   z-index: ${({ theme }) => theme.zIndex.overlay};
+  pointer-events: none;
 `
 
 export const ScrollContainer = styled.div`

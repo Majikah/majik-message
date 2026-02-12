@@ -4,9 +4,7 @@ import {
   CheckCircleIcon,
   // EnvelopeIcon,
   // EnvelopeOpenIcon,
-  HandPalmIcon,
   StarIcon,
-  TrashIcon,
   WarningCircleIcon
 } from '@phosphor-icons/react'
 import moment from 'moment'
@@ -19,7 +17,6 @@ import {
   type MajikMessageThreadSummary
 } from '@majikah/majik-message'
 import type { MajikMessageDatabase } from '@renderer/components/majik-context-wrapper/majik-message-database'
-import StyledIconButton from '@renderer/components/foundations/StyledIconButton'
 import theme from '@renderer/globals/theme'
 
 const RootContainer = styled.div<{ $isUnread: boolean }>`
@@ -167,8 +164,8 @@ const ThreadRow: React.FC<ThreadRowProps> = ({
   thread,
   currentUserPublicKey,
   onToggleStar,
-  onDelete,
-  onCancelDelete,
+  // onDelete,
+  // onCancelDelete,
   onClick
 }) => {
   const [isStarred, setIsStarred] = useState(thread.starred)
@@ -248,15 +245,15 @@ const ThreadRow: React.FC<ThreadRowProps> = ({
     onToggleStar?.(thread.id)
   }
 
-  const handleDeleteClick = (e: React.MouseEvent): void => {
-    e.stopPropagation()
-    onDelete?.(thread.id)
-  }
+  // const handleDeleteClick = (e: React.MouseEvent): void => {
+  //   e.stopPropagation()
+  //   onDelete?.(thread.id)
+  // }
 
-  const handleCancelDeleteClick = (e: React.MouseEvent): void => {
-    e.stopPropagation()
-    onCancelDelete?.(thread.id)
-  }
+  // const handleCancelDeleteClick = (e: React.MouseEvent): void => {
+  //   e.stopPropagation()
+  //   onCancelDelete?.(thread.id)
+  // }
 
   // const handleToggleReadClick = (e: React.MouseEvent): void => {
   //   e.stopPropagation()
@@ -272,9 +269,7 @@ const ThreadRow: React.FC<ThreadRowProps> = ({
     participantLabels.length > 0 ? participantLabels.join(', ') : 'No participants'
 
   // Get subject from metadata or use a default
-  const subject = thread.latest_message?.id
-    ? thread.subject || thread?.latest_message?.metadata?.subject || '(No Subject)'
-    : 'No messages available yet'
+  const subject = thread.subject || thread?.latest_message?.metadata?.subject || '(No Subject)'
 
   // Format timestamp
   const relativeTime = moment(thread.latest_message_timestamp).fromNow()
@@ -299,7 +294,7 @@ const ThreadRow: React.FC<ThreadRowProps> = ({
       </ParticipantsSection>
 
       <ContentSection>
-        <SubjectLine $isUnread={thread.has_unread}>
+        <SubjectLine $isUnread={thread.has_unread} data-private>
           {subject}{' '}
           {thread.status === ThreadStatus.PENDING_DELETION && (
             <WarningCircleIcon size={18} color={theme.colors.error}>
@@ -312,7 +307,13 @@ const ThreadRow: React.FC<ThreadRowProps> = ({
             </CheckCircleIcon>
           )}
         </SubjectLine>
-        <MessagePreview>{isHovered ? text : thread.latest_message?.message}</MessagePreview>
+        <MessagePreview data-private>
+          {thread.latest_message?.id?.trim()
+            ? isHovered
+              ? text
+              : thread.latest_message?.message
+            : 'No messages available yet'}
+        </MessagePreview>
       </ContentSection>
 
       <MetaSection>
@@ -320,8 +321,9 @@ const ThreadRow: React.FC<ThreadRowProps> = ({
           <UnreadBadge>{thread.unread_count}</UnreadBadge>
         )}
       </MetaSection>
-
-      <Timestamp $isUnread={thread.has_unread}>{relativeTime}</Timestamp>
+      {thread.total_messages > 0 && (
+        <Timestamp $isUnread={thread.has_unread}>{relativeTime}</Timestamp>
+      )}
 
       <ActionButtons className="action-buttons">
         {/* <StyledIconButton
@@ -331,7 +333,8 @@ const ThreadRow: React.FC<ThreadRowProps> = ({
           title={thread.has_unread ? 'Mark as read' : 'Mark as unread'}
           size={20}
         /> */}
-        {thread.deletion_requested ? (
+
+        {/* {thread.deletion_requested ? (
           <StyledIconButton
             onClick={handleCancelDeleteClick}
             aria-label="Revoke Deletion Request"
@@ -347,7 +350,7 @@ const ThreadRow: React.FC<ThreadRowProps> = ({
             title="Delete Thread"
             size={20}
           />
-        )}
+        )} */}
       </ActionButtons>
     </RootContainer>
   )

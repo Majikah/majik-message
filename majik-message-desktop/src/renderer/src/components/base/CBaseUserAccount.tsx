@@ -353,6 +353,7 @@ const CBaseUserAccount: React.FC<CBaseUserAccountProps> = ({
             icon={WifiHighIcon}
             alertTextTitle="Register Online"
             strict
+            descriptionText="Allows this account to be used for online Majikah services like chats and threads."
           />
         ) : null}
         {!!onUpdateName && onUpdateName !== undefined && !!onUpdateName ? (

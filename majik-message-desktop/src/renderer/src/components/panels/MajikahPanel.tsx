@@ -291,7 +291,7 @@ const MajikahPanel: React.FC<MajikahPanelProps> = ({ majik }) => {
                   description:
                     currentIdentities.length >= MAX_IDENTITY_LIMIT
                       ? 'Max registered accounts reached.'
-                      : 'Register an existing seed phrase account online for real time messaging.'
+                      : 'Register an existing seed phrase account online for real time messaging, threads and other Majikah services.'
                 }}
                 buttons={{
                   cancel: {
