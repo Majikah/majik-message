@@ -6,7 +6,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger
 } from './ui/dropdown-menu'
-import { CaretUpDownIcon, UserIcon } from '@phosphor-icons/react'
+import { CaretUpDownIcon, CheckIcon } from '@phosphor-icons/react'
 import { Tooltip } from 'react-tooltip'
 import theme from '../globals/theme'
 import { useMajik } from './majik-context-wrapper/use-majik'
@@ -14,134 +14,209 @@ import type { MajikMessageIdentity } from '@majikah/majik-message'
 import { toast } from 'sonner'
 import { useMajikah } from './majikah-session-wrapper/use-majikah'
 
-const OptionContainer = styled.div`
+// ─── Local tokens ─────────────────────────────────────────────────────────────
+const FONT_MONO = "'Fira Mono', 'JetBrains Mono', monospace"
+
+// ─── Trigger button ───────────────────────────────────────────────────────────
+/**
+ * Compact inline pill — shows avatar initial + label + key chip.
+ * Replaces the large card (60px icon, full-width layout) with something
+ * that sits comfortably beside pagination controls in a sub-row.
+ */
+const Trigger = styled.button`
   display: flex;
-  position: relative;
-  height: auto;
-  width: 100%;
   align-items: center;
-  justify-content: center;
-  cursor: pointer;
+  gap: 7px;
+  padding: 5px 8px 5px 5px;
   background: ${({ theme }) => theme.colors.secondaryBackground};
-  color: ${({ theme }) => theme.colors.textPrimary};
-  transition: background 0.1s ease-in-out;
-  border: 1px solid ${({ theme }) => theme.colors.secondaryBackground};
-  overflow: hidden;
+  border: 1px solid transparent;
   border-radius: 8px;
+  cursor: pointer;
+  transition:
+    background 150ms ease,
+    border-color 150ms ease;
+  max-width: 600px;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
 
   &:hover {
     background: ${({ theme }) => theme.colors.primaryBackground};
+    border-color: ${({ theme }) => theme.colors.secondaryBackground};
+  }
+
+  &:focus-visible {
+    outline: 2px solid ${({ theme }) => theme.colors.primary};
+    outline-offset: 2px;
   }
 `
 
-const DotsWrapper = styled.div`
-  position: absolute;
-  right: 10px;
+// ─── Avatar initial circle ────────────────────────────────────────────────────
+const IdentityAvatar = styled.div<{ $hue: number }>`
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  border-radius: 50%;
+  background: hsl(${({ $hue }) => $hue}, 38%, 26%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   display: flex;
   align-items: center;
   justify-content: center;
+  font-family: ${FONT_MONO};
+  font-size: 9px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.75);
+  user-select: none;
+  flex-shrink: 0;
 `
 
-const OptionItem = styled.p`
-  font-size: ${({ theme }) => theme.typography.sizes.subject};
+// ─── Label + key stacked ──────────────────────────────────────────────────────
+const IdentityInfo = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+  align-items: flex-start;
+`
+
+const IdentityLabel = styled.span`
+  font-size: 12px;
+  font-weight: 600;
   color: ${({ theme }) => theme.colors.textPrimary};
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: min(${({ theme }) => theme.typography.sizes.subject}, 4vw);
-`
-
-const UnsetOptionItem = styled(OptionItem)`
-  opacity: 0.6;
-`
-
-const StyledDropdownMenuContent = styled(DropdownMenuContent)`
-  max-height: 500px;
-  overflow-y: auto;
-  background: ${({ theme }) => theme.colors.primaryBackground};
-  width: var(--radix-dropdown-menu-trigger-width);
-
-  &::-webkit-scrollbar {
-    width: 1px;
-  }
-  &::-webkit-scrollbar-track {
-    background: rgba(0, 0, 0, 0);
-    border-radius: 24px;
-  }
-  &::-webkit-scrollbar-thumb {
-    background-color: rgba(0, 0, 0, 0);
-    border-radius: 24px;
-    border: 1px solid transparent;
-  }
-  &::-webkit-scrollbar-thumb:hover {
-    background-color: rgba(0, 0, 0, 0);
-  }
-  scrollbar-width: thin;
-  scrollbar-color: ${({ theme }) => theme.colors.secondaryBackground} rgba(0, 0, 0, 0);
-`
-
-const AccountAddressText = styled.p`
-  opacity: 0.6;
-  font-size: 10px;
-  color: ${({ theme }) => theme.colors.textSecondary};
-`
-
-const UserSelectorRow = styled.div`
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  padding: 5px 10px;
-  margin: 10px;
-  gap: 10px;
-`
-
-const Label = styled.h3`
-  font-size: 1.1rem;
-  font-weight: 700;
-  margin: 0;
-  color: ${({ theme }) => theme.colors.textPrimary};
-`
-
-const PublicKey = styled.p`
-  font-size: 0.7rem;
-  color: ${({ theme }) => theme.colors.textSecondary};
-  word-break: break-all;
+  line-height: 1.3;
   text-align: left;
 `
 
-const UserInfoColumn = styled.div`
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: flex-start;
-  width: 100%;
-  gap: 5px;
+const IdentityKey = styled.span`
+  font-family: ${FONT_MONO};
+  font-size: 9px;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  letter-spacing: 0.04em;
+  opacity: 0.7;
+  text-align: left;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  overflow: hidden;
 `
 
-const UserIconContainer = styled.div`
-  display: flex;
-  aspect-ratio: 1 / 1;
-  width: 60px;
-  border-radius: ${({ theme }) => theme.borders.radius.medium};
-  border: 1px solid ${({ theme }) => theme.colors.secondaryBackground};
-  align-items: center;
-  justify-content: center;
-  background: ${({ theme }) => theme.gradients.strong};
+const UnsetLabel = styled.span`
+  font-size: 12px;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  white-space: nowrap;
+`
 
-  svg {
-    fill: ${({ theme }) => theme.colors.primaryBackground};
+const Caret = styled.div`
+  display: flex;
+  align-items: center;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  opacity: 0.5;
+  flex-shrink: 0;
+`
+
+// ─── Dropdown content ─────────────────────────────────────────────────────────
+const MenuContent = styled(DropdownMenuContent)`
+  background: ${({ theme }) => theme.colors.primaryBackground};
+  border: 1px solid ${({ theme }) => theme.colors.secondaryBackground};
+  border-radius: 10px;
+  padding: 4px;
+  min-width: 220px;
+  max-width: 280px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  overflow-y: auto;
+  max-height: 320px;
+
+  scrollbar-width: thin;
+  scrollbar-color: ${({ theme }) => `${theme.colors.secondaryBackground} transparent`};
+
+  &::-webkit-scrollbar {
+    width: 3px;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: ${({ theme }) => theme.colors.secondaryBackground};
+    border-radius: 4px;
   }
 `
 
+// ─── Menu header label ────────────────────────────────────────────────────────
+const MenuHeading = styled.div`
+  font-family: ${FONT_MONO};
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  opacity: 0.45;
+  padding: 6px 10px 4px;
+`
+
+// ─── Individual identity row in dropdown ──────────────────────────────────────
+const IdentityOption = styled(DropdownMenuItem)<{ $isActive: boolean }>`
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  outline: none;
+  transition: background 120ms ease;
+  background: ${({ $isActive, theme }) =>
+    $isActive ? `${theme.colors.primary}18` : 'transparent'};
+
+  &[data-highlighted] {
+    background: ${({ theme }) => theme.colors.secondaryBackground};
+  }
+`
+
+const OptionInfo = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+`
+
+const OptionLabel = styled.span<{ $isActive: boolean }>`
+  font-size: 12px;
+  font-weight: ${({ $isActive }) => ($isActive ? 600 : 500)};
+  color: ${({ theme }) => theme.colors.textPrimary};
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+`
+
+const OptionKey = styled.span`
+  font-family: ${FONT_MONO};
+  font-size: 9px;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  opacity: 0.6;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: 0.04em;
+`
+
+const ActiveCheck = styled.div`
+  display: flex;
+  align-items: center;
+  color: ${({ theme }) => theme.colors.primary};
+  flex-shrink: 0;
+`
+
+// ─── Props ────────────────────────────────────────────────────────────────────
 interface MajikMessageIdentitySelectorProps {
   tooltip?: string
   onChange?: (identity: MajikMessageIdentity) => void
 }
 
+// ─── Component ────────────────────────────────────────────────────────────────
 export function MajikMessageIdentitySelector({
-  tooltip = 'Switch Account',
+  tooltip = 'Switch identity',
   onChange
 }: MajikMessageIdentitySelectorProps): JSX.Element {
   const { majik } = useMajik()
@@ -155,15 +230,15 @@ export function MajikMessageIdentitySelector({
     if (!majikah.isAuthenticated) return
     majik.refreshIdentities().then((list: MajikMessageIdentity[]) => {
       setIdentities(list)
-      const current = majik.currentIdentity // or whatever your getter is
+      const current = majik.currentIdentity
       if (current) setActiveId(current.id)
     })
   }, [majik, majikah.isAuthenticated, majikah.user?.id])
 
   const handleSelect = async (identity: MajikMessageIdentity): Promise<void> => {
     if (identity.id === activeId) {
-      toast.error('Already Selected', {
-        description: "You're already using this account.",
+      toast.error('Already selected', {
+        description: "You're already using this identity.",
         id: 'toast-error-identity-select'
       })
       return
@@ -172,7 +247,7 @@ export function MajikMessageIdentitySelector({
     try {
       await majik.setActiveIdentity(identity)
     } catch (err) {
-      toast.error('Failed to switch account', {
+      toast.error('Failed to switch identity', {
         description: `${err}`,
         id: 'toast-error-identity-select'
       })
@@ -184,56 +259,75 @@ export function MajikMessageIdentitySelector({
     setMenuOpen(false)
   }
 
-  const displayLabel = identities.find((i) => i.id === activeId)?.label
-  const displayPubkey = identities.find((i) => i.id === activeId)?.publicKey
+  const active = identities.find((i) => i.id === activeId)
+  const avatarHue = active ? getHue(active.label || active.id) : 0
+  const initials = active ? getInitials(active.label || active.id) : '?'
+  const shortKey = active ? active.publicKey : ''
 
   return (
     <>
-      <OptionContainer
-        data-tooltip-id={`rtip-identity-selector`}
-        data-tooltip-content={tooltip}
-        id={'selector-active-identity'}
-      >
-        <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
-          <DropdownMenuTrigger asChild>
-            <UserSelectorRow>
-              <UserIconContainer>
-                <UserIcon size={48} />
-              </UserIconContainer>
-              <UserInfoColumn>
-                {displayLabel ? (
-                  <>
-                    <Label data-private>{displayLabel}</Label>
-                    <PublicKey data-private>{displayPubkey}</PublicKey>
-                  </>
-                ) : (
-                  <UnsetOptionItem>{tooltip}</UnsetOptionItem>
-                )}
-              </UserInfoColumn>
-            </UserSelectorRow>
-          </DropdownMenuTrigger>
-          <DotsWrapper>
-            <CaretUpDownIcon size={24} />
-          </DotsWrapper>
+      <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+        <DropdownMenuTrigger asChild>
+          <Trigger
+            data-tooltip-id="rtip-identity-selector"
+            data-tooltip-content={tooltip}
+            id="selector-active-identity"
+          >
+            <IdentityAvatar $hue={avatarHue}>{initials}</IdentityAvatar>
 
-          <StyledDropdownMenuContent>
-            {identities.map((identity) => (
-              <DropdownMenuItem
+            <IdentityInfo>
+              {active ? (
+                <>
+                  <IdentityLabel data-private>{active.label}</IdentityLabel>
+                  <IdentityKey data-private>{shortKey}</IdentityKey>
+                </>
+              ) : (
+                <UnsetLabel>{tooltip}</UnsetLabel>
+              )}
+            </IdentityInfo>
+
+            <Caret>
+              <CaretUpDownIcon size={13} />
+            </Caret>
+          </Trigger>
+        </DropdownMenuTrigger>
+
+        <MenuContent align="start" sideOffset={6}>
+          <MenuHeading>Active Identity</MenuHeading>
+
+          {identities.map((identity) => {
+            const isActive = identity.id === activeId
+            const hue = getHue(identity.label || identity.id)
+            const init = getInitials(identity.label || identity.id)
+
+            return (
+              <IdentityOption
                 key={identity.id}
+                $isActive={isActive}
                 onSelect={() => handleSelect(identity)}
-                className="!px-4 !py-2 data-[highlighted]:bg-[#ea7f05] text-[#272525] data-[highlighted]:text-[#f7f7f7]"
               >
-                {identity.label}{' '}
-                <AccountAddressText data-private>{identity.publicKey}</AccountAddressText>
-              </DropdownMenuItem>
-            ))}
-          </StyledDropdownMenuContent>
-        </DropdownMenu>
-      </OptionContainer>
+                <IdentityAvatar $hue={hue}>{init}</IdentityAvatar>
+                <OptionInfo>
+                  <OptionLabel $isActive={isActive} data-private>
+                    {identity.label}
+                  </OptionLabel>
+                  <OptionKey data-private>{identity.publicKey}</OptionKey>
+                </OptionInfo>
+                {isActive && (
+                  <ActiveCheck>
+                    <CheckIcon size={13} weight="bold" />
+                  </ActiveCheck>
+                )}
+              </IdentityOption>
+            )
+          })}
+        </MenuContent>
+      </DropdownMenu>
+
       <Tooltip
-        id={`rtip-identity-selector`}
+        id="rtip-identity-selector"
         style={{
-          fontSize: 12,
+          fontSize: 11,
           fontWeight: 400,
           backgroundColor: theme.colors.secondaryBackground,
           color: theme.colors.textPrimary
@@ -242,3 +336,20 @@ export function MajikMessageIdentitySelector({
     </>
   )
 }
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function getHue(str: string): number {
+  return [...str].reduce((acc, c) => acc + c.charCodeAt(0), 0) % 360
+}
+
+function getInitials(name: string): string {
+  const parts = name.trim().split(/\s+/)
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase()
+  return name.slice(0, 2).toUpperCase()
+}
+
+// function shortenKey(key: string, chars = 5): string {
+//   const s = String(key)
+//   return `${s.slice(0, chars)}…${s.slice(-4)}`
+// }

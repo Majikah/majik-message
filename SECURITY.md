@@ -164,7 +164,7 @@ Thank you for helping keep **Majik Message** secure.
 
 [Read more about Majik Message here](https://majikah.solutions/products/majik-message)
 
-[![Majik Message Thumbnail](https://gydzizwxtftlmsdaiouw.supabase.co/storage/v1/object/public/bucket-majikah-public/main/Majikah_MajikMessage_SocialCard.webp)](https://message.majikah.solutions)
+[![Majik Message Thumbnail](https://storage.majikah.solutions/public/Majikah_MajikMessage_SocialCard.webp)](https://message.majikah.solutions)
 
 > Click the image to try Majik Message live.
 

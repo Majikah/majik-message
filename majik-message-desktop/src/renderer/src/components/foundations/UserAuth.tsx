@@ -272,10 +272,8 @@ const UserAuth: React.FC<UserAuthProps> = ({ onSignIn, onSignUp, onResetPassword
   const [userInfo, setUserInfo] = useState<UserInfoInput>({
     first_name: '',
     family_name: '',
-    avatar_url:
-      'https://gydzizwxtftlmsdaiouw.supabase.co/storage/v1/object/public/bucket-majikah-public/main/Majikah_Default_User.webp',
-    picture:
-      'https://gydzizwxtftlmsdaiouw.supabase.co/storage/v1/object/public/bucket-majikah-public/main/Majikah_Default_User.webp',
+    avatar_url: 'https://storage.majikah.solutions/public/Majikah_Default_User.webp',
+    picture: 'https://storage.majikah.solutions/public/Majikah_Default_User.webp',
     gender: 'Other'
   })
 

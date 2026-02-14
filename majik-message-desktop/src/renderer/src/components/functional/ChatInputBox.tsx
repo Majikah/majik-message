@@ -81,6 +81,7 @@ interface ChatInputBoxProps {
   placeholder?: string
   maxHeight?: number
   disabled?: boolean
+  sendOnEnter?: boolean
 }
 
 export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
@@ -88,7 +89,8 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
   onUpdate,
   placeholder,
   maxHeight = 200,
-  disabled = false
+  disabled = false,
+  sendOnEnter = true
 }) => {
   const [value, setValue] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
@@ -118,6 +120,7 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
     if (e.key === 'Enter' && !e.shiftKey) {
+      if (!sendOnEnter) return
       e.preventDefault()
       handleSend()
     }

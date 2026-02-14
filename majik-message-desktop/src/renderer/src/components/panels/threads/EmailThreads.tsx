@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import styled from 'styled-components'
+import styled, { css, keyframes } from 'styled-components'
 import {
   NotePencilIcon,
   CaretLeftIcon,
   CaretRightIcon,
-  ArrowClockwiseIcon
+  ArrowClockwiseIcon,
+  EnvelopeSimpleIcon
 } from '@phosphor-icons/react'
 import ThreadRow from './ThreadRow'
 import {
@@ -13,7 +14,6 @@ import {
   type MajikMessageThreadID,
   type MajikMessageThreadSummary
 } from '@majikah/majik-message'
-import { SectionTitleFrame } from '@renderer/globals/styled-components'
 import PopUpFormButton from '@renderer/components/foundations/PopUpFormButton'
 import UserAuth from '@renderer/components/foundations/UserAuth'
 import { useMajikah } from '@renderer/components/majikah-session-wrapper/use-majikah'
@@ -22,7 +22,6 @@ import { toast } from 'sonner'
 import NewThreadForm from './NewThreadForm'
 import { isDevEnvironment } from '@renderer/utils/utils'
 import StyledIconButton from '@renderer/components/foundations/StyledIconButton'
-import DynamicSlidingDialogue from '@renderer/components/functional/DynamicSlidingDialogue'
 import ThreadViewer from './ThreadViewer'
 import DynamicPlaceholder from '@renderer/components/foundations/DynamicPlaceholder'
 import { launchTutorialThreads } from '@renderer/lib/shepherd-js/tutorials/tutorial-threads'
@@ -30,100 +29,246 @@ import { useShepherd } from '@renderer/lib/shepherd-js/use-shepherd'
 import GuideHelper from '@renderer/components/functional/GuideHelper'
 import { MajikMessageIdentitySelector } from '@renderer/components/MajikMessageIdentitySelector'
 
-const RootContainer = styled.div`
+// ─── Local tokens ─────────────────────────────────────────────────────────────
+const FONT_MONO = "'Fira Mono', 'JetBrains Mono', monospace"
+
+// ─── Animations ───────────────────────────────────────────────────────────────
+const slideIn = keyframes`
+  from { opacity: 0; transform: translateX(12px); }
+  to   { opacity: 1; transform: translateX(0); }
+`
+
+const fadeIn = keyframes`
+  from { opacity: 0; }
+  to   { opacity: 1; }
+`
+
+// ─── Root split layout ────────────────────────────────────────────────────────
+/**
+ * Two-pane layout:
+ *   Left  — fixed-width thread list (never shrinks below 300px)
+ *   Right — thread viewer fills remaining space, hidden when no thread selected
+ *
+ * The original used a DynamicSlidingDialogue overlay. The split-screen
+ * approach keeps context: users can see the thread list while reading messages.
+ */
+const Root = styled.div`
   width: 100%;
-  margin: 0 auto;
-  border-radius: 8px;
-  padding: 8px;
-  overflow: hidden;
-  gap: 10px;
-`
-
-const Header = styled.div`
+  height: 100%;
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  overflow: hidden;
+  background: ${({ theme }) => theme.colors.primaryBackground};
+  flex-direction: row;
 `
 
-const Row = styled.div`
+// ─── Left pane ────────────────────────────────────────────────────────────────
+const ListPane = styled.div<{ $hasSelection: boolean }>`
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex-shrink: 0;
+  border-right: 1px solid ${({ theme }) => theme.colors.secondaryBackground};
+  transition: width 220ms cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Narrow when a thread is open, full width when not */
+  width: ${({ $hasSelection }) => ($hasSelection ? '40%' : '100%')};
+
+  /* On very small viewports collapse the list completely when viewing */
+  @media (max-width: 640px) {
+    width: ${({ $hasSelection }) => ($hasSelection ? '0px' : '100%')};
+    border-right: none;
+  }
+`
+
+// ─── Right pane ───────────────────────────────────────────────────────────────
+const ViewerPane = styled.div<{ $visible: boolean }>`
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  display: ${({ $visible }) => ($visible ? 'flex' : 'none')};
+  flex-direction: column;
+  animation: ${({ $visible }) =>
+    $visible
+      ? css`
+          ${slideIn} 220ms cubic-bezier(0.4, 0, 0.2, 1) both
+        `
+      : 'none'};
+`
+
+// ─── List pane header ─────────────────────────────────────────────────────────
+const PaneHeader = styled.div`
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  padding: 14px 14px 12px;
+  border-bottom: 1px solid ${({ theme }) => theme.colors.secondaryBackground};
+  flex-shrink: 0;
+  background: ${({ theme }) => theme.colors.primaryBackground};
 `
 
-const UpperSubheaderRow = styled(Row)`
-  align-items: flex-end;
-  justify-content: space-between;
-  margin: 15px 0px;
-`
-
-const Controls = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 16px;
-`
-
-const PaginationContainer = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  justify-content: flex-end;
-  margin: 10px 0px;
-`
-const PageInfo = styled.span`
+const PaneTitle = styled.h2`
   font-size: 14px;
-  color: ${({ theme }) => theme.colors.textSecondary};
-  font-weight: 500;
-`
-
-const PaginationButton = styled.button<{ $disabled?: boolean }>`
-  background: none;
-  border: 1px solid ${({ theme }) => theme.colors.secondaryBackground};
-  padding: 6px;
-  cursor: ${(props) => (props.$disabled ? 'not-allowed' : 'pointer')};
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: ${({ theme, $disabled }) =>
-    $disabled ? theme.colors.secondaryBackground : theme.colors.textSecondary};
-  border-radius: 4px;
-  transition: all 0.2s ease;
-
-  &:hover {
-    background-color: ${({ theme, $disabled }) =>
-      $disabled ? 'transparent' : theme.colors.textSecondary};
-    border-color: ${({ theme, $disabled }) =>
-      $disabled ? theme.colors.secondaryBackground : theme.colors.primary};
-  }
-
-  &:active {
-    transform: ${(props) => (props.$disabled ? 'none' : 'scale(0.95)')};
-  }
-`
-const ThreadsList = styled.div`
-  width: 100%;
-`
-
-const EmptyState = styled.div`
-  padding: 60px 20px;
-  text-align: center;
-  color: ${({ theme }) => theme.colors.textSecondary};
-`
-
-const EmptyStateTitle = styled.h3`
-  font-size: 18px;
-  font-weight: 600;
-  color: ${({ theme }) => theme.colors.textSecondary};
-  margin: 0 0 8px 0;
-`
-
-const EmptyStateMessage = styled.p`
-  font-size: 14px;
+  font-weight: 700;
+  color: ${({ theme }) => theme.colors.textPrimary};
+  letter-spacing: -0.01em;
   margin: 0;
 `
 
+const HeaderActions = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 6px;
+`
+
+// ─── Identity + pagination sub-row ────────────────────────────────────────────
+const SubRow = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid ${({ theme }) => theme.colors.secondaryBackground};
+  flex-shrink: 0;
+`
+
+// ─── Pagination ───────────────────────────────────────────────────────────────
+const Pagination = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+`
+
+const PageLabel = styled.span`
+  font-family: ${FONT_MONO};
+  font-size: 10px;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+`
+
+const PageBtn = styled.button<{ $disabled: boolean }>`
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid ${({ theme }) => theme.colors.secondaryBackground};
+  background: transparent;
+  border-radius: 4px;
+  color: ${({ theme, $disabled }) =>
+    $disabled ? theme.colors.secondaryBackground : theme.colors.textSecondary};
+  cursor: ${({ $disabled }) => ($disabled ? 'not-allowed' : 'pointer')};
+  transition: all 150ms ease;
+
+  &:hover {
+    background: ${({ theme, $disabled }) =>
+      $disabled ? 'transparent' : theme.colors.secondaryBackground};
+    color: ${({ theme, $disabled }) =>
+      $disabled ? theme.colors.secondaryBackground : theme.colors.textPrimary};
+  }
+
+  &:active {
+    transform: ${({ $disabled }) => ($disabled ? 'none' : 'scale(0.92)')};
+  }
+`
+
+// ─── Thread list scroll area ──────────────────────────────────────────────────
+const ListScroll = styled.ul`
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 10px 12px;
+  margin: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+
+  scrollbar-width: thin;
+  scrollbar-color: ${({ theme }) => `${theme.colors.secondaryBackground} transparent`};
+
+  &::-webkit-scrollbar {
+    width: 3px;
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: ${({ theme }) => theme.colors.secondaryBackground};
+    border-radius: 4px;
+  }
+`
+
+// ─── Empty state ──────────────────────────────────────────────────────────────
+const EmptyState = styled.div`
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 60px 20px;
+  text-align: center;
+  flex: 1;
+`
+
+const EmptyIcon = styled.div`
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: ${({ theme }) => theme.colors.secondaryBackground};
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  margin-bottom: 4px;
+`
+
+const EmptyTitle = styled.p`
+  font-size: 13px;
+  font-weight: 600;
+  color: ${({ theme }) => theme.colors.textPrimary};
+  margin: 0;
+`
+
+const EmptyMessage = styled.p`
+  font-size: 12px;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  margin: 0;
+  max-width: 200px;
+  line-height: 1.5;
+`
+
+// ─── Viewer placeholder (no thread selected) ──────────────────────────────────
+const ViewerPlaceholder = styled.div`
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  animation: ${fadeIn} 300ms ease both;
+`
+
+const PlaceholderIcon = styled.div`
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: ${({ theme }) => theme.colors.secondaryBackground};
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: ${({ theme }) => theme.colors.textSecondary};
+`
+
+const PlaceholderText = styled.p`
+  font-size: 13px;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  margin: 0;
+`
+
+// ─── Props ────────────────────────────────────────────────────────────────────
 interface EmailThreadsProps {
   majik: MajikMessageDatabase
   onUpdate?: (updatedInstance: MajikMessageDatabase) => void
@@ -133,6 +278,7 @@ interface EmailThreadsProps {
   onThreadClick?: (threadId: MajikMessageThreadID) => void
 }
 
+// ─── Component ────────────────────────────────────────────────────────────────
 const EmailThreads: React.FC<EmailThreadsProps> = ({
   majik,
   onPageChange,
@@ -145,38 +291,29 @@ const EmailThreads: React.FC<EmailThreadsProps> = ({
 
   const [fetchedThreads, setFetchedThreads] = useState<MajikMessageThreadSummary[]>([])
   const [totalThreads, setTotalThreads] = useState<number>(0)
-
   const [recipients, setRecipients] = useState<MajikContact[]>(() => {
     const myAccount = majik.getActiveAccount()
-    if (!myAccount) return []
-    return [myAccount]
+    return myAccount ? [myAccount] : []
   })
-
   const [threadLabel, setThreadLabel] = useState<string | undefined>(undefined)
-
   const [selectedThread, setSelectedThread] = useState<MajikMessageThread | null>(null)
-
   const [loading, setIsLoading] = useState(false)
   const [page, setPage] = useState(1)
   const [allowNextPage, setAllowNextPage] = useState(false)
 
   const isRefreshingRef = useRef(false)
 
+  // ── Data fetching ──────────────────────────────────────────────────────────
   const refreshThreads = useCallback(async () => {
     if (!majikah?.isAuthenticated) return
-
     if (isRefreshingRef.current) return
     isRefreshingRef.current = true
 
     try {
       setIsLoading(true)
       const fetchResponse = await majik.getThreads()
-      const threads = fetchResponse.threads
-
-      setFetchedThreads(threads)
-
+      setFetchedThreads(fetchResponse.threads)
       setTotalThreads(fetchResponse.total_threads)
-
       setAllowNextPage(fetchResponse.canNextPage)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (error: any) {
@@ -193,6 +330,7 @@ const EmailThreads: React.FC<EmailThreadsProps> = ({
     refreshThreads()
   }, [refreshThreads])
 
+  // ── Pagination ─────────────────────────────────────────────────────────────
   const handlePreviousPage = (): void => {
     if (page > 1) {
       const newPage = page - 1
@@ -203,26 +341,20 @@ const EmailThreads: React.FC<EmailThreadsProps> = ({
 
   const handleNextPage = (): void => {
     if (!allowNextPage) return
-
     const newPage = page + 1
     setPage(newPage)
     onPageChange?.(newPage)
   }
 
+  // ── Create thread ──────────────────────────────────────────────────────────
   const processCreateThread = async (): Promise<string> => {
     if (isDevEnvironment()) console.log('Creating thread for: ', recipients)
-
-    if (!recipients || recipients.length <= 1) {
-      throw new Error('Assign recipients first.')
-    }
+    if (!recipients || recipients.length <= 1) throw new Error('Assign recipients first.')
 
     const activeAccount = majik.currentIdentity
-    if (!activeAccount) {
-      throw new Error('No active account found')
-    }
+    if (!activeAccount) throw new Error('No active account found')
 
     const currentUserPublicKey = activeAccount.publicKey
-
     const messageRecipients = (
       await Promise.all(
         recipients.filter((r) => r.isMajikahRegistered()).map(async (r) => r.getPublicKeyBase64())
@@ -233,37 +365,26 @@ const EmailThreads: React.FC<EmailThreadsProps> = ({
 
     const createThreadResponse = await majik.createThread(messageRecipients, threadLabel)
 
-    if (
-      createThreadResponse !== null &&
-      createThreadResponse.success &&
-      createThreadResponse.message
-    ) {
+    if (createThreadResponse?.success && createThreadResponse.message) {
       refreshThreads()
+      const parsedThread = MajikMessageThread.fromJSON(createThreadResponse.data)
+      setSelectedThread(parsedThread)
       return `Thread created successfully! ${createThreadResponse.message}`
-    } else {
-      return `Oh no... There's a problem while creating the thread.`
     }
+    return `Oh no... There's a problem while creating the thread.`
   }
 
   const handleCreateThread = async (): Promise<void> => {
-    const activeAccount = majik.currentIdentity
-    if (!activeAccount) return
-
+    if (!majik.currentIdentity) return
     if (!recipients || recipients.length <= 1) {
       toast.error('Assign recipients first.')
       return
     }
 
     toast.promise(processCreateThread(), {
-      loading: `Creating thread...`,
-      success: (outputMessage) => {
-        setTimeout(() => {}, 1000)
-
-        return outputMessage
-      },
-      error: () => {
-        return `Oh no... There's a problem while creating the thread.`
-      }
+      loading: 'Creating thread...',
+      success: (msg) => msg,
+      error: () => "Oh no... There's a problem while creating the thread."
     })
   }
 
@@ -272,422 +393,310 @@ const EmailThreads: React.FC<EmailThreadsProps> = ({
     setThreadLabel(subject)
   }
 
+  // ── Select thread ──────────────────────────────────────────────────────────
   const processSelectThread = async (threadID: MajikMessageThreadID): Promise<string> => {
     if (isDevEnvironment()) console.log('Loading thread: ', threadID)
-
-    if (!threadID.trim()) {
-      throw new Error('Please select a valid thread.')
-    }
-
-    const activeAccount = majik.currentIdentity
-    if (!activeAccount) {
-      throw new Error('No active account found')
-    }
+    if (!threadID.trim()) throw new Error('Please select a valid thread.')
+    if (!majik.currentIdentity) throw new Error('No active account found')
 
     const fetchedThread = await majik.getThread(threadID)
-
-    if (fetchedThread !== null && fetchedThread.thread) {
+    if (fetchedThread?.thread) {
       const parsedThread = MajikMessageThread.fromJSON(fetchedThread.thread)
       setSelectedThread(parsedThread)
-      return `Thread loaded successfully!`
-    } else {
-      return `Oh no... There's a problem while loading this thread.`
+      return 'Thread loaded successfully!'
     }
+    return "Oh no... There's a problem while loading this thread."
   }
 
   const handleSelectThread = async (threadID: MajikMessageThreadID): Promise<void> => {
-    const activeAccount = majik.currentIdentity
-    if (!activeAccount) return
-
+    if (!majik.currentIdentity) return
     if (!threadID.trim()) {
       toast.error('A valid thread ID is required.')
       return
     }
 
     toast.promise(processSelectThread(threadID), {
-      loading: `Loading thread...`,
-      success: (outputMessage) => {
-        setTimeout(() => {
-          onThreadClick?.(threadID)
-        }, 1000)
-
-        return outputMessage
+      loading: 'Loading thread...',
+      success: (msg) => {
+        onThreadClick?.(threadID)
+        return msg
       },
-      error: () => {
-        return `Oh no... There's a problem while loading this thread.`
-      }
+      error: () => "Oh no... There's a problem while loading this thread."
     })
   }
 
-  const handleCloseThread = (): void => {
-    setSelectedThread(null)
-  }
+  // ── Close / refresh ────────────────────────────────────────────────────────
+  const handleCloseThread = (): void => setSelectedThread(null)
 
   const handleMarkThreadClosed = (): void => {
     handleCloseThread()
     refreshThreads()
   }
 
+  // ── Delete thread (by object) ──────────────────────────────────────────────
   const processDeleteThread = async (thread: MajikMessageThread): Promise<string> => {
     const activeAccount = majik.currentIdentity
-    if (!activeAccount) {
-      throw new Error('No active account found')
-    }
-
-    if (!thread?.validate()) {
-      throw new Error('Invalid thread')
-    }
-
-    if (thread.hasDeletionApproval(activeAccount.publicKey)) {
+    if (!activeAccount) throw new Error('No active account found')
+    if (!thread?.validate()) throw new Error('Invalid thread')
+    if (thread.hasDeletionApproval(activeAccount.publicKey))
       throw new Error("You've already requested to delete this thread.")
-    }
 
-    const deleteResponse = await majik.deleteThread(thread)
-
-    if (deleteResponse !== null && deleteResponse.success) {
-      return deleteResponse.message || `Your deletion request has been recorded successfully!`
-    } else {
-      return `Oh no... There's a problem while requesting to delete this thread.`
-    }
+    const res = await majik.deleteThread(thread)
+    return res?.success
+      ? res.message || 'Your deletion request has been recorded successfully!'
+      : "Oh no... There's a problem while requesting to delete this thread."
   }
 
   const handleDeleteThread = async (thread: MajikMessageThread): Promise<void> => {
-    const activeAccount = majik.currentIdentity
-    if (!activeAccount) return
-
+    if (!majik.currentIdentity) return
     if (!thread?.validate()) {
       toast.error('Invalid thread provided.')
       return
     }
 
     toast.promise(processDeleteThread(thread), {
-      loading: `Requesting to delete this thread...`,
-      success: (outputMessage) => {
-        setTimeout(() => {
-          refreshThreads()
-        }, 1000)
+      loading: 'Requesting to delete this thread...',
+      success: (msg) => {
+        setTimeout(refreshThreads, 1000)
         handleCloseThread()
-        return outputMessage
+        return msg
       },
-      error: () => {
-        return `Oh no... There's a problem while requesting to delete this thread.`
-      }
+      error: () => "Oh no... There's a problem while requesting to delete this thread."
     })
   }
 
   const processCancelDeleteThread = async (thread: MajikMessageThread): Promise<string> => {
-    const activeAccount = majik.currentIdentity
-    if (!activeAccount) {
-      throw new Error('No active account found')
-    }
-
-    if (!thread?.validate()) {
-      throw new Error('Invalid thread')
-    }
-
-    if (!thread.hasDeletionApproval(activeAccount.publicKey)) {
+    if (!majik.currentIdentity) throw new Error('No active account found')
+    if (!thread?.validate()) throw new Error('Invalid thread')
+    if (!thread.hasDeletionApproval(majik.currentIdentity.publicKey))
       throw new Error("You haven't requested to delete this thread yet.")
-    }
 
-    const deleteResponse = await majik.revokeDeleteThread(thread)
-
-    if (deleteResponse !== null && deleteResponse.success) {
-      return deleteResponse.message || `Your deletion request has been revoked successfully!`
-    } else {
-      return `Oh no... There's a problem while revoking your request to delete this thread.`
-    }
+    const res = await majik.revokeDeleteThread(thread)
+    return res?.success
+      ? res.message || 'Your deletion request has been revoked successfully!'
+      : "Oh no... There's a problem while revoking your request to delete this thread."
   }
 
   const handleCancelDeleteThread = async (thread: MajikMessageThread): Promise<void> => {
-    const activeAccount = majik.currentIdentity
-    if (!activeAccount) return
-
+    if (!majik.currentIdentity) return
     if (!thread?.validate()) {
       toast.error('Invalid thread provided.')
       return
     }
 
     toast.promise(processCancelDeleteThread(thread), {
-      loading: `Revoking your request to delete this thread...`,
-      success: (outputMessage) => {
-        setTimeout(() => {
-          refreshThreads()
-        }, 1000)
+      loading: 'Revoking your request to delete this thread...',
+      success: (msg) => {
+        setTimeout(refreshThreads, 1000)
         handleCloseThread()
-        return outputMessage
+        return msg
       },
-      error: () => {
-        return `Oh no... There's a problem while revoking your request to delete this thread.`
-      }
+      error: () => "Oh no... There's a problem while revoking your request to delete this thread."
     })
   }
 
+  // ── Delete thread (by ID) ──────────────────────────────────────────────────
   const processDeleteThreadByID = async (threadID: MajikMessageThreadID): Promise<string> => {
-    const activeAccount = majik.currentIdentity
-    if (!activeAccount) {
-      throw new Error('No active account found')
-    }
+    if (!majik.currentIdentity) throw new Error('No active account found')
+    if (!threadID?.trim()) throw new Error('Invalid thread ID')
 
-    if (!threadID?.trim()) {
-      throw new Error('Invalid thread ID')
-    }
-
-    const deleteResponse = await majik.manageThreadDeletionByID(threadID)
-
-    if (deleteResponse !== null && deleteResponse.success) {
-      return deleteResponse.message || `Your deletion request has been recorded successfully!`
-    } else {
-      return `Oh no... There's a problem while requesting to delete this thread.`
-    }
+    const res = await majik.manageThreadDeletionByID(threadID)
+    return res?.success
+      ? res.message || 'Your deletion request has been recorded successfully!'
+      : "Oh no... There's a problem while requesting to delete this thread."
   }
 
   const handleDeleteThreadByID = async (threadID: MajikMessageThreadID): Promise<void> => {
-    const activeAccount = majik.currentIdentity
-    if (!activeAccount) return
-
+    if (!majik.currentIdentity) return
     if (!threadID?.trim()) {
       toast.error('Invalid thread ID provided.')
       return
     }
 
     toast.promise(processDeleteThreadByID(threadID), {
-      loading: `Requesting to delete this thread...`,
-      success: (outputMessage) => {
-        setTimeout(() => {
-          refreshThreads()
-        }, 1000)
+      loading: 'Requesting to delete this thread...',
+      success: (msg) => {
+        setTimeout(refreshThreads, 1000)
         handleCloseThread()
-        return outputMessage
+        return msg
       },
-      error: () => {
-        return `Oh no... There's a problem while requesting to delete this thread.`
-      }
+      error: () => "Oh no... There's a problem while requesting to delete this thread."
     })
   }
 
   const processCancelDeleteThreadByID = async (threadID: MajikMessageThreadID): Promise<string> => {
-    const activeAccount = majik.currentIdentity
-    if (!activeAccount) {
-      throw new Error('No active account found')
-    }
+    if (!majik.currentIdentity) throw new Error('No active account found')
+    if (!threadID?.trim()) throw new Error('Invalid thread ID')
 
-    if (!threadID?.trim()) {
-      throw new Error('Invalid thread ID')
-    }
-    const deleteResponse = await majik.manageThreadDeletionByID(threadID, true)
-
-    if (deleteResponse !== null && deleteResponse.success) {
-      return deleteResponse.message || `Your deletion request has been revoked successfully!`
-    } else {
-      return `Oh no... There's a problem while revoking your request to delete this thread.`
-    }
+    const res = await majik.manageThreadDeletionByID(threadID, true)
+    return res?.success
+      ? res.message || 'Your deletion request has been revoked successfully!'
+      : "Oh no... There's a problem while revoking your request to delete this thread."
   }
 
   const handleCancelDeleteThreadByID = async (threadID: MajikMessageThreadID): Promise<void> => {
-    const activeAccount = majik.currentIdentity
-    if (!activeAccount) return
-
+    if (!majik.currentIdentity) return
     if (!threadID?.trim()) {
       toast.error('Invalid thread ID provided.')
       return
     }
 
     toast.promise(processCancelDeleteThreadByID(threadID), {
-      loading: `Revoking your request to delete this thread...`,
-      success: (outputMessage) => {
-        setTimeout(() => {
-          refreshThreads()
-        }, 1000)
+      loading: 'Revoking your request to delete this thread...',
+      success: (msg) => {
+        setTimeout(refreshThreads, 1000)
         handleCloseThread()
-        return outputMessage
+        return msg
       },
-      error: () => {
-        return `Oh no... There's a problem while revoking your request to delete this thread.`
-      }
+      error: () => "Oh no... There's a problem while revoking your request to delete this thread."
     })
   }
 
+  // ── Derived ────────────────────────────────────────────────────────────────
   const isPreviousDisabled = page <= 1
   const isNextDisabled = !allowNextPage
-
-  const mailsPerPage = 50 // or your API/page size
-
+  const mailsPerPage = 50
   const startThread = totalThreads === 0 ? 0 : (page - 1) * mailsPerPage + 1
   const endThread = Math.min(page * mailsPerPage, totalThreads)
 
-  const isUserRestricted = useMemo(() => {
-    return majik?.currentIdentity?.isRestricted() || false
+  const isUserRestricted = useMemo(
+    () => majik?.currentIdentity?.isRestricted() || false,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [majik, majik.user?.id, majik.getActiveAccount()?.id])
+    [majik, majik.user?.id, majik.getActiveAccount()?.id]
+  )
 
-  if (!majikah?.isAuthenticated) {
-    return <UserAuth />
-  }
+  const hasSelection = !!selectedThread?.validate()
+
+  // ── Early returns ──────────────────────────────────────────────────────────
+  if (!majikah?.isAuthenticated) return <UserAuth />
 
   if (loading) {
     return (
-      <RootContainer>
-        <DynamicPlaceholder loading>Loading...</DynamicPlaceholder>
-      </RootContainer>
+      <Root>
+        <ListPane $hasSelection={false}>
+          <DynamicPlaceholder loading>Loading…</DynamicPlaceholder>
+        </ListPane>
+      </Root>
     )
   }
 
+  // ── Main render ────────────────────────────────────────────────────────────
   return (
-    <RootContainer id="section-threads">
-      <GuideHelper
-        docsPath="https://majikah.solutions/products/majik-message/docs/threads-documentation"
-        startTour={() => launchTutorialThreads(tour)}
-      />
-      <Header>
-        <SectionTitleFrame>
-          <Row>
-            <h2>Threads</h2>
-            <div style={{ display: 'flex', flexDirection: 'row', gap: 15 }}>
-              <PopUpFormButton
-                id="button-new-thread"
-                icon={NotePencilIcon}
-                text="New Thread"
-                disabled={isUserRestricted}
-                modal={{
-                  title: 'New Thread',
-                  description: 'Create a new thread'
-                }}
-                buttons={{
-                  cancel: {
-                    text: 'Cancel'
-                  },
-                  confirm: {
-                    text: 'Create',
-                    onClick: handleCreateThread,
-                    isDisabled: loading
-                  }
-                }}
+    <Root id="section-threads">
+      {/* ── LEFT: thread list ── */}
+      <ListPane $hasSelection={hasSelection}>
+        <GuideHelper
+          docsPath="https://majikah.solutions/products/majik-message/docs/threads-documentation"
+          startTour={() => launchTutorialThreads(tour)}
+          id="main-threads"
+        />
+        {/* Header */}
+        <PaneHeader>
+          <PaneTitle>Threads</PaneTitle>
+          <HeaderActions>
+            <PopUpFormButton
+              id="button-new-thread"
+              icon={NotePencilIcon}
+              text="New"
+              disabled={isUserRestricted}
+              modal={{ title: 'New Thread', description: 'Create a new thread' }}
+              buttons={{
+                cancel: { text: 'Cancel' },
+                confirm: { text: 'Create', onClick: handleCreateThread, isDisabled: loading }
+              }}
+            >
+              <NewThreadForm majik={majik} onUpdate={handleThreadFormUpdate} />
+            </PopUpFormButton>
+
+            <StyledIconButton
+              onClick={refreshThreads}
+              aria-label="Reload Threads"
+              icon={ArrowClockwiseIcon}
+              title="Reload Threads"
+              size={22}
+              id="button-refresh-thread"
+            />
+          </HeaderActions>
+        </PaneHeader>
+
+        {/* Identity selector + pagination */}
+        <SubRow>
+          <MajikMessageIdentitySelector />
+          {fetchedThreads.length > 0 && (
+            <Pagination>
+              <PageLabel>
+                {totalThreads > 0 ? `${startThread}–${endThread} of ${totalThreads}` : '—'}
+              </PageLabel>
+              <PageBtn
+                onClick={handlePreviousPage}
+                $disabled={isPreviousDisabled}
+                disabled={isPreviousDisabled}
+                aria-label="Previous page"
               >
-                <NewThreadForm majik={majik} onUpdate={handleThreadFormUpdate} />
-              </PopUpFormButton>
+                <CaretLeftIcon size={12} />
+              </PageBtn>
+              <PageBtn
+                onClick={handleNextPage}
+                $disabled={isNextDisabled}
+                disabled={isNextDisabled}
+                aria-label="Next page"
+              >
+                <CaretRightIcon size={12} />
+              </PageBtn>
+            </Pagination>
+          )}
+        </SubRow>
 
-              <Controls>
-                <StyledIconButton
-                  onClick={refreshThreads}
-                  aria-label="Reload Threads"
-                  icon={ArrowClockwiseIcon}
-                  title="Reload Threads"
-                  size={25}
-                  id="button-refresh-thread"
-                />
-              </Controls>
-            </div>
-          </Row>
-        </SectionTitleFrame>
-      </Header>
-
-      <UpperSubheaderRow>
-        <MajikMessageIdentitySelector />
-        {fetchedThreads.length > 0 && (
-          <PaginationContainer>
-            <PageInfo>
-              {totalThreads > 0 ? `${startThread}-${endThread} of ${totalThreads}` : 'No threads'}
-            </PageInfo>
-            <PaginationButton
-              onClick={handlePreviousPage}
-              $disabled={isPreviousDisabled}
-              disabled={isPreviousDisabled}
-              aria-label="Previous page"
-            >
-              <CaretLeftIcon size={16} />
-            </PaginationButton>
-            <PaginationButton
-              onClick={handleNextPage}
-              $disabled={isNextDisabled}
-              disabled={isNextDisabled}
-              aria-label="Next page"
-            >
-              <CaretRightIcon size={16} />
-            </PaginationButton>
-          </PaginationContainer>
-        )}
-      </UpperSubheaderRow>
-
-      <ThreadsList>
+        {/* Thread list */}
         {fetchedThreads.length === 0 ? (
           <EmptyState>
-            <EmptyStateTitle>No messages</EmptyStateTitle>
-            <EmptyStateMessage>
-              Your inbox is empty. New messages will appear here.
-            </EmptyStateMessage>
+            <EmptyIcon>
+              <EnvelopeSimpleIcon size={20} />
+            </EmptyIcon>
+            <EmptyTitle>No threads yet</EmptyTitle>
+            <EmptyMessage>
+              Your inbox is empty. Create a new thread above to get started.
+            </EmptyMessage>
           </EmptyState>
         ) : (
-          fetchedThreads.map((thread) => (
-            <ThreadRow
-              key={thread.id}
-              majik={majik}
-              thread={thread}
-              currentUserPublicKey={majik.currentIdentity!.publicKey}
-              onToggleStar={onToggleStar}
-              onToggleRead={onToggleRead}
-              onClick={() => handleSelectThread(thread.id)}
-              onDelete={handleDeleteThreadByID}
-              onCancelDelete={handleCancelDeleteThreadByID}
-            />
-          ))
+          <ListScroll>
+            {fetchedThreads.map((thread) => (
+              <ThreadRow
+                key={thread.id}
+                majik={majik}
+                thread={thread}
+                currentUserPublicKey={majik.currentIdentity!.publicKey}
+                onToggleStar={onToggleStar}
+                onToggleRead={onToggleRead}
+                onClick={() => handleSelectThread(thread.id)}
+                onDelete={handleDeleteThreadByID}
+                onCancelDelete={handleCancelDeleteThreadByID}
+              />
+            ))}
+          </ListScroll>
         )}
-      </ThreadsList>
-      {fetchedThreads.length > 0 && (
-        <PaginationContainer>
-          <PageInfo>
-            {totalThreads > 0 ? `${startThread}-${endThread} of ${totalThreads}` : 'No threads'}
-          </PageInfo>
-          <PaginationButton
-            onClick={handlePreviousPage}
-            $disabled={isPreviousDisabled}
-            disabled={isPreviousDisabled}
-            aria-label="Previous page"
-          >
-            <CaretLeftIcon size={16} />
-          </PaginationButton>
-          <PaginationButton
-            onClick={handleNextPage}
-            $disabled={isNextDisabled}
-            disabled={isNextDisabled}
-            aria-label="Next page"
-          >
-            <CaretRightIcon size={16} />
-          </PaginationButton>
-        </PaginationContainer>
-      )}
+      </ListPane>
 
-      <DynamicSlidingDialogue
-        scrollable={false}
-        isOpen={!!selectedThread?.validate()}
-        modal={{
-          title: 'View Messages',
-          description: 'Read and reply to messages in this thread'
-        }}
-        buttons={{
-          cancel: {
-            text: 'Close',
-            onClick: handleCloseThread,
-            hide: true
-          },
-          confirm: {
-            text: 'Save',
-            isDisabled: true,
-            hide: true
-          }
-        }}
-        onOpenChange={handleCloseThread}
-      >
-        {selectedThread && (
+      {/* ── RIGHT: thread viewer or placeholder ── */}
+      {hasSelection ? (
+        <ViewerPane $visible>
           <ThreadViewer
             majik={majik}
-            thread={selectedThread}
+            thread={selectedThread!}
             onDelete={handleDeleteThread}
             onRevokeDelete={handleCancelDeleteThread}
             onMarkClosed={handleMarkThreadClosed}
           />
-        )}
-      </DynamicSlidingDialogue>
-    </RootContainer>
+        </ViewerPane>
+      ) : (
+        <ViewerPlaceholder>
+          <PlaceholderIcon>
+            <EnvelopeSimpleIcon size={24} />
+          </PlaceholderIcon>
+          <PlaceholderText>Select a thread to read messages</PlaceholderText>
+        </ViewerPlaceholder>
+      )}
+    </Root>
   )
 }
 

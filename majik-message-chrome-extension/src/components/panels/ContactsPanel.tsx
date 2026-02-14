@@ -152,6 +152,7 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({ majik, onUpdate }) => {
               }}
             >
               <CustomInputField
+                currentValue={inviteKey}
                 onChange={(e) => setInviteKey(e)}
                 maxChar={500}
                 label="Invite Key"
@@ -159,6 +160,7 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({ majik, onUpdate }) => {
                 importProp={{
                   type: "txt",
                 }}
+                sensitive={true}
               />
             </PopUpFormButton>
           </div>

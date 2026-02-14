@@ -1,12 +1,7 @@
+'use client'
 import React, { useCallback, useEffect, useState } from 'react'
-import styled from 'styled-components'
-import {
-  BracketsCurlyIcon,
-  CaretDownIcon,
-  CaretUpIcon,
-  CopyIcon,
-  TextAaIcon
-} from '@phosphor-icons/react'
+import styled, { css } from 'styled-components'
+import { BracketsCurlyIcon, CaretDownIcon, CopyIcon, TextAaIcon } from '@phosphor-icons/react'
 import moment from 'moment'
 import { MessageEnvelope, type MajikMessageMail } from '@majikah/majik-message'
 import type { MajikMessagePublicKey } from '@majikah/majik-message'
@@ -15,196 +10,260 @@ import { downloadBlob } from '@renderer/utils/utils'
 import { toast } from 'sonner'
 import StyledIconButton from '@renderer/components/foundations/StyledIconButton'
 
-const RootContainer = styled.div<{ $isExpanded: boolean }>`
+// ─── Local tokens ─────────────────────────────────────────────────────────────
+const FONT_MONO = "'Fira Mono', 'JetBrains Mono', monospace"
+
+// ─── Pill shared base ─────────────────────────────────────────────────────────
+const pillBase = css`
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 100px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  line-height: 1.6;
+`
+
+// ─── Root card ────────────────────────────────────────────────────────────────
+/**
+ * Single border radius, no margin — spacing handled by the parent list gap.
+ * Border tints with primary when unread to subtly draw the eye.
+ * $isUnread is passed through for the border color only.
+ */
+const Card = styled.div<{ $isUnread: boolean }>`
   width: 100%;
-  background-color: ${({ theme }) => theme.colors.primaryBackground || '#ffffff'};
-  border: 1px solid ${({ theme }) => theme.colors.secondaryBackground || '#e5e7eb'};
-  border-radius: 8px;
-  margin-bottom: 8px;
+  background: ${({ theme }) => theme.colors.primaryBackground};
+  border: 1px solid
+    ${({ theme, $isUnread }) =>
+      $isUnread
+        ? `${theme.colors.primary}40` /* ~25% opacity tint */
+        : theme.colors.secondaryBackground};
+  border-radius: 10px;
   overflow: hidden;
-  transition: all 0.2s ease;
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease;
 
   &:hover {
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    border-color: ${({ theme, $isUnread }) =>
+      $isUnread ? `${theme.colors.primary}70` : theme.colors.secondaryBackground};
   }
 `
 
-const CollapsedHeader = styled.div`
+// ─── Shared header row (collapsed + expanded share this shell) ────────────────
+const HeaderRow = styled.div<{ $clickable: boolean }>`
   display: flex;
   align-items: center;
-  padding: 12px 16px;
-  cursor: pointer;
+  gap: 11px;
+  padding: 12px 14px;
+  cursor: ${({ $clickable }) => ($clickable ? 'pointer' : 'default')};
+  transition: background 150ms ease;
   user-select: none;
-  gap: 12px;
+  overflow: hidden;
 
   &:hover {
-    background-color: ${({ theme }) => theme.colors.secondaryBackground || '#f9fafb'};
+    background: ${({ theme, $clickable }) =>
+      $clickable ? theme.colors.secondaryBackground : 'transparent'};
+    box-shadow: 0 3px 16px rgba(0, 0, 0, 0.2);
   }
 `
 
-const ExpandedHeader = styled.div`
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  padding: 16px 20px;
-  border-bottom: 1px solid ${({ theme }) => theme.colors.secondaryBackground || '#e5e7eb'};
-`
-
-const CollapseButton = styled.button`
-  background: none;
-  border: none;
-  padding: 4px;
-  cursor: pointer;
+// ─── Avatar ───────────────────────────────────────────────────────────────────
+const Avatar = styled.div<{ $hue: number }>`
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  border-radius: 50%;
+  background: hsl(${({ $hue }) => $hue}, 38%, 26%);
+  border: 1px solid rgba(255, 255, 255, 0.07);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: ${({ theme }) => theme.colors.textSecondary || '#6b7280'};
-  border-radius: 4px;
-  transition: all 0.2s ease;
-
-  &:hover {
-    background-color: ${({ theme }) => theme.colors.secondaryBackground || '#e5e7eb'};
-    color: ${({ theme }) => theme.colors.textPrimary || '#111827'};
-  }
-
-  &:disabled {
-    cursor: not-allowed;
-    opacity: 0.5;
-  }
+  font-family: ${FONT_MONO};
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.72);
+  user-select: none;
+  flex-shrink: 0;
 `
 
-const SenderInfo = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  flex: 1;
-  min-width: 0;
-`
-
-const SenderName = styled.div<{ $isUnread?: boolean }>`
-  font-size: 14px;
-  font-weight: ${(props) => (props.$isUnread ? '600' : '500')};
-  color: ${({ theme }) => theme.colors.textPrimary || '#111827'};
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-`
-
-const MessagePreview = styled.div`
-  font-size: 13px;
-  color: ${({ theme }) => theme.colors.textSecondary || '#6b7280'};
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-`
-
-const Timestamp = styled.div`
-  font-size: 12px;
-  color: ${({ theme }) => theme.colors.textSecondary || '#6b7280'};
-  white-space: nowrap;
-`
-
-const HeaderLeft = styled.div`
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  flex: 1;
-  min-width: 0;
-`
-
-const HeaderRight = styled.div`
+// ─── Caret toggle ────────────────────────────────────────────────────────────
+/**
+ * Single element — rotates 180° when expanded rather than swapping icons.
+ * Disabled state shown via opacity, not cursor change, since the latest
+ * message is always expanded and non-collapsible.
+ */
+const Caret = styled.div<{ $isExpanded: boolean; $disabled: boolean }>`
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
+  flex-shrink: 0;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  transform: rotate(${({ $isExpanded }) => ($isExpanded ? '180deg' : '0deg')});
+  transition: transform 200ms ease;
+  opacity: ${({ $disabled }) => ($disabled ? 0.3 : 1)};
 `
 
-const SenderDetails = styled.div`
+// ─── Header body (sender + preview / recipients) ──────────────────────────────
+const HeaderBody = styled.div`
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
-  flex: 1;
+`
+
+const SenderRow = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 7px;
   min-width: 0;
 `
 
-const SenderNameExpanded = styled.div`
-  font-size: 15px;
+const SenderName = styled.span<{ $bold: boolean }>`
+  font-size: 13px;
+  font-weight: ${({ $bold }) => ($bold ? 700 : 500)};
+  color: ${({ theme }) => theme.colors.textPrimary};
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+`
+
+/**
+ * Public key shown as a monospaced chip — visually quieter than the
+ * full key but still lets privacy-conscious users spot-check sender identity.
+ */
+const KeyChip = styled.span`
+  font-family: ${FONT_MONO};
+  font-size: 10px;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  background: ${({ theme }) => theme.colors.secondaryBackground};
+  padding: 1px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  flex-shrink: 0;
+`
+
+const RecipientsLine = styled.div`
+  font-size: 12px;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.7;
+`
+
+const Preview = styled.div`
+  font-size: 12px;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.65;
+`
+
+// ─── Header right (timestamp + read pill) ─────────────────────────────────────
+const HeaderRight = styled.div`
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5px;
+  flex-shrink: 0;
+`
+
+const Timestamp = styled.span`
+  font-family: ${FONT_MONO};
+  font-size: 10px;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+`
+
+// Read pill: muted when read, primary-tinted when unread
+const ReadPill = styled.span<{ $isRead: boolean }>`
+  ${pillBase}
+  ${({ theme, $isRead }) =>
+    $isRead
+      ? css`
+          background: ${theme.colors.secondaryBackground};
+          color: ${theme.colors.textSecondary};
+          border: 1px solid transparent;
+        `
+      : css`
+          background: ${theme.colors.primary};
+          color: #fff;
+        `}
+`
+
+// ─── Metadata band ────────────────────────────────────────────────────────────
+/**
+ * Sits between the header and body when subject/priority/attachments exist.
+ * Uses secondaryBackground to visually separate it from the message body.
+ */
+const MetaBand = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 9px 14px;
+  background: ${({ theme }) => theme.colors.secondaryBackground};
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+`
+
+const MetaRow = styled.div`
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+`
+
+const MetaLabel = styled.span`
+  font-family: ${FONT_MONO};
+  font-size: 10px;
   font-weight: 600;
-  color: ${({ theme }) => theme.colors.textPrimary || '#111827'};
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  opacity: 0.55;
+  min-width: 72px;
+  flex-shrink: 0;
 `
 
-const SenderEmail = styled.div`
+const MetaValue = styled.span`
+  font-size: 12px;
+  color: ${({ theme }) => theme.colors.textPrimary};
+`
+
+// ─── Message body ─────────────────────────────────────────────────────────────
+const Body = styled.div`
+  padding: 16px;
   font-size: 13px;
-  color: ${({ theme }) => theme.colors.textSecondary || '#6b7280'};
-`
-
-const Recipients = styled.div`
-  font-size: 13px;
-  color: ${({ theme }) => theme.colors.textSecondary || '#6b7280'};
-  margin-top: 4px;
-`
-
-const MessageBody = styled.div`
-  padding: 20px;
-  font-size: 14px;
-  line-height: 1.6;
-  color: ${({ theme }) => theme.colors.textPrimary || '#111827'};
+  line-height: 1.75;
+  color: ${({ theme }) => theme.colors.textPrimary};
   white-space: pre-wrap;
   word-wrap: break-word;
+  border-top: 1px solid ${({ theme }) => theme.colors.secondaryBackground};
 `
 
+// ─── Action bar ───────────────────────────────────────────────────────────────
+/**
+ * Subtle tinted background so the actions feel like a footer,
+ * not just floating buttons on the card.
+ */
 const ActionBar = styled.div`
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 12px 20px;
-  border-top: 1px solid ${({ theme }) => theme.colors.secondaryBackground || '#e5e7eb'};
+  gap: 4px;
+  padding: 8px 12px;
+  border-top: 1px solid ${({ theme }) => theme.colors.secondaryBackground};
+  background: ${({ theme }) => theme.colors.secondaryBackground}33;
 `
 
-const MetadataSection = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 16px 20px;
-  background-color: ${({ theme }) => theme.colors.secondaryBackground || '#f9fafb'};
-  border-top: 1px solid ${({ theme }) => theme.colors.secondaryBackground || '#e5e7eb'};
-`
-
-const MetadataRow = styled.div`
-  display: flex;
-  gap: 8px;
-  font-size: 13px;
-`
-
-const MetadataLabel = styled.span`
-  font-weight: 600;
-  color: ${({ theme }) => theme.colors.textPrimary || '#111827'};
-  min-width: 80px;
-`
-
-const MetadataValue = styled.span`
-  color: ${({ theme }) => theme.colors.textSecondary || '#6b7280'};
-`
-
-const ReadStatus = styled.div<{ $isRead: boolean }>`
-  font-size: 11px;
-  color: ${({ theme, $isRead }) =>
-    $isRead ? theme.colors.textSecondary : theme.colors.primaryBackground};
-  font-weight: 500;
-  padding: 2px 8px;
-  border-radius: 12px;
-  background-color: ${({ theme, $isRead }) =>
-    $isRead ? theme.colors.secondaryBackground : theme.colors.primary};
-`
-
-const UnreadBadge = styled.span`
-  background-color: #3b82f6;
-  color: white;
-  font-size: 11px;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 12px;
-  margin-left: 8px;
-`
+// ─── Props ────────────────────────────────────────────────────────────────────
 interface ThreadMailProps {
   majik: MajikMessageDatabase
   mail: MajikMessageMail
@@ -215,6 +274,7 @@ interface ThreadMailProps {
   onToggleStar?: (mailId: string) => void
 }
 
+// ─── Component ────────────────────────────────────────────────────────────────
 export const ThreadMail: React.FC<ThreadMailProps> = ({
   majik,
   mail,
@@ -224,15 +284,14 @@ export const ThreadMail: React.FC<ThreadMailProps> = ({
   displayNames = {}
 }) => {
   const [isExpanded, setIsExpanded] = useState(isLatest)
-  //   const [isStarred, setIsStarred] = useState(false)
-
-  const canCollapse = !isLatest && !isSingle
-
   const [text, setText] = useState<string>('')
 
+  // The latest message or a single message can't be collapsed
+  const canCollapse = !isLatest && !isSingle
+
+  // ── Decrypt ──────────────────────────────────────────────────────────────
   useEffect(() => {
     let mounted = true
-
     let envelope: MessageEnvelope
 
     try {
@@ -240,10 +299,7 @@ export const ThreadMail: React.FC<ThreadMailProps> = ({
     } catch {
       return
     }
-
-    if (!envelope) {
-      return
-    }
+    if (!envelope) return
 
     majik
       .decryptEnvelope(envelope, true)
@@ -260,23 +316,16 @@ export const ThreadMail: React.FC<ThreadMailProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mail.message])
 
+  // ── Handlers ─────────────────────────────────────────────────────────────
   const handleToggleExpand = (): void => {
-    if (canCollapse) {
-      setIsExpanded(!isExpanded)
-    }
+    if (canCollapse) setIsExpanded((prev) => !prev)
   }
-
-  //   const handleStarClick = (e: React.MouseEvent): void => {
-  //     e.stopPropagation()
-  //     setIsStarred(!isStarred)
-  //     onToggleStar?.(mail.id)
-  //   }
 
   const handleCopy = useCallback(() => {
     if (!mail.message?.trim()) {
       toast.error('Failed to copy to clipboard', {
         description: 'No text to copy.',
-        id: `toast-error-copy`
+        id: 'toast-error-copy'
       })
       return
     }
@@ -287,7 +336,6 @@ export const ThreadMail: React.FC<ThreadMailProps> = ({
         id: `toast-success-copy-${mail.message}`
       })
     } catch (e) {
-      // fallback: show in prompt
       toast.error('Failed to copy to clipboard', {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         description: (e as any)?.message || e,
@@ -297,12 +345,8 @@ export const ThreadMail: React.FC<ThreadMailProps> = ({
   }, [mail.message])
 
   const handleDownloadTxt = async (): Promise<void> => {
-    const blob = new Blob([mail.message], {
-      type: 'application/octet-stream'
-    })
-
+    const blob = new Blob([mail.message], { type: 'application/octet-stream' })
     const sender = await majik.getContactByPublicKey(mail.sender)
-
     downloadBlob(
       blob,
       'txt',
@@ -311,18 +355,10 @@ export const ThreadMail: React.FC<ThreadMailProps> = ({
   }
 
   const handleDownloadJson = async (): Promise<void> => {
-    const messageJSON = {
-      original: text,
-      encrypted: mail.message
-    }
-
-    const jsonString = JSON.stringify(messageJSON)
-
-    const blob = new Blob([jsonString], {
+    const blob = new Blob([JSON.stringify({ original: text, encrypted: mail.message })], {
       type: 'application/json;charset=utf-8'
     })
     const sender = await majik.getContactByPublicKey(mail.sender)
-
     downloadBlob(
       blob,
       'json',
@@ -330,10 +366,12 @@ export const ThreadMail: React.FC<ThreadMailProps> = ({
     )
   }
 
+  // ── Derived values ────────────────────────────────────────────────────────
   const senderKey = mail.sender
   const senderName = displayNames[senderKey] || senderKey
   const isOwn = mail.isSender(currentUserPublicKey)
   const hasUserRead = mail.hasUserRead(currentUserPublicKey)
+  const isUnread = !hasUserRead && !isOwn
 
   const recipientNames = mail.recipients.map((key) => displayNames[key] || key).join(', ')
 
@@ -345,125 +383,123 @@ export const ThreadMail: React.FC<ThreadMailProps> = ({
   const priority = mail.metadata?.priority
   const attachments = mail.metadata?.attachments || []
 
-  if (!isExpanded) {
-    return (
-      <RootContainer $isExpanded={false}>
-        <CollapsedHeader onClick={handleToggleExpand}>
-          <CollapseButton as="div" style={{ cursor: canCollapse ? 'pointer' : 'default' }}>
-            <CaretDownIcon size={16} />
-          </CollapseButton>
+  const avatarHue = getHue(senderName)
+  const initials = getInitials(senderName)
+  const shortKey = shortenKey(senderKey)
 
-          {/* <StarButton
-            $isStarred={isStarred}
-            onClick={handleStarClick}
-            aria-label={isStarred ? 'Unstar' : 'Star'}
-          >
-            <StarIcon size={16} weight={isStarred ? 'fill' : 'regular'} />
-          </StarButton> */}
+  const hasMetadata = subject || priority || attachments.length > 0
 
-          <SenderInfo>
-            <SenderName $isUnread={!hasUserRead && !isOwn} data-private>
-              {senderName}
-              {!hasUserRead && !isOwn && <UnreadBadge>New</UnreadBadge>}
-            </SenderName>
-            <MessagePreview data-private>{text}</MessagePreview>
-          </SenderInfo>
-
-          <Timestamp>{relativeTime}</Timestamp>
-        </CollapsedHeader>
-      </RootContainer>
-    )
-  }
-
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <RootContainer $isExpanded={true}>
-      <ExpandedHeader>
-        <HeaderLeft>
-          <CollapseButton
-            onClick={handleToggleExpand}
-            disabled={!canCollapse}
-            aria-label="Collapse message"
-          >
-            <CaretUpIcon size={16} />
-          </CollapseButton>
+    <Card $isUnread={isUnread}>
+      {/* ── Header (shared layout, caret rotates) ── */}
+      <HeaderRow $clickable={canCollapse} onClick={handleToggleExpand}>
+        <Caret $isExpanded={isExpanded} $disabled={!canCollapse}>
+          <CaretDownIcon size={14} />
+        </Caret>
 
-          {/* <StarButton
-            $isStarred={isStarred}
-            onClick={handleStarClick}
-            aria-label={isStarred ? 'Unstar' : 'Star'}
-          >
-            <StarIcon size={18} weight={isStarred ? 'fill' : 'regular'} />
-          </StarButton> */}
+        <Avatar $hue={avatarHue}>{initials}</Avatar>
 
-          <SenderDetails>
-            <SenderNameExpanded data-private>{senderName}</SenderNameExpanded>
-            <SenderEmail data-private>{senderKey}</SenderEmail>
-            {recipientNames && <Recipients data-private>to {recipientNames}</Recipients>}
-          </SenderDetails>
-        </HeaderLeft>
+        <HeaderBody>
+          <SenderRow>
+            <SenderName $bold={isUnread} data-private>
+              {senderName}
+            </SenderName>
+            {/* Show key chip only when expanded — collapsed already tight on space */}
+            {isExpanded && <KeyChip data-private>{shortKey}</KeyChip>}
+            {isUnread && !isExpanded && <ReadPill $isRead={false}>New</ReadPill>}
+          </SenderRow>
+
+          {isExpanded ? (
+            // Expanded: show recipients line
+            recipientNames && <RecipientsLine data-private>to {recipientNames}</RecipientsLine>
+          ) : (
+            // Collapsed: show message preview
+            <Preview data-private>{text}</Preview>
+          )}
+        </HeaderBody>
 
         <HeaderRight>
-          <Timestamp title={fullTime} data-private>
-            {relativeTime}
-          </Timestamp>
-          {!isOwn && (
-            <ReadStatus $isRead={hasUserRead}>{hasUserRead ? 'Read' : 'Unread'}</ReadStatus>
+          <Timestamp title={fullTime}>{relativeTime}</Timestamp>
+          {/* Read pill only when expanded — keeps collapsed rows minimal */}
+          {isExpanded && !isOwn && (
+            <ReadPill $isRead={hasUserRead}>{hasUserRead ? 'Read' : 'Unread'}</ReadPill>
           )}
         </HeaderRight>
-      </ExpandedHeader>
+      </HeaderRow>
 
-      {(subject || priority || attachments.length > 0) && (
-        <MetadataSection>
+      {/* ── Metadata band (subject / priority / attachments) ── */}
+      {isExpanded && hasMetadata && (
+        <MetaBand>
           {subject && (
-            <MetadataRow>
-              <MetadataLabel>Subject:</MetadataLabel>
-              <MetadataValue data-private>{subject}</MetadataValue>
-            </MetadataRow>
+            <MetaRow>
+              <MetaLabel>Subject</MetaLabel>
+              <MetaValue data-private>{subject}</MetaValue>
+            </MetaRow>
           )}
           {priority && (
-            <MetadataRow>
-              <MetadataLabel>Priority:</MetadataLabel>
-              <MetadataValue style={{ textTransform: 'capitalize' }}>{priority}</MetadataValue>
-            </MetadataRow>
+            <MetaRow>
+              <MetaLabel>Priority</MetaLabel>
+              <MetaValue style={{ textTransform: 'capitalize' }}>{priority}</MetaValue>
+            </MetaRow>
           )}
           {attachments.length > 0 && (
-            <MetadataRow>
-              <MetadataLabel>Attachments:</MetadataLabel>
-              <MetadataValue data-private>{attachments.join(', ')}</MetadataValue>
-            </MetadataRow>
+            <MetaRow>
+              <MetaLabel>Attachments</MetaLabel>
+              <MetaValue data-private>{attachments.join(', ')}</MetaValue>
+            </MetaRow>
           )}
-        </MetadataSection>
+        </MetaBand>
       )}
 
-      <MessageBody>{text}</MessageBody>
+      {/* ── Message body ── */}
+      {isExpanded && <Body>{text}</Body>}
 
-      <ActionBar>
-        <StyledIconButton
-          onClick={handleCopy}
-          aria-label="Copy"
-          icon={CopyIcon}
-          title="Copy encrypted message to Clipboard"
-          size={25}
-        />
-
-        <StyledIconButton
-          onClick={handleDownloadTxt}
-          aria-label="Copy"
-          icon={TextAaIcon}
-          title="Download encrypted message as .txt"
-          size={25}
-        />
-
-        <StyledIconButton
-          onClick={handleDownloadJson}
-          aria-label="Copy"
-          icon={BracketsCurlyIcon}
-          title="Download encrypted message as .json"
-          size={25}
-        />
-      </ActionBar>
-    </RootContainer>
+      {/* ── Action bar ── */}
+      {isExpanded && (
+        <ActionBar>
+          <StyledIconButton
+            onClick={handleCopy}
+            aria-label="Copy encrypted message"
+            icon={CopyIcon}
+            title="Copy encrypted message to clipboard"
+            size={22}
+          />
+          <StyledIconButton
+            onClick={handleDownloadTxt}
+            aria-label="Download as .txt"
+            icon={TextAaIcon}
+            title="Download encrypted message as .txt"
+            size={22}
+          />
+          <StyledIconButton
+            onClick={handleDownloadJson}
+            aria-label="Download as .json"
+            icon={BracketsCurlyIcon}
+            title="Download encrypted message as .json"
+            size={22}
+          />
+        </ActionBar>
+      )}
+    </Card>
   )
 }
 
 export default ThreadMail
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function getHue(str: string): number {
+  return [...str].reduce((acc, c) => acc + c.charCodeAt(0), 0) % 360
+}
+
+function getInitials(name: string): string {
+  const parts = name.trim().split(/\s+/)
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase()
+  return name.slice(0, 2).toUpperCase()
+}
+
+function shortenKey(key: string, chars = 4): string {
+  const s = String(key)
+  return `${s.slice(0, chars)}…${s.slice(-chars)}`
+}

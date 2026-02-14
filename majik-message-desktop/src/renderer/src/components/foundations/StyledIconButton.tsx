@@ -74,14 +74,14 @@ const StyledIconButton: React.FC<StyledIconButtonProps> = ({
       {...props}
       $darkMode={darkMode}
       $size={size}
-      data-tooltip-id={`rtip-button-${Icon.displayName}`}
+      data-tooltip-id={`rtip-button-${Icon.displayName}-${props?.id || 'default'}`}
       data-tooltip-content={`${tooltip ? tooltip : ''}`}
       title={props.title}
     >
       <Icon />
       {!!tooltip && tooltip.trim() !== '' ? (
         <Tooltip
-          id={`rtip-button-${Icon.displayName}`}
+          id={`rtip-button-${Icon.displayName}-${props?.id || 'default'}`}
           style={{
             fontSize: 12,
             fontWeight: 400,

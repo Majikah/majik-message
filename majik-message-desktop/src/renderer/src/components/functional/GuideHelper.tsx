@@ -18,9 +18,10 @@ const RootContainer = styled.div`
 type GuideHelperProps = {
   docsPath?: string
   startTour?: () => void
+  id?: string
 }
 
-const GuideHelper: React.FC<GuideHelperProps> = ({ docsPath, startTour }) => {
+const GuideHelper: React.FC<GuideHelperProps> = ({ docsPath, startTour, id }) => {
   const handleReadDocs = (): void => {
     if (!docsPath || docsPath.trim() === '') return
 
@@ -39,6 +40,7 @@ const GuideHelper: React.FC<GuideHelperProps> = ({ docsPath, startTour }) => {
           onClick={startTour}
           tooltip="Start Tutorial"
           disabled={!startTour}
+          id={id}
         />
       ) : null}
 
@@ -49,6 +51,7 @@ const GuideHelper: React.FC<GuideHelperProps> = ({ docsPath, startTour }) => {
           onClick={handleReadDocs}
           tooltip="Read Docs"
           disabled={!docsPath}
+          id={id}
         />
       ) : null}
     </RootContainer>

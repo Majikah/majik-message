@@ -292,6 +292,7 @@ const NewMailForm: React.FC<NewMailFormProps> = ({ majik, thread, onUpdate, onSe
             onSend={handleSend}
             onUpdate={handleEncryptMessage}
             disabled={!recipients || recipients.length <= 1}
+            sendOnEnter={false}
           />
           <PreviewActions>
             <ExportButton onClick={handleCopy}>Copy</ExportButton>

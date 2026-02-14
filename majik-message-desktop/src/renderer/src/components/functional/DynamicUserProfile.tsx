@@ -171,6 +171,13 @@ const CardTitle = styled.div`
   gap: 8px;
 `
 
+const TopHeaderRow = styled.div`
+  display: flex;
+  justify-content: space-between;
+  margin: 15px 0px;
+  width: 100%;
+`
+
 interface DynamicUserProfileProps {
   session: MajikahSession
   userData: MajikUser
@@ -509,15 +516,15 @@ export const DynamicUserProfile: React.FC<DynamicUserProfileProps> = ({
           </PopUpFormButton>
         </div>
       </Header>
-      <p className="text-right m-5!" data-private>
-        Logged in as <strong>{currentUserAccount.email}</strong>{' '}
-      </p>
+
+      <TopHeaderRow>
+        <MajikMessageIdentitySelector />
+        <p className="text-right m-5!" data-private>
+          Logged in as <strong>{currentUserAccount.email}</strong>{' '}
+        </p>
+      </TopHeaderRow>
 
       <Grid>
-        <Card>
-          <MajikMessageIdentitySelector />
-        </Card>
-
         <Card>
           <CardTitle>Display Name</CardTitle>
           <Value data-private>{originalUserAccount?.displayName || 'Not set'}</Value>
