@@ -2,7 +2,7 @@
   "name": "@majikah/majik-message",
   "type": "module",
   "description": "Encrypt and decrypt messages on any website or platform. Secure chats with keypairs and seed-based accounts. Open source.",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "license": "Apache-2.0",
   "author": "Zelijah",
   "main": "./dist/index.js",

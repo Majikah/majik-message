@@ -9,6 +9,7 @@ import type { MajikMessageDatabase } from './majik-context-wrapper/majik-message
 import type { MajikContact, MajikMessagePublicKey } from '@majikah/majik-message'
 import { MajikContactListSelector } from './MajikContactListSelector'
 import { ChatInputBox } from './functional/ChatInputBox'
+import type { MajikahSession } from './majikah-session-wrapper/majikah-session'
 
 /* ---------------------------------------------
  * Styled Components
@@ -44,9 +45,11 @@ const PreviewActions = styled.div`
 
 const ExportButton = styled(ButtonPrimaryConfirm)`
   padding: 6px 20px;
+  width: 100%;
 `
 
 interface NewMessageFormProps {
+  majikah: MajikahSession
   majik: MajikMessageDatabase
   onUpdate?: (message: string) => void
   onSend?: (message: string) => void
@@ -55,7 +58,7 @@ interface NewMessageFormProps {
 /* ---------------------------------------------
  * Component
  * ------------------------------------------- */
-const NewMessageForm: React.FC<NewMessageFormProps> = ({ majik, onUpdate, onSend }) => {
+const NewMessageForm: React.FC<NewMessageFormProps> = ({ majikah, majik, onUpdate, onSend }) => {
   const [input, setInput] = useState('')
   const [output, setOutput] = useState('')
 
@@ -242,6 +245,7 @@ const NewMessageForm: React.FC<NewMessageFormProps> = ({ majik, onUpdate, onSend
       <Body>
         <Section>
           <ChatInputBox
+            majikah={majikah}
             onSend={handleSend}
             onUpdate={handleEncryptMessage}
             disabled={!recipients || recipients.length <= 1}

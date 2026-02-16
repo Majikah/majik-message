@@ -6,6 +6,7 @@ export {}
 export interface ElectronAPI {
   importAccount: () => Promise<{ base64Content: string; fileName: string } | null>
   importContact: () => Promise<{ base64Content: string; fileName: string } | null>
+  onToggleDarkMode: (callback: () => void) => () => void
   onImportAccountTriggered: (callback: () => void) => () => void
   onImportContactTriggered: (callback: () => void) => () => void
   onClearTriggered: (callback: () => void) => () => void
@@ -32,6 +33,10 @@ declare global {
     }
 
     electron: ElectronAPI
+
+    // Cloudflare
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    turnstile: any
   }
 }
 

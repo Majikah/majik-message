@@ -6,6 +6,7 @@ import type { MajikMessagePublicKey } from '@majikah/majik-message'
 import { useMajikMessageRealtime } from '../majikah-session-wrapper/messages/use-majik-message-realtime'
 import { isDevEnvironment } from '@renderer/utils/utils'
 import type { MajikMessageDatabase } from '../majik-context-wrapper/majik-message-database'
+import type { MajikahSession } from '../majikah-session-wrapper/majikah-session'
 
 /* ======================================================
  * Styled Components
@@ -26,6 +27,7 @@ const InputWrapper = styled.div`
  * ====================================================== */
 
 interface RealtimeChatInputProps {
+  majikah: MajikahSession
   majik: MajikMessageDatabase
   onUpdate?: (text: string) => void
   maxHeight?: number
@@ -35,6 +37,7 @@ interface RealtimeChatInputProps {
 }
 
 export const RealtimeChatInput: React.FC<RealtimeChatInputProps> = ({
+  majikah,
   majik,
   onUpdate,
   maxHeight = 200,
@@ -42,7 +45,7 @@ export const RealtimeChatInput: React.FC<RealtimeChatInputProps> = ({
   conversationID
 }) => {
   const client = useMajikMessageRealtime()
-  const [value, setValue] = useState('')
+  const [, setValue] = useState('')
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const isTypingRef = useRef(false)
@@ -71,7 +74,7 @@ export const RealtimeChatInput: React.FC<RealtimeChatInputProps> = ({
     return `Message sent!`
   }
 
-  const handleSend = async (): Promise<void> => {
+  const handleSend = async (finalText: string): Promise<void> => {
     const activeAccount = majik.getActiveAccount()
     if (!activeAccount) return
 
@@ -82,7 +85,7 @@ export const RealtimeChatInput: React.FC<RealtimeChatInputProps> = ({
       return
     }
 
-    toast.promise(processSend(currentUserPublicKey, value), {
+    toast.promise(processSend(currentUserPublicKey, finalText), {
       loading: `Sending message...`,
       success: (outputMessage) => {
         setTimeout(() => {
@@ -144,6 +147,7 @@ export const RealtimeChatInput: React.FC<RealtimeChatInputProps> = ({
   return (
     <InputWrapper>
       <ChatInputBox
+        majikah={majikah}
         onSend={handleSend}
         onUpdate={handleChange}
         disabled={!participants || participants.length <= 0}

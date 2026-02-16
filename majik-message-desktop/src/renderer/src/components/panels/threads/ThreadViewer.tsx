@@ -718,7 +718,7 @@ export const ThreadViewer: React.FC<ThreadViewerProps> = ({
               confirm: { text: 'Create', hide: true }
             }}
           >
-            <NewMailForm majik={majik} onSend={refreshMails} thread={thread} />
+            <NewMailForm majikah={majikah} majik={majik} onSend={refreshMails} thread={thread} />
           </PopUpFormButton>
 
           {/* Rename thread */}

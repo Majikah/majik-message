@@ -1,5 +1,13 @@
 import { MajikMessageChat, type MajikMessagePublicKey } from '@majikah/majik-message'
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
+import {
+  forwardRef,
+  memo,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState
+} from 'react'
 import styled from 'styled-components'
 import type { MajikMessageDatabase } from '../majik-context-wrapper/majik-message-database'
 import { toast } from 'sonner'
@@ -11,14 +19,39 @@ import type { ChatMessagePayload } from '../majikah-session-wrapper/messages/maj
 import { useTypingIndicators } from './TypingIndicator/useTypingIndicator'
 import { TypingIndicator } from './TypingIndicator/TypingIndicator'
 
-/* ======================================================
- * Root Container
- * ====================================================== */
+// ─── Local tokens ─────────────────────────────────────────────────────────────
+const FONT_MONO = "'Fira Mono', 'JetBrains Mono', monospace"
+
+// ─── useNow — OUTSIDE the component ──────────────────────────────────────────
+/**
+ * CRITICAL: This hook must live outside ConversationMessages.
+ *
+ * When defined inside the component, every setNow() tick triggers a full
+ * re-render of ConversationMessages, which rebuilds the fetchedMessages.map()
+ * and passes new JSX / prop objects to every CBaseChatBubble. Even with stable
+ * `key` props, the `message` prop object reference changes, which caused the
+ * isMounted ref to reset mid-flight in the decrypt effect.
+ *
+ * Defined outside, useNow() re-renders only the component that calls it.
+ * CBaseChatBubble receives `now` as a prop, but since it's a primitive number
+ * and the bubble is memoized (see MemoizedBubble below), it only re-renders
+ * when `now` actually matters for expiry display — not every tick.
+ */
+function useNow(interval = 1000): number {
+  // eslint-disable-next-line react-hooks/purity
+  const [now, setNow] = useState(Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), interval)
+    return () => clearInterval(id)
+  }, [interval])
+  return now
+}
+
+// ─── Styled components ────────────────────────────────────────────────────────
 
 const Root = styled.div`
   width: 100%;
   height: 100%;
-  max-height: 80dvh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -27,51 +60,87 @@ const Root = styled.div`
 
 const ScrollArea = styled.div`
   flex: 1 1 auto;
-  min-height: 0; /* ensures flex container can shrink */
+  min-height: 0;
   overflow-y: auto;
-  padding: 16px 20px;
+  padding: 14px 18px 8px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 16px;
+
+  scrollbar-width: thin;
+  scrollbar-color: ${({ theme }) => `${theme.colors.secondaryBackground} transparent`};
 
   &::-webkit-scrollbar {
-    width: 5px;
+    width: 3px;
   }
   &::-webkit-scrollbar-track {
-    background: ${({ theme }) => theme.colors.secondaryBackground};
-    border-radius: 8px;
+    background: transparent;
   }
   &::-webkit-scrollbar-thumb {
-    background: ${({ theme }) => theme.gradients.primary};
-    border-radius: 8px;
+    background: ${({ theme }) => theme.colors.secondaryBackground};
+    border-radius: 4px;
   }
 `
 
-/* ======================================================
- * Types
- * ====================================================== */
+// ─── Date separator ───────────────────────────────────────────────────────────
+/**
+ * Mono label between day groups — gives the message stream a clear
+ * temporal structure without heavy visual weight.
+ */
+const DateSeparator = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0 6px;
+`
+
+const SepLine = styled.div`
+  flex: 1;
+  height: 1px;
+  background: ${({ theme }) => theme.colors.secondaryBackground};
+`
+
+const SepLabel = styled.span`
+  font-family: ${FONT_MONO};
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  opacity: 0.45;
+  white-space: nowrap;
+`
+
+// ─── Memoized bubble wrapper ──────────────────────────────────────────────────
+const MemoizedBubble = memo(CBaseChatBubble, (prev, next) => {
+  if (prev.message.getID() !== next.message.getID()) return false
+  if (prev.isOwn !== next.isOwn) return false
+  if (prev.majik !== next.majik) return false
+  if (prev.canDelete !== next.canDelete) return false
+  // Only re-render for now changes if message has an expiry
+  if (prev.message.getExpiresAt() && prev.now !== next.now) return false
+  return true
+})
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface ConversationMessagesProps {
   majik: MajikMessageDatabase
   conversationID: string
 }
 
-/* ======================================================
- * Main Conversation Component
- * ====================================================== */
+// ─── Component ────────────────────────────────────────────────────────────────
 
 export const ConversationMessages = forwardRef<
-  { insertMessage: (message: MajikMessageChat) => Promise<void> }, // methods exposed to parent
+  { insertMessage: (message: MajikMessageChat) => Promise<void> },
   ConversationMessagesProps
 >(({ majik, conversationID }, ref) => {
   const client = useMajikMessageRealtime()
+  const now = useNow(1000)
 
   const bottomRef = useRef<HTMLDivElement | null>(null)
-
   const [fetchedMessages, setFetchedMessages] = useState<MajikMessageChat[]>([])
-
   const [senderKey, setSenderKey] = useState<MajikMessagePublicKey | undefined>(undefined)
-
   const [loading, setIsLoading] = useState(false)
 
   const { typingUsers, isAnyoneTyping } = useTypingIndicators(client, senderKey)
@@ -79,9 +148,9 @@ export const ConversationMessages = forwardRef<
   const observerRef = useRef<IntersectionObserver | null>(null)
   const messageRefsMap = useRef<Map<string, HTMLDivElement>>(new Map())
   const markedAsReadRef = useRef<Set<string>>(new Set())
-
   const displayNamesRef = useRef<Record<string, string>>({})
 
+  // ── Load messages ──────────────────────────────────────────────────────────
   const loadInitialMessages = useCallback(async () => {
     try {
       setIsLoading(true)
@@ -90,7 +159,6 @@ export const ConversationMessages = forwardRef<
 
       if (!messages.length) {
         setFetchedMessages([])
-
         return
       }
 
@@ -100,42 +168,35 @@ export const ConversationMessages = forwardRef<
 
       setFetchedMessages(parsedMessages)
 
-      // setAllowNextPage(messages.length > 0)
-
-      // Scroll after setting messages
       requestAnimationFrame(() => {
         bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
       })
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (error: any) {
       if (error?.name !== 'AbortError') {
-        toast.error('Failed to refresh messages', { description: error?.message })
+        toast.error('Failed to refresh messages', {
+          description: error?.message
+        })
       }
     } finally {
       setIsLoading(false)
     }
   }, [conversationID, majik])
 
+  // ── Resolve sender key ─────────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false
-
     const resolveSenderPublicKey = async (): Promise<void> => {
       try {
         const activeAccount = majik.getActiveAccount()
-
         if (!activeAccount) return
         const activeKey = await activeAccount.getPublicKeyBase64()
-
-        if (!cancelled) {
-          setSenderKey(activeKey)
-        }
+        if (!cancelled) setSenderKey(activeKey)
       } catch (err) {
         console.error('Failed to resolve sender public key', err)
       }
     }
-
     resolveSenderPublicKey()
-
     return () => {
       cancelled = true
     }
@@ -146,6 +207,7 @@ export const ConversationMessages = forwardRef<
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // ── Resolve display names ──────────────────────────────────────────────────
   useEffect(() => {
     const fetchNames = async (): Promise<void> => {
       const names: Record<string, string> = {}
@@ -162,6 +224,7 @@ export const ConversationMessages = forwardRef<
     fetchNames()
   }, [conversationID, majik, fetchedMessages])
 
+  // ── Realtime event handlers ────────────────────────────────────────────────
   useEffect(() => {
     if (!client) return
 
@@ -265,80 +328,53 @@ export const ConversationMessages = forwardRef<
         `${errorMessage}: One or more participants in this conversation are no longer registered, so your message couldn’t be delivered.`
       )
     })
-
-    // // Listen for participant list updates
-    // client.on('participants', (participants) => {
-    //   console.log('Current participants:', participants)
-    //   // Update your participant list UI
-    // })
-
     return () => {
       client.off('message', handleIncomingMessage)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client])
 
+  // ── Scroll to bottom on new messages ──────────────────────────────────────
   useEffect(() => {
     if (!bottomRef.current) return
-    // wait one tick for DOM to render
     const id = requestAnimationFrame(() => {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
     })
     return () => cancelAnimationFrame(id)
   }, [fetchedMessages.length])
 
-  // Setup Intersection Observer
+  // ── Intersection observer (mark as read) ──────────────────────────────────
   useEffect(() => {
     if (!client || !senderKey) return
 
     observerRef.current = new IntersectionObserver(
       (entries) => {
         entries.forEach((entry) => {
-          if (entry.isIntersecting && entry.intersectionRatio >= 0.5) {
-            // 50% visible
-            const messageId = entry.target.getAttribute('data-message-id')
-            if (!messageId) return
+          if (!entry.isIntersecting || entry.intersectionRatio < 0.5) return
 
-            // Only mark once per message
-            if (markedAsReadRef.current.has(messageId)) return
+          const messageId = entry.target.getAttribute('data-message-id')
+          if (!messageId) return
+          if (markedAsReadRef.current.has(messageId)) return
 
-            const message = fetchedMessages.find((m) => m.getID() === messageId)
-            if (!message) return
+          const message = fetchedMessages.find((m) => m.getID() === messageId)
+          if (!message) return
+          if (message.isSender(senderKey)) return
+          if (message.isReadByAll()) return
+          if (message.hasUserRead(senderKey)) return
+          if (!document.hasFocus()) return
 
-            // Don't mark own messages as read
-            if (message.isSender(senderKey)) return
-
-            if (message.isReadByAll()) return
-
-            if (message.hasUserRead(senderKey)) return
-
-            // Check if tab is focused (optional but recommended)
-            if (!document.hasFocus()) return
-
-            // Optional: Add delay to ensure user actually saw it
-            setTimeout(() => {
-              if (entry.isIntersecting) {
-                // Still visible after delay
-                client.markRead(messageId)
-
-                markedAsReadRef.current.add(messageId)
-
-                if (isDevEnvironment()) {
-                  console.log('Marked as read:', messageId)
-                }
-              }
-            }, 1500) // 1.5 second delay
-          }
+          setTimeout(() => {
+            if (entry.isIntersecting) {
+              client.markRead(messageId)
+              markedAsReadRef.current.add(messageId)
+              if (isDevEnvironment()) console.log('Marked as read:', messageId)
+            }
+          }, 1500)
         })
       },
-      {
-        root: null, // viewport
-        threshold: 0.5, // 50% of message must be visible
-        rootMargin: '0px'
-      }
+      { root: null, threshold: 0.5, rootMargin: '0px' }
     )
 
-    // Observe all current messages
     messageRefsMap.current.forEach((element) => {
       if (element) observerRef.current?.observe(element)
     })
@@ -348,7 +384,12 @@ export const ConversationMessages = forwardRef<
     }
   }, [client, senderKey, fetchedMessages])
 
-  // Callback ref for messages
+  useEffect(() => {
+    console.log('ConversationMessages mounted')
+    return () => console.log('ConversationMessages unmounted')
+  }, [])
+
+  // ── Callback ref for message elements ─────────────────────────────────────
   const setMessageRef = useCallback((messageId: string) => {
     return (element: HTMLDivElement | null) => {
       if (element) {
@@ -364,47 +405,33 @@ export const ConversationMessages = forwardRef<
     }
   }, [])
 
+  // ── Delete ─────────────────────────────────────────────────────────────────
   const processDelete = async (
     senderPublicKey: MajikMessagePublicKey,
     message: MajikMessageChat
   ): Promise<string> => {
-    if (isDevEnvironment()) console.log('Deleting message from: ', message.getID())
-
-    if (!senderPublicKey?.trim()) {
-      throw new Error('A valid sender public key is required.')
-    }
-
-    if (!message) {
-      throw new Error('A valid message is required.')
-    }
-
-    if (!message.isSender(senderPublicKey)) {
+    if (!senderPublicKey?.trim()) throw new Error('A valid sender public key is required.')
+    if (!message) throw new Error('A valid message is required.')
+    if (!message.isSender(senderPublicKey))
       throw new Error('You are not allowed to delete this message.')
-    }
 
     setIsLoading(true)
-
     client.deleteMessage(message.getID(), message.getRedisKey())
-
-    return `Message deleted successfully!`
+    return 'Message deleted successfully!'
   }
 
   const handleDelete = async (message: MajikMessageChat): Promise<void> => {
     const activeAccount = majik.getActiveAccount()
-    if (!activeAccount) return
-
+    if (!activeAccount || !message) return
     const currentUserPublicKey = await activeAccount.getPublicKeyBase64()
 
-    if (!message) return
-
     toast.promise(processDelete(currentUserPublicKey, message), {
-      loading: `Deleting message...`,
+      loading: 'Deleting message...',
       success: (outputMessage) => {
         setTimeout(() => {
           setFetchedMessages((prev) => prev.filter((m) => m.getID() !== message.getID()))
           setIsLoading(false)
         }, 1000)
-
         return outputMessage
       },
       error: (error) => {
@@ -414,77 +441,90 @@ export const ConversationMessages = forwardRef<
     })
   }
 
+  // ── Insert message (exposed via ref) ──────────────────────────────────────
   const insertMessage = useCallback(async (message: MajikMessageChat): Promise<void> => {
     if (!message) return
-
     setFetchedMessages((prev) => {
-      // Prevent duplicates
-      if (prev.some((m) => m.getID() === message.getID())) {
-        return prev
-      }
-
+      if (prev.some((m) => m.getID() === message.getID())) return prev
       const newMessages = [...prev, message].sort(
         (a, b) => new Date(a.getTimestamp()).getTime() - new Date(b.getTimestamp()).getTime()
       )
-
-      // Scroll to bottom after DOM updates
       requestAnimationFrame(() => {
         bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
       })
-
       return newMessages
     })
   }, [])
 
-  // Expose refreshMessages to parent via ref
-  useImperativeHandle(ref, () => ({
-    insertMessage
-  }))
+  useImperativeHandle(ref, () => ({ insertMessage }))
 
-  function useNow(interval = 1000): number {
-    const [now, setNow] = useState(Date.now())
+  // ── Date separator helper ──────────────────────────────────────────────────
+  const getDateLabel = (ts: string): string => {
+    const d = new Date(ts)
+    const today = new Date()
+    const yesterday = new Date(today)
+    yesterday.setDate(today.getDate() - 1)
 
-    useEffect(() => {
-      const id = setInterval(() => setNow(Date.now()), interval)
-      return () => clearInterval(id)
-    }, [interval])
-
-    return now
+    if (d.toDateString() === today.toDateString()) return 'Today'
+    if (d.toDateString() === yesterday.toDateString()) return 'Yesterday'
+    return d.toLocaleDateString('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric'
+    })
   }
 
-  const now = useNow(1000)
-
-  if (!senderKey || loading) {
-    return (
-      <>
-        <DynamicPlaceholder loading>Loading...</DynamicPlaceholder>
-      </>
-    )
-  }
-
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <Root>
       <ScrollArea>
-        {fetchedMessages.map((msg) => {
-          const isOwn = msg.isSender(senderKey)
+        {/* 1. Only show the full-screen loader if we have NO messages at all */}
+        {loading && fetchedMessages.length === 0 ? (
+          <DynamicPlaceholder loading>Loading messages…</DynamicPlaceholder>
+        ) : (
+          <>
+            {/* 2. Optional: A small, non-intrusive loader at the top if you are refreshing */}
+            {loading && fetchedMessages.length > 0 && (
+              <div style={{ opacity: 0.5, fontSize: '10px', textAlign: 'center' }}>Updating...</div>
+            )}
 
-          return (
-            <div key={msg.getID()} ref={setMessageRef(msg.getID())} data-message-id={msg.getID()}>
-              <CBaseChatBubble
-                key={msg.getID()}
-                message={msg}
-                isOwn={isOwn}
-                majik={majik}
-                now={now}
-                canDelete={isOwn}
-                onDelete={handleDelete}
-              />
-            </div>
-          )
-        })}
+            {fetchedMessages.map((msg, index) => {
+              const isOwn = msg.isSender(senderKey!) // Added ! because we check length above
+              const prevMsg = index > 0 ? fetchedMessages[index - 1] : null
+              const showSeparator =
+                !prevMsg ||
+                getDateLabel(msg.getTimestamp()) !== getDateLabel(prevMsg.getTimestamp())
+
+              return (
+                <div
+                  key={msg.getID()}
+                  ref={setMessageRef(msg.getID())}
+                  data-message-id={msg.getID()}
+                >
+                  {showSeparator && (
+                    <DateSeparator>
+                      <SepLine />
+                      <SepLabel>{getDateLabel(msg.getTimestamp())}</SepLabel>
+                      <SepLine />
+                    </DateSeparator>
+                  )}
+                  <MemoizedBubble
+                    message={msg}
+                    isOwn={isOwn}
+                    majik={majik}
+                    now={now}
+                    canDelete={isOwn}
+                    onDelete={handleDelete}
+                  />
+                </div>
+              )
+            })}
+          </>
+        )}
         {isAnyoneTyping && (
           <TypingIndicator typingPublicKeys={typingUsers.map((u) => u.publicKey)} majik={majik} />
         )}
+
         <div ref={bottomRef} />
       </ScrollArea>
     </Root>

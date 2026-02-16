@@ -11,7 +11,7 @@
 
 [Read more about Majik Message here](https://majikah.solutions/products/majik-message)
 
-[![Majik Message Thumbnail](https://storage.majikah.solutions/public/Majikah_MajikMessage_SocialCard.webp)](https://message.majikah.solutions)
+[![Majik Message Thumbnail](https://github.com/user-attachments/assets/d433c6b8-1841-4fa1-a6da-b348029d1dbe)](https://message.majikah.solutions)
 
 > Click the image to try Majik Message live.
 

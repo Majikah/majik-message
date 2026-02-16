@@ -1,139 +1,178 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import styled from 'styled-components'
 
 import { MessageEnvelope, type MajikMessagePublicKey } from '@majikah/majik-message'
 import type { ConversationSummary } from '../majikah-session-wrapper/api-types'
 import type { MajikMessageDatabase } from '../majik-context-wrapper/majik-message-database'
 import moment from 'moment'
+// ─── Local tokens ─────────────────────────────────────────────────────────────
+const FONT_MONO = "'Fira Mono', 'JetBrains Mono', monospace"
 
-/* --------------------------------
- * Styled Components
- * -------------------------------- */
-
-const Card = styled.div<{
-  $active: boolean
-  $unread: boolean
-}>`
+// ─── Card ─────────────────────────────────────────────────────────────────────
+const Card = styled.div<{ $active: boolean; $unread: boolean }>`
+  position: relative;
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  align-items: center;
+  gap: 10px;
   width: 100%;
-
-  padding: 12px 14px;
-  border-radius: 12px;
-
+  padding: 10px 12px 10px 16px;
+  border-radius: 10px;
   cursor: pointer;
+  border: 1px solid transparent;
   transition:
-    background 0.15s ease,
-    box-shadow 0.15s ease;
+    background 120ms ease,
+    border-color 120ms ease;
 
   background: ${({ $active, theme }) =>
-    $active ? theme.colors.semitransparent : 'rgba(255,255,255,0.04)'};
-
-  box-shadow: ${({ $unread, theme }) =>
-    $unread ? `0 0 0 1px ${theme.colors.secondaryBackground}` : 'none'};
+    $active ? theme.colors.secondaryBackground : 'transparent'};
 
   &:hover {
-    background: rgba(255, 255, 255, 0.1);
+    background: ${({ theme }) => theme.colors.secondaryBackground};
+  }
+
+  /* Unread left accent strip — same system as ThreadRow */
+  &::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 10px;
+    bottom: 10px;
+    width: 3px;
+    border-radius: 0 2px 2px 0;
+    background: ${({ $unread, theme }) => ($unread ? theme.colors.primary : 'transparent')};
+    transition: background 150ms ease;
   }
 `
 
-const Header = styled.div`
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
+// ─── Avatar stack ─────────────────────────────────────────────────────────────
+const AvatarStack = styled.div`
+  position: relative;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
 `
 
-const Participants = styled.div`
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-`
-
-const Participant = styled.span`
-  font-size: 12px;
-  opacity: 0.85;
-  padding: 2px 6px;
-  border-radius: 6px;
-  background: ${({ theme }) => theme.colors.secondaryBackground};
-  color: ${({ theme }) => theme.colors.textSecondary};
-`
-
-const Timestamp = styled.span`
-  font-size: 11px;
-  opacity: 0.6;
-  white-space: nowrap;
-`
-
-const MessagePreview = styled.div<{ $unread: boolean }>`
-  font-size: 14px;
-  line-height: 1.4;
-  opacity: ${({ $unread }) => ($unread ? 1 : 0.75)};
-  font-weight: ${({ $unread }) => ($unread ? 600 : 400)};
-
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-`
-
-const Footer = styled.div`
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-`
-
-const Meta = styled.div`
+const Avatar = styled.div<{ $hue: number; $size: number }>`
+  width: ${({ $size }) => $size}px;
+  height: ${({ $size }) => $size}px;
+  border-radius: 50%;
+  background: hsl(${({ $hue }) => $hue}, 38%, 26%);
+  border: 1.5px solid ${({ theme }) => theme.colors.primaryBackground};
   display: flex;
   align-items: center;
+  justify-content: center;
+  font-family: ${FONT_MONO};
+  font-size: ${({ $size }) => Math.round($size * 0.34)}px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.75);
+  user-select: none;
+  flex-shrink: 0;
+`
+
+const AvatarSingle = styled(Avatar)`
+  position: static;
+`
+
+const AvatarA1 = styled(Avatar)`
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 2;
+`
+
+const AvatarA2 = styled(Avatar)`
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  z-index: 1;
+`
+
+// ─── Body ─────────────────────────────────────────────────────────────────────
+const Body = styled.div`
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+`
+
+const TopRow = styled.div`
+  display: flex;
+  align-items: baseline;
   gap: 8px;
 `
 
-const Count = styled.span`
-  font-size: 11px;
+const Name = styled.span<{ $bold: boolean }>`
+  font-size: 13px;
+  font-weight: ${({ $bold }) => ($bold ? 700 : 500)};
+  color: ${({ theme }) => theme.colors.textPrimary};
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+`
+
+const Time = styled.span<{ $bold: boolean }>`
+  font-family: ${FONT_MONO};
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-weight: ${({ $bold }) => ($bold ? 600 : 400)};
+  color: ${({ $bold, theme }) => ($bold ? theme.colors.textPrimary : theme.colors.textSecondary)};
+`
+
+const Preview = styled.div<{ $unread: boolean }>`
+  font-size: 12px;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: ${({ $unread }) => ($unread ? 600 : 400)};
+  opacity: ${({ $unread }) => ($unread ? 0.9 : 0.55)};
+`
+
+const PreviewSkeleton = styled.div`
+  height: 11px;
+  width: 55%;
+  border-radius: 4px;
+  background: ${({ theme }) => theme.colors.secondaryBackground};
   opacity: 0.6;
 `
 
+// ─── Footer ───────────────────────────────────────────────────────────────────
+const FooterRow = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+`
+
+const MsgCount = styled.span`
+  font-family: ${FONT_MONO};
+  font-size: 9px;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  letter-spacing: 0.06em;
+  opacity: 0.4;
+`
+
 const UnreadBadge = styled.span`
-  min-width: 20px;
-  height: 20px;
-  padding: 0 6px;
-
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-
-  font-size: 11px;
-  font-weight: 600;
-
-  border-radius: 10px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 100px;
   background: ${({ theme }) => theme.colors.primary};
-  color: ${({ theme }) => theme.colors.primaryBackground};
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
 `
 
-const ReadIndicator = styled.div<{ $unread: boolean }>`
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-
-  background: ${({ $unread, theme }) => ($unread ? theme.colors.primary : 'transparent')};
-`
-
-const TextPlaceholder = styled.div`
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  width: 100%;
-  padding: 10px 25px;
-  border-radius: 12px;
-  background: ${({ theme }) => theme.colors.secondaryBackground};
-`
-
-/* --------------------------------
- * Props
- * -------------------------------- */
-
+// ─── Props ────────────────────────────────────────────────────────────────────
 interface CBaseConversationProps {
   majik: MajikMessageDatabase
   conversation: ConversationSummary
@@ -141,10 +180,7 @@ interface CBaseConversationProps {
   onClick?: (conversation: ConversationSummary) => void
 }
 
-/* --------------------------------
- * Component
- * -------------------------------- */
-
+// ─── Component ────────────────────────────────────────────────────────────────
 export const CBaseConversation: React.FC<CBaseConversationProps> = ({
   majik,
   conversation,
@@ -161,123 +197,170 @@ export const CBaseConversation: React.FC<CBaseConversationProps> = ({
     has_unread
   } = conversation
 
-  const [decryptedMessage, setDecryptedMessage] = React.useState<string | null>(null)
-  const [loading, setLoading] = React.useState<boolean>(true)
-  const [participantLabels, setParticipantLabels] = React.useState<string[]>([])
+  const [decryptedMessage, setDecryptedMessage] = useState<string | null>(null)
+  const [decryptLoading, setDecryptLoading] = useState<boolean>(true)
+  const [participantLabels, setParticipantLabels] = useState<string[]>([])
 
+  // Ref-based mount guard — survives re-renders without cancelling in-flight promises
+  const isMounted = useRef(true)
   useEffect(() => {
-    let cancelled = false
-
-    const decrypt = async (): Promise<void> => {
-      try {
-        if (!latest_message?.message) {
-          setDecryptedMessage('')
-          return
-        }
-
-        const envelope = MessageEnvelope.fromMatchedString(latest_message.message)
-
-        if (!envelope) {
-          setDecryptedMessage(null)
-          return
-        }
-
-        const plaintext = await majik.decryptEnvelope(envelope, true)
-
-        if (!cancelled) {
-          setDecryptedMessage(plaintext ?? '')
-        }
-      } catch (err) {
-        console.error('Decryption failed', err)
-        if (!cancelled) {
-          setDecryptedMessage(null)
-        }
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    decrypt()
-
+    isMounted.current = true
     return () => {
-      cancelled = true
+      isMounted.current = false
     }
+  }, [])
+
+  // ── Decrypt preview ────────────────────────────────────────────────────────
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setDecryptLoading(true)
+    setDecryptedMessage(null)
+
+    if (!latest_message?.message) {
+      setDecryptedMessage('')
+      setDecryptLoading(false)
+      return
+    }
+
+    let envelope: ReturnType<typeof MessageEnvelope.fromMatchedString>
+    try {
+      envelope = MessageEnvelope.fromMatchedString(latest_message.message)
+    } catch {
+      setDecryptedMessage(null)
+      setDecryptLoading(false)
+      return
+    }
+
+    if (!envelope) {
+      setDecryptedMessage(null)
+      setDecryptLoading(false)
+      return
+    }
+
+    majik
+      .decryptEnvelope(envelope, true)
+      .then((plaintext) => {
+        if (isMounted.current) {
+          setDecryptedMessage(plaintext ?? '')
+          setDecryptLoading(false)
+        }
+      })
+      .catch(() => {
+        if (isMounted.current) {
+          setDecryptedMessage(null)
+          setDecryptLoading(false)
+        }
+      })
   }, [majik, conversation_id, latest_message?.message])
 
+  // ── Resolve participant labels ─────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false
-
     const resolveParticipants = async (): Promise<void> => {
       try {
         const labels = await Promise.all(
-          participants.map(async (pk) => {
+          participants.map(async (pk: string) => {
             try {
               const contact = await majik.getContactByPublicKey(pk)
-              return contact?.meta.label?.trim() ? contact.meta.label : shortenPublicKey(pk)
+              return contact?.meta.label?.trim() ? contact.meta.label : shortenKey(pk)
             } catch {
-              return shortenPublicKey(pk)
+              return shortenKey(pk)
             }
           })
         )
-
-        if (!cancelled) {
-          setParticipantLabels(labels)
-        }
+        if (!cancelled) setParticipantLabels(labels)
       } catch (err) {
         console.error('Failed to resolve participant labels', err)
       }
     }
-
     resolveParticipants()
-
     return () => {
       cancelled = true
     }
   }, [majik, participants])
 
+  // ── Avatar rendering ───────────────────────────────────────────────────────
+  const renderAvatars = (): React.ReactNode => {
+    if (participantLabels.length === 0) {
+      return (
+        <AvatarSingle $hue={0} $size={32}>
+          ?
+        </AvatarSingle>
+      )
+    }
+    if (participantLabels.length === 1) {
+      const n = participantLabels[0]
+      return (
+        <AvatarSingle $hue={getHue(n)} $size={32}>
+          {getInitials(n)}
+        </AvatarSingle>
+      )
+    }
+    const n1 = participantLabels[0]
+    const n2 = participantLabels[1]
+    return (
+      <AvatarStack>
+        <AvatarA1 $hue={getHue(n1)} $size={24}>
+          {getInitials(n1)}
+        </AvatarA1>
+        <AvatarA2 $hue={getHue(n2)} $size={20}>
+          {getInitials(n2)}
+        </AvatarA2>
+      </AvatarStack>
+    )
+  }
+
+  const displayName =
+    participantLabels.length > 0
+      ? participantLabels.join(', ')
+      : participants.map((p) => shortenKey(p)).join(', ')
+
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <Card $active={isActive} $unread={has_unread} onClick={() => onClick?.(conversation)}>
-      <Header>
-        <Participants>
-          {participantLabels.map((label, idx) => (
-            <Participant key={idx} data-private>
-              {label}
-            </Participant>
-          ))}
-        </Participants>
+      {renderAvatars()}
 
-        <Timestamp>{formatTimestamp(latest_message_timestamp)}</Timestamp>
-      </Header>
-      {decryptedMessage?.trim() ? (
-        <MessagePreview $unread={has_unread} data-private>
-          {decryptedMessage ?? 'No messages yet'}
-        </MessagePreview>
-      ) : (
-        <TextPlaceholder>{loading ? 'Loading...' : 'Invalid Message'}</TextPlaceholder>
-      )}
+      <Body>
+        <TopRow>
+          <Name $bold={has_unread} data-private>
+            {displayName}
+          </Name>
+          <Time $bold={has_unread}>{formatTimestamp(latest_message_timestamp)}</Time>
+        </TopRow>
 
-      <Footer>
-        <Meta>
-          <Count>{total_messages} msgs</Count>
-          {has_unread && <UnreadBadge>{unread_count}</UnreadBadge>}
-        </Meta>
+        {decryptLoading ? (
+          <PreviewSkeleton />
+        ) : (
+          <Preview $unread={has_unread} data-private>
+            {decryptedMessage?.trim() || 'No messages yet'}
+          </Preview>
+        )}
 
-        <ReadIndicator $unread={has_unread} />
-      </Footer>
+        <FooterRow>
+          <MsgCount>{total_messages} msgs</MsgCount>
+          {has_unread && unread_count > 0 && <UnreadBadge>{unread_count}</UnreadBadge>}
+        </FooterRow>
+      </Body>
     </Card>
   )
 }
 
-/* --------------------------------
- * Helpers
- * -------------------------------- */
-
-function shortenPublicKey(pk: MajikMessagePublicKey, chars = 6): string {
-  const str = String(pk)
-  return `${str.slice(0, chars)}…${str.slice(-chars)}`
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function shortenKey(pk: MajikMessagePublicKey, chars = 5): string {
+  const s = String(pk)
+  return `${s.slice(0, chars)}…${s.slice(-4)}`
 }
 
 function formatTimestamp(ts: string): string {
-  const date = new Date(ts)
-  return moment(date).fromNow()
+  return moment(new Date(ts)).fromNow()
+}
+
+function getHue(str: string): number {
+  return [...str].reduce((acc, c) => acc + c.charCodeAt(0), 0) % 360
+}
+
+function getInitials(name: string): string {
+  const parts = name.trim().split(/\s+/)
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase()
+  return name.slice(0, 2).toUpperCase()
 }

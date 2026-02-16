@@ -1,21 +1,19 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import DynamicPlaceholder from '@/components/foundations/DynamicPlaceholder'
-import { ButtonPrimaryConfirm } from '@/globals/buttons'
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import styled from 'styled-components'
+import styled, { keyframes } from 'styled-components'
 
 import type { ConversationSummary } from '@renderer/components/majikah-session-wrapper/api-types'
 
 import { CBaseConversation } from '@renderer/components/base/CBaseConversation'
 import type { MajikMessageDatabase } from '@renderer/components/majik-context-wrapper/majik-message-database'
-import { SectionTitleFrame } from '@renderer/globals/styled-components'
 import { toast } from 'sonner'
 import { MajikMessageIdentitySelector } from '@renderer/components/MajikMessageIdentitySelector'
 
-import { MajikMessageChat } from '@majikah/majik-message'
-import { NotePencilIcon } from '@phosphor-icons/react'
+import { MajikMessageChat, MajikMessageIdentity } from '@majikah/majik-message'
+import { ArrowClockwiseIcon, ChatTeardropTextIcon, NotePencilIcon } from '@phosphor-icons/react'
 import PopUpFormButton from '@renderer/components/foundations/PopUpFormButton'
 import NewMessageForm from '@renderer/components/NewMessageForm'
 import { useMajikah } from '@renderer/components/majikah-session-wrapper/use-majikah'
@@ -27,25 +25,31 @@ import { RealtimeChatInput } from '@renderer/components/functional/RealtimeChatI
 import GuideHelper from '@renderer/components/functional/GuideHelper'
 import { launchTutorialChats } from '@renderer/lib/shepherd-js/tutorials/tutorial-chats'
 import { useShepherd } from '@renderer/lib/shepherd-js/use-shepherd'
+import StyledIconButton from '@renderer/components/foundations/StyledIconButton'
 
-// Styled Components
-const RootContainer = styled.div`
-  display: flex;
-  flex: 1; 
-  min-height:
-  overflow: hidden;
-  height: 100%;
+// ─── Animations ───────────────────────────────────────────────────────────────
+const slideIn = keyframes`
+  from { opacity: 0; transform: translateX(8px); }
+  to   { opacity: 1; transform: translateX(0); }
 `
 
-const LeftPane = styled.div`
-  width: 40%;
+// ─── Layout ───────────────────────────────────────────────────────────────────
+const Root = styled.div`
+  display: flex;
+  flex: 1;
+  height: 100%;
+  overflow: hidden;
+  width: 100%;
+`
 
+const ListPane = styled.div<{ $hasSelection: boolean }>`
   display: flex;
   flex-direction: column;
-  flex: none;
-  min-height: 0;
-  padding: 0px 10px;
-  margin-right: 10px;
+  /* Narrow when a thread is open, full width when not */
+  width: ${({ $hasSelection }) => ($hasSelection ? '40%' : '100%')};
+  flex-shrink: 0;
+  overflow: hidden;
+  border-right: 1px solid ${({ theme }) => theme.colors.secondaryBackground};
 `
 
 const RightPane = styled.div`
@@ -53,92 +57,168 @@ const RightPane = styled.div`
   display: flex;
   min-height: 0;
   overflow: hidden;
-  padding: 0;
-  border-left: 1px solid ${({ theme }) => theme.colors.secondaryBackground};
 `
 
-const Row = styled.div`
+// ─── List pane header ─────────────────────────────────────────────────────────
+const PaneHeader = styled.div`
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-`
-const ListWrapper = styled.div`
-  flex: 1;
-  min-height: 0; /* 🔑 THIS WAS MISSING */
-  overflow-y: auto;
-  padding: 1rem 1rem 150px 1rem;
+  padding: 14px 14px 12px;
+  border-bottom: 1px solid ${({ theme }) => theme.colors.secondaryBackground};
+  flex-shrink: 0;
 `
 
-const ListContainer = styled.div`
-  display: flex;
-  flex-direction: column;
-  padding: 0.5em;
-  background-color: transparent;
+const PaneTitle = styled.h2`
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
   color: ${({ theme }) => theme.colors.textPrimary};
-  height: auto;
-  padding-bottom: 150px;
-
-  width: 100%;
-  overflow-y: auto;
-  align-items: center;
-  gap: 10px;
-  &::-webkit-scrollbar {
-    display: none;
-  }
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-  @media (max-width: 768px) {
-    padding: 5px;
-  }
+  margin: 0;
 `
 
-const ItemColumnContainer = styled.div`
+const HeaderActions = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 6px;
+`
+
+const IdentityRow = styled.div`
+  padding: 8px 12px;
+  border-bottom: 1px solid ${({ theme }) => theme.colors.secondaryBackground};
+  flex-shrink: 0;
+`
+
+// ─── Conversation list ────────────────────────────────────────────────────────
+const ConvList = styled.ul`
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 10px 12px;
+  margin: 0;
+  list-style: none;
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
-  gap: 15px;
-  width: 100%;
+  gap: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: ${({ theme }) => `${theme.colors.secondaryBackground} transparent`};
+  &::-webkit-scrollbar {
+    width: 3px;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: ${({ theme }) => theme.colors.secondaryBackground};
+    border-radius: 4px;
+  }
 `
 
+const EmptyState = styled.div`
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 60px 20px;
+  text-align: center;
+  flex: 1;
+  color: ${({ theme }) => theme.colors.textSecondary};
+`
+
+const EmptyIcon = styled.div`
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: ${({ theme }) => theme.colors.secondaryBackground};
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.7;
+`
+
+const EmptyText = styled.p`
+  font-size: 13px;
+  font-weight: 600;
+  color: ${({ theme }) => theme.colors.textPrimary};
+  margin: 0;
+`
+
+const EmptyHint = styled.p`
+  font-size: 12px;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  margin: 0;
+  max-width: 180px;
+  line-height: 1.5;
+  opacity: 0.7;
+`
+
+// ─── Right pane states ────────────────────────────────────────────────────────
 const ChatContainer = styled.div`
   display: flex;
   flex-direction: column;
   height: 100%;
   width: 100%;
+  animation: ${slideIn} 200ms cubic-bezier(0.4, 0, 0.2, 1) both;
 `
 
+const ViewerPlaceholder = styled.div`
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: ${({ theme }) => theme.colors.textSecondary};
+`
+
+const PlaceholderIcon = styled.div`
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: ${({ theme }) => theme.colors.secondaryBackground};
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.6;
+`
+
+const PlaceholderText = styled.p`
+  font-size: 13px;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  margin: 0;
+  opacity: 0.6;
+`
+
+// ─── Props ────────────────────────────────────────────────────────────────────
 interface ConversationSidePanelProps {
   majik: MajikMessageDatabase
   onUpdate?: (updatedInstance: MajikMessageDatabase) => void
 }
 
-// Main Component
+// ─── Component ────────────────────────────────────────────────────────────────
 const ConversationSidePanel: React.FC<ConversationSidePanelProps> = ({ majik }) => {
   const { majikah } = useMajikah()
   const tour = useShepherd()
 
   const [fetchedConversations, setFetchedConversations] = useState<ConversationSummary[]>([])
-
-  const [selectedConversation, setSelectedConversation] = useState<ConversationSummary | undefined>(
+  const [selectedConversationId, setSelectedConversationId] = useState<string | undefined>(
     undefined
   )
-
   const [loading, setIsLoading] = useState(false)
-  const [pageIndex, setPageIndex] = useState(0)
-  const [allowNextPage] = useState(false)
-
-  const isRefreshingRef = useRef(false)
-
   const [newMessageText, setNewMessageText] = useState<string>('')
-
   const [isCreatingMessage, setIsCreatingMessage] = useState<boolean>(false)
 
-  const messagesRef = useRef<{ insertMessage: (message: MajikMessageChat) => Promise<void> }>(null)
+  const isRefreshingRef = useRef(false)
+  const messagesRef = useRef<{
+    insertMessage: (message: MajikMessageChat) => Promise<void>
+  }>(null)
 
+  const selectedConversation = useMemo(
+    () => fetchedConversations.find((c) => c.conversation_id === selectedConversationId),
+    [fetchedConversations, selectedConversationId]
+  )
+
+  // ── Fetch conversations ────────────────────────────────────────────────────
   const refreshConversations = useCallback(async () => {
     if (!majikah?.isAuthenticated) return
-
     if (isRefreshingRef.current) return
     isRefreshingRef.current = true
 
@@ -146,13 +226,19 @@ const ConversationSidePanel: React.FC<ConversationSidePanelProps> = ({ majik }) 
       setIsLoading(true)
       const fetchResponse = await majik.getConversations()
       const conversations = fetchResponse.conversations
-
       setFetchedConversations(conversations)
-      setSelectedConversation(conversations[0])
-      // setAllowNextPage(conversations.length > 0)
+
+      // Only auto-select the first conversation on initial load (when nothing is selected yet).
+      // Never override an active selection on subsequent refreshes.
+      setSelectedConversationId((prev) => {
+        if (prev !== undefined) return prev
+        return conversations[0]?.conversation_id ?? undefined
+      })
     } catch (error: any) {
       if (error?.name !== 'AbortError') {
-        toast.error('Failed to refresh conversations', { description: error?.message })
+        toast.error('Failed to refresh conversations', {
+          description: error?.message
+        })
       }
     } finally {
       isRefreshingRef.current = false
@@ -165,136 +251,169 @@ const ConversationSidePanel: React.FC<ConversationSidePanelProps> = ({ majik }) 
     refreshConversations()
   }, [refreshConversations])
 
+  // ── Handlers ───────────────────────────────────────────────────────────────
   const handleSelectConversation = (input: ConversationSummary): void => {
-    if (!!input && !!input?.conversation_id) {
-      setSelectedConversation(input)
-    }
-  }
-
-  const handlePageLoadMore = (): void => {
-    setPageIndex(pageIndex + 1)
+    if (input?.conversation_id) setSelectedConversationId(input.conversation_id)
   }
 
   const handleMessageTextUpdate = (text: string): void => {
     setNewMessageText(text || '')
   }
 
-  const isUserRestricted = useMemo(() => {
-    return majik?.currentIdentity?.isRestricted() || false
+  useEffect(() => {
+    console.log('Identity ref changed')
+  }, [majik.currentIdentity])
+
+  const isUserRestricted = useMemo(
+    () => majik?.currentIdentity?.isRestricted() || false,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [majik, majik.user?.id, majik.getActiveAccount()?.id])
+    [majik, majik.user?.id, majik.getActiveAccount()?.id]
+  )
 
-  if (!majikah?.isAuthenticated) {
-    return <UserAuth />
-  }
+  // Use a ref to store the last known good identity
+  const lastValidIdentity = useRef<MajikMessageIdentity | null>(majik.currentIdentity)
 
+  const stableIdentity = useMemo(() => {
+    if (majik.currentIdentity) {
+      lastValidIdentity.current = majik.currentIdentity
+      return majik.currentIdentity
+    }
+    // If majik.currentIdentity is briefly null, return the last one we had
+    return lastValidIdentity.current
+  }, [majik.currentIdentity]) // Only re-calc if the key actually changes
+
+  if (!majikah?.isAuthenticated) return <UserAuth />
+
+  if (!majik?.currentIdentity)
+    return (
+      <Root>
+        <ListPane $hasSelection={false}>
+          <DynamicPlaceholder>
+            To use <strong>Chats</strong>, you need a registered Majik Key (local seed phrase
+            account). Create a new account and register it online, or select an existing one to
+            continue.
+            <IdentityRow>
+              <MajikMessageIdentitySelector onChange={refreshConversations} />
+            </IdentityRow>
+          </DynamicPlaceholder>
+        </ListPane>
+      </Root>
+    )
+
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <RootContainer>
-      <LeftPane id="section-chats">
+    <Root>
+      {/* ── Left: conversation list ── */}
+      <ListPane id="section-chats" $hasSelection={!!selectedConversation?.conversation_id?.trim()}>
         <GuideHelper
-          docsPath="https://majikah.solutions/products/majik-message/docs/chats-realtime-documentation"
+          docsPath="/products/majik-message/docs/chats-realtime-documentation"
           startTour={() => launchTutorialChats(tour)}
         />
-        <SectionTitleFrame>
-          <Row>
-            <h2>Chats</h2>
-            <div style={{ display: 'flex', flexDirection: 'row' }}>
-              <PopUpFormButton
-                id="button-new-conversation"
-                icon={NotePencilIcon}
-                text="New Message"
-                disabled={isUserRestricted}
-                modal={{
-                  title: 'New Message',
-                  description: 'Send a new message to your contacts.'
-                }}
-                buttons={{
-                  cancel: {
-                    text: 'Cancel'
-                  },
-                  confirm: {
-                    text: 'Send',
-                    isDisabled: !newMessageText?.trim(),
-                    hide: true
-                  }
-                }}
-                isOpen={isCreatingMessage}
-                onOpenChange={(open) => setIsCreatingMessage(open)}
-              >
-                <NewMessageForm
+        <PaneHeader>
+          <PaneTitle>Chats</PaneTitle>
+          <HeaderActions>
+            <PopUpFormButton
+              id="button-new-conversation"
+              icon={NotePencilIcon}
+              text="New"
+              disabled={isUserRestricted}
+              modal={{
+                title: 'New Message',
+                description: 'Send a new message to your contacts.'
+              }}
+              buttons={{
+                cancel: { text: 'Cancel' },
+                confirm: {
+                  text: 'Send',
+                  isDisabled: !newMessageText?.trim(),
+                  hide: true
+                }
+              }}
+              isOpen={isCreatingMessage}
+              onOpenChange={(open) => setIsCreatingMessage(open)}
+            >
+              <NewMessageForm
+                majikah={majikah}
+                majik={majik}
+                onSend={refreshConversations}
+                onUpdate={handleMessageTextUpdate}
+              />
+            </PopUpFormButton>
+
+            <StyledIconButton
+              icon={ArrowClockwiseIcon}
+              title="Refresh"
+              onClick={refreshConversations}
+              size={22}
+            />
+          </HeaderActions>
+        </PaneHeader>
+
+        <IdentityRow>
+          <MajikMessageIdentitySelector onChange={refreshConversations} />
+        </IdentityRow>
+
+        {loading ? (
+          <DynamicPlaceholder loading>Loading…</DynamicPlaceholder>
+        ) : fetchedConversations.length === 0 ? (
+          <EmptyState>
+            <EmptyIcon>
+              <ChatTeardropTextIcon size={18} />
+            </EmptyIcon>
+            <EmptyText>No conversations yet</EmptyText>
+            <EmptyHint>Start a new encrypted chat with the button above.</EmptyHint>
+          </EmptyState>
+        ) : (
+          <ConvList>
+            {fetchedConversations.map((conv) => (
+              <li key={conv.conversation_id}>
+                <CBaseConversation
                   majik={majik}
-                  onSend={refreshConversations}
-                  onUpdate={handleMessageTextUpdate}
+                  conversation={conv}
+                  onClick={handleSelectConversation}
+                  isActive={conv.conversation_id === selectedConversationId}
                 />
-              </PopUpFormButton>
+              </li>
+            ))}
+          </ConvList>
+        )}
+      </ListPane>
 
-              {/* <PopUpFormButton scrollable={true} icon={PlusIcon} text="Create Account">
-               <></>
-             </PopUpFormButton> */}
-            </div>
-          </Row>
-        </SectionTitleFrame>
-        <MajikMessageIdentitySelector onChange={refreshConversations} />
-        <ListWrapper>
-          {!loading ? (
-            <ListContainer className="rootListConversations">
-              {fetchedConversations.length > 0 ? (
-                fetchedConversations.map((conversationItem, index) => (
-                  <ItemColumnContainer key={conversationItem.conversation_id || index}>
-                    <CBaseConversation
-                      majik={majik}
-                      conversation={conversationItem}
-                      onClick={handleSelectConversation}
-                      isActive={
-                        selectedConversation
-                          ? conversationItem.conversation_id ===
-                            selectedConversation.conversation_id
-                          : false
-                      }
-                    />
-
-                    {index === fetchedConversations.length - 1 && allowNextPage ? (
-                      <ButtonPrimaryConfirm onClick={handlePageLoadMore} disabled={!allowNextPage}>
-                        Load more
-                      </ButtonPrimaryConfirm>
-                    ) : null}
-                  </ItemColumnContainer>
-                ))
-              ) : (
-                <DynamicPlaceholder>No conversations found.</DynamicPlaceholder>
-              )}
-            </ListContainer>
-          ) : (
-            <DynamicPlaceholder loading={loading}>Loading...</DynamicPlaceholder>
-          )}
-        </ListWrapper>
-      </LeftPane>
+      {/* ── Right: messages or placeholder ── */}
       <RightPane id="section-chats-messages">
         {selectedConversation ? (
           <ChatContainer>
-            <MajikMessageRealtimeChatClientProvider
-              conversationID={selectedConversation.conversation_id}
-              account={majik.currentIdentity!}
-            >
-              <ConversationMessages
+            {stableIdentity && (
+              <MajikMessageRealtimeChatClientProvider
                 conversationID={selectedConversation.conversation_id}
-                majik={majik}
-                ref={messagesRef}
-              />
-              <RealtimeChatInput
-                majik={majik}
-                conversationID={selectedConversation.conversation_id}
-                participants={selectedConversation.participants}
-              />
-            </MajikMessageRealtimeChatClientProvider>
+                account={stableIdentity}
+              >
+                <ConversationMessages
+                  conversationID={selectedConversation.conversation_id}
+                  majik={majik}
+                  ref={messagesRef}
+                />
+                {selectedConversation && (
+                  <RealtimeChatInput
+                    majikah={majikah}
+                    majik={majik}
+                    conversationID={selectedConversation.conversation_id}
+                    participants={selectedConversation.participants}
+                  />
+                )}
+              </MajikMessageRealtimeChatClientProvider>
+            )}
           </ChatContainer>
         ) : (
-          <ChatContainer>
-            <DynamicPlaceholder>Select a conversation to view messages.</DynamicPlaceholder>
-          </ChatContainer>
+          <ViewerPlaceholder>
+            <PlaceholderIcon>
+              <ChatTeardropTextIcon size={20} />
+            </PlaceholderIcon>
+            <PlaceholderText>Select a conversation to start chatting</PlaceholderText>
+          </ViewerPlaceholder>
         )}
       </RightPane>
-    </RootContainer>
+    </Root>
   )
 }
 

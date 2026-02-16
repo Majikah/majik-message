@@ -106,6 +106,7 @@ export class MajikMessageMail {
     p_hash: string,
     previousMailID?: MajikMessageMailID,
     readBy: MajikMessagePublicKey[] = [],
+    bypassValidation: boolean = false,
   ) {
     this._id = id;
     this._threadID = threadID;
@@ -120,8 +121,10 @@ export class MajikMessageMail {
     this._previousMailID = previousMailID;
     this._readBy = [...readBy];
 
-    // Validate on construction
-    this.validate();
+    if (!bypassValidation) {
+      // Validate on construction
+      this.validate();
+    }
   }
 
   // ==================== Getters ====================
@@ -1048,6 +1051,7 @@ export class MajikMessageMail {
 
   public static fromJSON(
     json: MajikMessageMailJSON | string,
+    bypassValidation: boolean = false,
   ): MajikMessageMail {
     try {
       const data: MajikMessageMailJSON =
@@ -1079,6 +1083,7 @@ export class MajikMessageMail {
         data.p_hash,
         data.previous_mail_id,
         data.read_by || [],
+        bypassValidation,
       );
     } catch (error) {
       if (error instanceof MajikMailError) {

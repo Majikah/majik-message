@@ -76,14 +76,14 @@ const DuoButton: React.FC<DuoButtonProps> = ({
     <>
       <RowContainer $enableColumn={enableColumn} $direction={direction}>
         {!hideButtonA && (
-          <ChoiceButton variant="secondary" onClick={onClickButtonA} disabled={isDisabledButtonA}>
+          <ChoiceButton $variant="secondary" onClick={onClickButtonA} disabled={isDisabledButtonA}>
             {textButtonA}
           </ChoiceButton>
         )}
 
         {!hideButtonB && (
           <ChoiceButton
-            variant="primary"
+            $variant="primary"
             onClick={strictMode ? handleOnStrictClick : onClickButtonB}
             disabled={isDisabledButtonB}
           >
@@ -102,10 +102,10 @@ const DuoButton: React.FC<DuoButtonProps> = ({
               </DialogDescription>
             </DialogHeader>
             <RowContainer $enableColumn={enableColumn}>
-              <ChoiceButton variant="secondary" onClick={handleOnCancel}>
+              <ChoiceButton $variant="secondary" onClick={handleOnCancel}>
                 Cancel
               </ChoiceButton>
-              <ChoiceButton variant="primary" onClick={handleOnConfirm}>
+              <ChoiceButton $variant="primary" onClick={handleOnConfirm}>
                 Proceed
               </ChoiceButton>
             </RowContainer>

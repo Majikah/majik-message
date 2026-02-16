@@ -15,6 +15,7 @@ import type { MajikMessageDatabase } from '@renderer/components/majik-context-wr
 import MajikContactListSelector from '@renderer/components/MajikContactListSelector'
 import { ChatInputBox } from '@renderer/components/functional/ChatInputBox'
 import CustomInputField from '@renderer/components/foundations/CustomInputField'
+import type { MajikahSession } from '@renderer/components/majikah-session-wrapper/majikah-session'
 
 /* ---------------------------------------------
  * Styled Components
@@ -50,9 +51,11 @@ const PreviewActions = styled.div`
 
 const ExportButton = styled(ButtonPrimaryConfirm)`
   padding: 6px 20px;
+  width: 100%;
 `
 
 interface NewMailFormProps {
+  majikah: MajikahSession
   majik: MajikMessageDatabase
   thread: MajikMessageThread
   onUpdate?: (message: string, subject?: string) => void
@@ -63,7 +66,7 @@ interface NewMailFormProps {
 /* ---------------------------------------------
  * Component
  * ------------------------------------------- */
-const NewMailForm: React.FC<NewMailFormProps> = ({ majik, thread, onUpdate, onSend }) => {
+const NewMailForm: React.FC<NewMailFormProps> = ({ majikah, majik, thread, onUpdate, onSend }) => {
   const [input, setInput] = useState<string>('')
   const [output, setOutput] = useState<string>('')
   const [subject, setSubject] = useState<string | undefined>(undefined)
@@ -289,10 +292,12 @@ const NewMailForm: React.FC<NewMailFormProps> = ({ majik, thread, onUpdate, onSe
       <Body>
         <Section>
           <ChatInputBox
+            majikah={majikah}
             onSend={handleSend}
             onUpdate={handleEncryptMessage}
             disabled={!recipients || recipients.length <= 1}
             sendOnEnter={false}
+            enableGIF={false}
           />
           <PreviewActions>
             <ExportButton onClick={handleCopy}>Copy</ExportButton>

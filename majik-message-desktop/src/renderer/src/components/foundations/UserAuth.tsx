@@ -28,6 +28,7 @@ const RootContainer = styled.div`
   justify-content: center;
   background: transparent;
   padding: 2rem;
+  width: 100%;
 `
 
 const AuthCard = styled.div`
@@ -285,7 +286,11 @@ const UserAuth: React.FC<UserAuthProps> = ({ onSignIn, onSignUp, onResetPassword
     setIsLoading(true)
 
     try {
-      const signInResponse = await majikah.signIn({ email, password })
+      const signInResponse = await majikah.signIn({
+        email,
+        password,
+        'cf-turnstile-response': 'desktop'
+      })
       const userName = majikah.user?.displayName || 'user'
 
       if (signInResponse !== null && signInResponse.session) {
@@ -335,7 +340,8 @@ const UserAuth: React.FC<UserAuthProps> = ({ onSignIn, onSignUp, onResetPassword
       password,
       options: {
         data: userAttribs
-      }
+      },
+      'cf-turnstile-response': 'desktop'
     })
 
     const userName = majikah.user?.displayName || 'user'

@@ -570,6 +570,22 @@ const EmailThreads: React.FC<EmailThreadsProps> = ({
   // ── Early returns ──────────────────────────────────────────────────────────
   if (!majikah?.isAuthenticated) return <UserAuth />
 
+  if (!majik?.currentIdentity)
+    return (
+      <Root>
+        <ListPane $hasSelection={false}>
+          <DynamicPlaceholder>
+            To use <strong>Chats</strong>, you need a registered Majik Key (local seed phrase
+            account). Create a new account and register it online, or select an existing one to
+            continue.
+            <SubRow>
+              <MajikMessageIdentitySelector onChange={refreshThreads} />
+            </SubRow>
+          </DynamicPlaceholder>
+        </ListPane>
+      </Root>
+    )
+
   if (loading) {
     return (
       <Root>
@@ -621,7 +637,7 @@ const EmailThreads: React.FC<EmailThreadsProps> = ({
 
         {/* Identity selector + pagination */}
         <SubRow>
-          <MajikMessageIdentitySelector />
+          <MajikMessageIdentitySelector onChange={refreshThreads} />
           {fetchedThreads.length > 0 && (
             <Pagination>
               <PageLabel>

@@ -55,6 +55,7 @@ declare module 'styled-components' {
 
     colors: {
       primary: string
+      primarySoft: string
       accent: string
       error: string
       textPrimary: string
@@ -80,6 +81,7 @@ declare module 'styled-components' {
       primary: string
       secondary: string
       strong: string
+      glass: string
     }
 
     spacing: {

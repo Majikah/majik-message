@@ -16,6 +16,10 @@ if (process.contextIsolated) {
       importAccount: () => ipcRenderer.invoke('import-account'),
       importContact: () => ipcRenderer.invoke('import-contact'),
       // Add listeners for menu events
+      onToggleDarkMode: (callback: any) => {
+        ipcRenderer.on('trigger-toggle-dark-mode', callback)
+        return () => ipcRenderer.removeListener('trigger-toggle-dark-mode', callback)
+      },
       onImportAccountTriggered: (callback: any) => {
         ipcRenderer.on('trigger-import-account', callback)
         return () => ipcRenderer.removeListener('trigger-import-account', callback)

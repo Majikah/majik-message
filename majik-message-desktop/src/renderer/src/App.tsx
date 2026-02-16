@@ -40,6 +40,8 @@ import { SeedKeyInput } from './components/foundations/SeedKeyInput'
 import { downloadBlob } from './utils/utils'
 import { useMajikah } from './components/majikah-session-wrapper/use-majikah'
 import EmailThreads from './components/panels/threads/EmailThreads'
+import { useDispatch } from 'react-redux'
+import { toggleTheme } from './redux/slices/system'
 
 const RootContainer = styled.div`
   display: flex;
@@ -57,6 +59,8 @@ const MAX_ACCOUNT_LIMIT = 25
 
 function App(): JSX.Element {
   const navigate = useNavigate()
+  const dispatch = useDispatch()
+
   const { majik, loading, updateInstance } = useMajik()
   const { majikah } = useMajikah()
   const [unlockId, setUnlockId] = useState<string | null>(null)
@@ -215,6 +219,11 @@ function App(): JSX.Element {
       }
     }
 
+    const handleToggleDarkmode = async (): Promise<void> => {
+      dispatch(toggleTheme())
+    }
+    const removeToggleDarkMode = window.electron.onToggleDarkMode(handleToggleDarkmode)
+
     const removeCreateListener = window.electron.onCreateAccountTriggered(handleCreate)
 
     const removeImportListener = window.electron.onImportAccountTriggered(handleImport)
@@ -226,6 +235,7 @@ function App(): JSX.Element {
     const removeSignOutListener = window.electron.onSignOutTriggered(handleSignOut)
 
     return () => {
+      removeToggleDarkMode()
       removeImportListener()
 
       removeCreateListener()

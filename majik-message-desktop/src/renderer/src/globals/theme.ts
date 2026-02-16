@@ -53,6 +53,7 @@ export const theme: DefaultTheme = {
 
   colors: {
     primary: '#ea7f05',
+    primarySoft: '#ea7f050e',
     error: '#ff471e',
     accent: '#002968',
     textPrimary: '#272525',
@@ -76,7 +77,8 @@ export const theme: DefaultTheme = {
   gradients: {
     primary: 'linear-gradient(135deg, #ea7f05 0%, #b96300 100%)',
     strong: 'linear-gradient(135deg, #ffaa5b, #ffa33a)',
-    secondary: 'linear-gradient(135deg, #e5c7a6, rgb(231, 165, 89))'
+    secondary: 'linear-gradient(135deg, #e5c7a6, rgb(231, 165, 89))',
+    glass: 'linear-gradient(135deg, #f2e0cb, rgba(226, 214, 199, 0.36))'
   },
   spacing: {
     tight: '0.2rem',

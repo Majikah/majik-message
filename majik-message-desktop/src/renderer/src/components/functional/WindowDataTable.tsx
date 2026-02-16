@@ -42,7 +42,7 @@ interface WindowDataTableProps<TData, TValue> {
   onEmptyActionClick?(): void
   onEmptyActionButtonText?: string
   onEmptyText?: string
-  pagination?: boolean
+  showPagination?: boolean
 }
 
 /* ---------- component ----------- */
@@ -57,7 +57,7 @@ export function WindowDataTable<TData, TValue>({
   onEmptyActionClick,
   onEmptyActionButtonText = 'Create New Item',
   onEmptyText = 'There are currently no items available.',
-  pagination = true
+  showPagination = true
 }: WindowDataTableProps<TData, TValue>): JSX.Element {
   /* table core */
 
@@ -84,7 +84,7 @@ export function WindowDataTable<TData, TValue>({
   return (
     <div className="w-full rounded-md border ">
       {/* pagination controls */}
-      {pagination && (
+      {showPagination && (
         <div className="flex items-center justify-end gap-4 p-3 !m-5">
           <PageText>Page {currentPage + 1}</PageText>
           <Button
