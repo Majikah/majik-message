@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import "./App.css";
 
-import { KeyStore, MajikContact } from "@majikah/majik-message";
+import { MajikKeyStore, MajikContact } from "@majikah/majik-message";
 import UnlockModal from "../../components/UnlockModal";
 import { toast, Toaster } from "sonner";
 import { useMajik } from "../../components/majik-context-wrapper/use-majik";
@@ -14,8 +14,8 @@ function App() {
   >(null);
 
   useEffect(() => {
-    // Wire KeyStore.onUnlockRequested to present our React modal
-    KeyStore.onUnlockRequested = (id: string) => {
+    // Wire MajikKeyStore.onUnlockRequested to present our React modal
+    MajikKeyStore.onUnlockRequested = (id: string) => {
       return new Promise<string>((resolve) => {
         setUnlockId(id);
         setUnlockResolver(() => resolve);
@@ -23,7 +23,7 @@ function App() {
     };
 
     return () => {
-      KeyStore.onUnlockRequested = undefined;
+      MajikKeyStore.onUnlockRequested = undefined;
     };
   }, []);
 

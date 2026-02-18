@@ -102,7 +102,7 @@ const TabButton = styled.button<{ $active: boolean }>`
 
 const ContentWrapper = styled.div`
   flex: 1;
-  padding: 1rem;
+  padding: 1rem 0px;
 `;
 
 const TabNameText = styled.p<{ $active?: boolean }>``;

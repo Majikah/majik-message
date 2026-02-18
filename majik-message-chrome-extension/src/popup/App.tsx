@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 import ScannerPanel from "../components/panels/ScannerPanel";
 import UnlockModal from "../components/UnlockModal";
-import { KeyStore, MajikContact } from "@majikah/majik-message";
+import { MajikKeyStore, MajikContact } from "@majikah/majik-message";
 
 import { toast, Toaster } from "sonner";
 import DynamicPlaceholder from "../components/foundations/DynamicPlaceholder";
@@ -37,8 +37,8 @@ function App() {
   const [unlocked, setUnlocked] = useState<boolean>(false);
 
   useEffect(() => {
-    // Wire KeyStore.onUnlockRequested to present our React modal
-    KeyStore.onUnlockRequested = (id: string) => {
+    // Wire MajikKeyStore.onUnlockRequested to present our React modal
+    MajikKeyStore.onUnlockRequested = (id: string) => {
       return new Promise<string>((resolve) => {
         setUnlockId(id);
         setUnlockResolver(() => resolve);
@@ -46,7 +46,7 @@ function App() {
     };
 
     return () => {
-      KeyStore.onUnlockRequested = undefined;
+      MajikKeyStore.onUnlockRequested = undefined;
     };
   }, []);
 

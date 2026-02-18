@@ -8,6 +8,7 @@ import ThemeProviderWrapper from "../globals/ThemeProviderWrapper.tsx";
 import { base64EncodeUtf8 } from "../lib/majik-file-utils.ts";
 import { MajikMessageWrapper } from "../components/majik-context-wrapper/MajikMessageWrapper.tsx";
 import { MajikMessageDatabase } from "../components/majik-context-wrapper/majik-message-database.ts";
+import { MajikahProvider } from "../components/majikah-session-wrapper/MajikahSessionWrapper.tsx";
 
 console.log("[Majik Message] Content Script Initialized");
 
@@ -380,9 +381,11 @@ createRoot(container).render(
   <StrictMode>
     <ReduxProvider>
       <ThemeProviderWrapper>
-        <MajikMessageWrapper>
-          <App />
-        </MajikMessageWrapper>
+        <MajikahProvider>
+          <MajikMessageWrapper>
+            <App />
+          </MajikMessageWrapper>
+        </MajikahProvider>
       </ThemeProviderWrapper>
     </ReduxProvider>
   </StrictMode>,

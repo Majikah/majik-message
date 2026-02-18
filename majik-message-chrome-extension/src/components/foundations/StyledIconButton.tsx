@@ -60,8 +60,7 @@ const IconButton = styled.button<{ $darkMode: boolean; $size: number }>`
 `;
 
 // Define the props type for the IconButton component
-interface StyledIconButtonProps
-  extends ButtonHTMLAttributes<HTMLButtonElement> {
+interface StyledIconButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   icon: ComponentType;
   darkMode?: boolean;
   size?: number;
@@ -94,6 +93,7 @@ const StyledIconButton: React.FC<StyledIconButtonProps> = ({
             fontWeight: 400,
             backgroundColor: theme.colors.secondaryBackground,
             zIndex: theme.zIndex.topmost,
+            color: theme.colors.textPrimary,
           }}
         />
       ) : null}

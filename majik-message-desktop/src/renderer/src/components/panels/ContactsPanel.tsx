@@ -151,13 +151,13 @@ const LimitBadge = styled.span`
   white-space: nowrap;
 `
 
-interface AccountsPanelProps {
+interface ContactsPanelProps {
   majik: MajikMessageDatabase
   onUpdate?: (updatedInstance: MajikMessageDatabase) => void
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
-const AccountsPanel: React.FC<AccountsPanelProps> = ({ majik, onUpdate }) => {
+const ContactsPanel: React.FC<ContactsPanelProps> = ({ majik, onUpdate }) => {
   const tour = useShepherd()
   const [refreshKey, setRefreshKey] = useState<number>(0)
   const [inviteKey, setInviteKey] = useState<string>('')
@@ -361,4 +361,4 @@ const AccountsPanel: React.FC<AccountsPanelProps> = ({ majik, onUpdate }) => {
   )
 }
 
-export default AccountsPanel
+export default ContactsPanel

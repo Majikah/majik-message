@@ -55,6 +55,7 @@ declare module "styled-components" {
 
     colors: {
       primary: string;
+      primarySoft: string;
       accent: string;
       error: string;
       textPrimary: string;

@@ -53,6 +53,7 @@ export const theme: DefaultTheme = {
 
   colors: {
     primary: "#ea7f05",
+    primarySoft: "#ea7f050e",
     error: "#ff471e",
     accent: "#002968",
     textPrimary: "#272525",

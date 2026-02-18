@@ -130,3 +130,119 @@ html body[data-scroll-locked] {
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
 }
+
+.custom-tour-step,
+.shepherd-modal-overlay {
+  z-index: 999999999 !important; /* higher than your drawer/dialog */
+  pointer-events: auto; /* ensure steps are clickable */
+}
+
+.custom-tour-step {
+  background-color: #f2e0cb !important;
+  color: #272525;
+  /* optional: dark text for contrast */
+  border-radius: 16px;
+  padding: 1rem 25px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.7);
+}
+
+.custom-tour-step .shepherd-header {
+  background-color: #f2e0cb !important;
+  align-items: center;
+  display: flex;
+  justify-content: center;
+
+  /* optional: dark text for contrast */
+  border-radius: 12px 12px 0 0;
+  padding: 1rem 25px;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.2);
+}
+
+.custom-tour-step .shepherd-title {
+  color: #ea7f05;
+  font-size: large;
+  text-align: center;
+  font-weight: 600;
+  align-items: center;
+  display: flex;
+  justify-content: center;
+}
+
+.custom-tour-step .shepherd-button {
+  background-color: #ea7f05 !important;
+  border: 1px solid transparent !important;
+  /* force custom bg */
+  color: #f8eee2 !important;
+  /* force custom text */
+  padding: 4px 16px;
+  border-radius: 6px;
+  font-weight: 500;
+  margin: 0 4px;
+  transition:
+    background-color 0.3s ease,
+    transform 0.2s ease;
+  text-decoration: none !important;
+  /* remove underline */
+  display: inline-block;
+
+  /* prevent default link outline */
+}
+
+.custom-tour-step .shepherd-button:hover {
+  background-color: #f8eee2 !important;
+  border: 1px solid #ea7f05 !important;
+  color: #ea7f05 !important;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+}
+
+/* This is the fix for the 15px margin for modals and dialog sliders and dropdown */
+html body[data-scroll-locked] {
+  margin-right: 0 !important;
+}
+
+.custom-tour-step .shepherd-button-secondary {
+  background-color: #f8eee2 !important;
+  border: 1px solid transparent !important;
+  /* force custom bg */
+  color: #514f4f !important;
+  /* force custom text */
+  padding: 4px 16px;
+  border-radius: 6px;
+  font-weight: 500;
+  margin: 0 4px;
+  transition:
+    background-color 0.3s ease,
+    transform 0.2s ease;
+  text-decoration: none !important;
+  /* remove underline */
+  display: inline-block;
+
+  /* prevent default link outline */
+}
+
+.custom-tour-step .shepherd-button-secondary:hover {
+  background-color: #f8eee2 !important;
+  border: 1px solid #ea7f05 !important;
+  color: #ea7f05 !important;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+}
+
+.toast-main {
+  background-color: #f2e0cb !important;
+  border: 2px solid #f8eee2 !important;
+  user-select: none;
+  color: #272525;
+  /* optional: dark text for contrast */
+  border-radius: 16px;
+  padding: 1rem 25px !important;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+  align-items: center;
+  justify-content: center;
+}
+
+.toast-description {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3; /* max lines */
+  overflow: hidden;
+}

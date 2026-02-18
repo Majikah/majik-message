@@ -61,7 +61,7 @@ export const ActionButton = styled.button`
   }
 `
 
-export const ChoiceButton = styled.button<{ variant?: 'primary' | 'secondary' }>`
+export const ChoiceButton = styled.button<{ $variant?: 'primary' | 'secondary' }>`
   padding: 0.75rem 1.5rem;
   border-radius: 8px;
   font-size: 1rem;
@@ -70,8 +70,8 @@ export const ChoiceButton = styled.button<{ variant?: 'primary' | 'secondary' }>
   transition: all 0.2s ease;
   border: none;
 
-  ${({ variant, theme }) =>
-    variant === 'primary'
+  ${({ $variant, theme }) =>
+    $variant === 'primary'
       ? `
     background: ${theme.gradients.primary};
     color: ${theme.colors.primaryBackground};

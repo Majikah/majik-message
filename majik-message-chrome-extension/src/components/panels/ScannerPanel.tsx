@@ -21,20 +21,77 @@ import {
 } from "../../redux/slices/system";
 
 import ConfirmationButton from "../foundations/ConfirmationButton";
-import {
-  SectionSubTitle,
-  SectionTitleFrame,
-} from "../../globals/styled-components";
+import { SectionSubTitle } from "../../globals/styled-components";
 import { MajikMessageDatabase } from "../majik-context-wrapper/majik-message-database";
 import ThemeToggle from "../functional/ThemeToggle";
+import GuideHelper from "../functional/GuideHelper";
 
-const Container = styled.div`
-  width: inherit;
-  height: 100%;
-  padding: 8px;
-  text-align: center;
+// ─── Layout ───────────────────────────────────────────────────────────────────
+const Root = styled.div`
   display: flex;
   flex-direction: column;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+`;
+
+// ─── Panel header ─────────────────────────────────────────────────────────────
+const PanelHeader = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px 13px;
+  border-bottom: 1px solid ${({ theme }) => theme.colors.secondaryBackground};
+  flex-shrink: 0;
+`;
+
+const HeaderLeft = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+`;
+
+const PanelTitle = styled.h2`
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: ${({ theme }) => theme.colors.textPrimary};
+  margin: 0;
+`;
+
+const PanelSubtitle = styled.p`
+  font-family: "Fira Mono", "JetBrains Mono", monospace;
+  font-size: 10px;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  margin: 0;
+  opacity: 0.5;
+  letter-spacing: 0.03em;
+`;
+
+const HeaderActions = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 6px;
+`;
+
+// ─── Scrollable body ──────────────────────────────────────────────────────────
+const Body = styled.div`
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 18px 24px;
+
+  scrollbar-width: thin;
+  scrollbar-color: ${({ theme }) =>
+    `${theme.colors.secondaryBackground} transparent`};
+
+  &::-webkit-scrollbar {
+    width: 3px;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: ${({ theme }) => theme.colors.secondaryBackground};
+    border-radius: 4px;
+  }
 `;
 
 const Row = styled.div`
@@ -191,11 +248,20 @@ const ScannerPanel: React.FC<ScannerPanelProps> = ({
   }
 
   return (
-    <Container>
-      <ThemeToggle size={45} />
-      <SectionTitleFrame>
-        <Row>
-          <h2>Scanner</h2>
+    <Root id="section-contacts">
+      <GuideHelper docsPath="https://majikah.solutions/products/majik-message/docs/contacts-documentation" />
+
+      <PanelHeader>
+        <HeaderLeft>
+          <PanelTitle>Scanner</PanelTitle>
+          <PanelSubtitle>
+            Automatically scan encrypted Majik Messages from your browser.
+          </PanelSubtitle>
+        </HeaderLeft>
+
+        <HeaderActions>
+          <ThemeToggle size={45} />
+          {/* Import */}
           <ConfirmationButton
             alertTextTitle="Clear History"
             disabled={!history || history.length === 0}
@@ -204,8 +270,8 @@ const ScannerPanel: React.FC<ScannerPanelProps> = ({
             strict
             text="Clear History"
           />
-        </Row>
-      </SectionTitleFrame>
+        </HeaderActions>
+      </PanelHeader>
       <AnimatedIconToggle
         currentValue={scannerMode}
         onUpdate={handleToggleScanning}
@@ -223,33 +289,35 @@ const ScannerPanel: React.FC<ScannerPanelProps> = ({
           },
         }}
       />
-      {showHistoryLog && (
-        <section style={{ marginTop: 12 }}>
-          <Row>
-            <SectionSubTitle>History Log</SectionSubTitle>
-          </Row>
-          <List>
-            {history.map((h, idx) => (
-              <CBaseMessage
-                key={h.id || idx}
-                itemData={h}
-                index={idx}
-                onDecrypt={handleDecryptMessage}
-              />
-            ))}
-          </List>
-          <UtilityButton
-            onClick={async () => {
-              const next = offset + PAGE;
-              const loaded = await loadPage(next);
-              if (!!loaded && loaded > 0) setOffset(next);
-            }}
-          >
-            Load more
-          </UtilityButton>
-        </section>
-      )}
-    </Container>
+      <Body>
+        {showHistoryLog && (
+          <section style={{ marginTop: 12 }}>
+            <Row>
+              <SectionSubTitle>History Log</SectionSubTitle>
+            </Row>
+            <List>
+              {history.map((h, idx) => (
+                <CBaseMessage
+                  key={h.id || idx}
+                  itemData={h}
+                  index={idx}
+                  onDecrypt={handleDecryptMessage}
+                />
+              ))}
+            </List>
+            <UtilityButton
+              onClick={async () => {
+                const next = offset + PAGE;
+                const loaded = await loadPage(next);
+                if (!!loaded && loaded > 0) setOffset(next);
+              }}
+            >
+              Load more
+            </UtilityButton>
+          </section>
+        )}
+      </Body>
+    </Root>
   );
 };
 

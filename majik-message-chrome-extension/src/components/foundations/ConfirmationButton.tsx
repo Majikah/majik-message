@@ -84,7 +84,7 @@ const ConfirmationButton: React.FC<ConfirmationButtonProps> = ({
           onClick={() => setOpen(true)}
           disabled={disabled}
           $strict={strict}
-          variant="secondary"
+          $variant="secondary"
         >
           {text}
         </Button>

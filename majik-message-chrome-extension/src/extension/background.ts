@@ -2,7 +2,7 @@
 // Handles dynamic context menu actions and forwards messages to content script
 
 import {
-  KeyStore,
+  MajikKeyStore,
   EnvelopeCache,
   MessageEnvelope,
 } from "@majikah/majik-message";
@@ -21,7 +21,7 @@ async function initMajik() {
     majikInstance =
       await MajikMessageDatabase.loadOrCreate<MajikMessageDatabase>(
         {
-          keyStore: KeyStore,
+          keyStore: MajikKeyStore,
           envelopeCache: new EnvelopeCache(undefined, "default"),
         },
         "default",
@@ -222,15 +222,16 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           console.log("[Majik] Account found", activeAccount.id);
 
           // return the Promise from unlockIdentity for next then
-          return KeyStore.unlockIdentity(activeAccount.id, passphrase).then(
-            () => ({ majik, envelope }),
-          );
+          return MajikKeyStore.unlockIdentity(
+            activeAccount.id,
+            passphrase,
+          ).then(() => ({ majik, envelope }));
         })
         .then(({ majik, envelope }) => {
           console.log("[Majik] Identity unlocked", passphrase);
 
           // return the Promise from decryptEnvelope
-          return majik.decryptEnvelope(envelope, true);
+          return majik.decryptEnvelope(envelope);
         })
         .then((decryptedString) => {
           sendResponse({ text: decryptedString });

@@ -2,15 +2,15 @@
  * MajikKeyStore.ts
  *
  * IDB persistence + in-memory cache layer for MajikKey accounts.
- * Replaces KeyStore as the account storage backend for MajikMessage.
+ * Replaces MajikKeyStore as the account storage backend for MajikMessage.
  *
  * Design:
- *   - MajikKeyJSON is the canonical storage format (replaces KeyStore.SerializedIdentity)
+ *   - MajikKeyJSON is the canonical storage format (replaces MajikKeyStore.SerializedIdentity)
  *   - MajikKey is the canonical account object (replaces KeyStoreIdentity)
  *   - In-memory Map<id, MajikKey> caches unlocked accounts for the session
  *   - All crypto (KDF, encrypt/decrypt) stays inside MajikKey — this class only does IDB
  *
- * Migration from KeyStore:
+ * Migration from MajikKeyStore:
  *   Old accounts stored as SerializedIdentity (5 fields, PBKDF2) are loaded via
  *   fromSerializedIdentity() which reconstructs a locked MajikKey from the legacy format.
  *   On next unlock, MajikKey automatically uses the correct KDF (PBKDF2 for old accounts).
@@ -21,7 +21,7 @@
  *   Key path: "id"
  *   Value: MajikKeyJSON (full MajikKey serialization)
  *
- *   Legacy store: "identities" (KeyStore format — read-only migration path)
+ *   Legacy store: "identities" (MajikKeyStore format — read-only migration path)
  */
 
 import { MajikKey, MajikKeyJSON, SerializedIdentity } from "@majikah/majik-key";
@@ -31,13 +31,13 @@ import { KDF_VERSION } from "./constants";
 // ─── IDB Config ───────────────────────────────────────────────────────────────
 
 const STORE_NAME = "majik-keys";
-const LEGACY_STORE_NAME = "identities"; // KeyStore's old store — for migration reads
-const DB_VERSION = 2; // bump from KeyStore's v1 to trigger onupgradeneeded
+const LEGACY_STORE_NAME = "identities"; // MajikKeyStore's old store — for migration reads
+const DB_VERSION = 2; // bump from MajikKeyStore's v1 to trigger onupgradeneeded
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 /**
- * The legacy SerializedIdentity shape from KeyStore.
+ * The legacy SerializedIdentity shape from MajikKeyStore.
  * Used only for reading old IDB records during migration.
  */
 interface LegacySerializedIdentity {
@@ -237,7 +237,7 @@ export class MajikKeyStore {
       return key;
     }
 
-    // 3. Legacy IDB store (KeyStore format) — migrate on read
+    // 3. Legacy IDB store (MajikKeyStore format) — migrate on read
     const legacy = await this._getLegacy(id);
     if (legacy) {
       const key = MajikKeyStore.fromLegacySerializedIdentity(legacy);
@@ -453,7 +453,7 @@ export class MajikKeyStore {
   // ── Migration: fromLegacySerializedIdentity ────────────────────────────────
 
   /**
-   * Reconstruct a locked MajikKey from a KeyStore SerializedIdentity.
+   * Reconstruct a locked MajikKey from a MajikKeyStore SerializedIdentity.
    *
    * The legacy format has:
    *   - id, publicKey (base64), fingerprint
@@ -471,7 +471,7 @@ export class MajikKeyStore {
    * is required (mnemonic needed).
    *
    * This method is also the answer to your question: it's how MajikKey
-   * accepts a SerializedIdentity from the existing KeyStore IDB.
+   * accepts a SerializedIdentity from the existing MajikKeyStore IDB.
    */
   static fromLegacySerializedIdentity(si: LegacySerializedIdentity): MajikKey {
     if (!si.id || !si.publicKey || !si.fingerprint) {
@@ -496,7 +496,7 @@ export class MajikKeyStore {
       salt: si.salt || "",
       backup: "_LEGACY", // no backup available from legacy format
       timestamp: new Date().toISOString(),
-      kdfVersion: KDF_VERSION.PBKDF2, // legacy KeyStore always used PBKDF2
+      kdfVersion: KDF_VERSION.PBKDF2, // legacy MajikKeyStore always used PBKDF2
       // mlKemPublicKey: absent — hasMlKem will be false
       // encryptedMlKemSecretKey: absent
     };
@@ -505,13 +505,13 @@ export class MajikKeyStore {
   }
 
   /**
-   * Migrate all legacy KeyStore accounts to the new MajikKeyJSON format.
+   * Migrate all legacy MajikKeyStore accounts to the new MajikKeyJSON format.
    *
    * Reads all records from the old "identities" IDB store, reconstructs
    * them as MajikKey instances, and writes them to the new "majik-keys" store.
    * Does NOT upgrade KDF or add ML-KEM keys — that requires the passphrase/mnemonic.
    *
-   * Call this once on app startup after KeyStore → MajikKeyStore transition.
+   * Call this once on app startup after MajikKeyStore → MajikKeyStore transition.
    * Safe to call multiple times (already-migrated accounts are skipped).
    */
   static async migrateAllLegacy(): Promise<{
@@ -545,12 +545,12 @@ export class MajikKeyStore {
   }
 
   /**
-   * Migrate a legacy KeyStore account to the new MajikKeyJSON format.
+   * Migrate a legacy MajikKeyStore account to the new MajikKeyJSON format.
    *
    * Reconstructs them as MajikKey instances, and writes them to the new "majik-keys" store.
    * Does NOT upgrade KDF or add ML-KEM keys — that requires the passphrase/mnemonic.
    *
-   * Call this once on app startup after KeyStore → MajikKeyStore transition.
+   * Call this once on app startup after MajikKeyStore → MajikKeyStore transition.
    * Safe to call multiple times (already-migrated accounts are skipped).
    */
   static async migrate(identity: SerializedIdentity): Promise<{
@@ -574,10 +574,10 @@ export class MajikKeyStore {
     }
   }
 
-  // ── Drop-in replacements for KeyStore methods used by MajikMessage ─────────
+  // ── Drop-in replacements for MajikKeyStore methods used by MajikMessage ─────────
 
   /**
-   * Drop-in for KeyStore.addMajikKey().
+   * Drop-in for MajikKeyStore.addMajikKey().
    * Saves the FULL MajikKeyJSON to IDB (not just 5 fields).
    */
   static async addMajikKey(key: MajikKey): Promise<void> {
@@ -585,7 +585,7 @@ export class MajikKeyStore {
   }
 
   /**
-   * Drop-in for KeyStore.unlockIdentity().
+   * Drop-in for MajikKeyStore.unlockIdentity().
    */
   static async unlockIdentity(
     id: string,
@@ -595,21 +595,21 @@ export class MajikKeyStore {
   }
 
   /**
-   * Drop-in for KeyStore.lockIdentity().
+   * Drop-in for MajikKeyStore.lockIdentity().
    */
   static lockIdentity(id: string): void {
     return this.lock(id);
   }
 
   /**
-   * Drop-in for KeyStore.hasIdentity().
+   * Drop-in for MajikKeyStore.hasIdentity().
    */
   static async hasIdentity(fingerprint: string): Promise<boolean> {
     return this.has(fingerprint);
   }
 
   /**
-   * Drop-in for KeyStore.isPassphraseValid().
+   * Drop-in for MajikKeyStore.isPassphraseValid().
    */
   static async isPassphraseValidFor(
     id: string,
@@ -619,8 +619,8 @@ export class MajikKeyStore {
   }
 
   /**
-   * Drop-in for KeyStore.updatePassphrase().
-   * Correctly upgrades KDF to Argon2id on re-encryption (KeyStore never did this).
+   * Drop-in for MajikKeyStore.updatePassphrase().
+   * Correctly upgrades KDF to Argon2id on re-encryption (MajikKeyStore never did this).
    */
   static async updatePassphrase(
     id: string,
@@ -634,7 +634,7 @@ export class MajikKeyStore {
   }
 
   /**
-   * Drop-in for KeyStore.listStoredIdentities().
+   * Drop-in for MajikKeyStore.listStoredIdentities().
    * Returns all stored MajikKey instances (loaded from IDB if needed).
    */
   static async listStoredKeys(): Promise<MajikKey[]> {
@@ -642,21 +642,21 @@ export class MajikKeyStore {
   }
 
   /**
-   * Drop-in for KeyStore.deleteIdentity().
+   * Drop-in for MajikKeyStore.deleteIdentity().
    */
   static async deleteIdentity(id: string): Promise<void> {
     return this.delete(id);
   }
 
   /**
-   * Drop-in for KeyStore.generateMnemonic().
+   * Drop-in for MajikKeyStore.generateMnemonic().
    */
   static generateMnemonic(strength: 128 | 256 = 128): string {
     return MajikKey.generateMnemonic(strength);
   }
 
   /**
-   * Drop-in for KeyStore.exportIdentityMnemonicBackup().
+   * Drop-in for MajikKeyStore.exportIdentityMnemonicBackup().
    * The account must be unlocked.
    */
   static async exportMnemonicBackup(
@@ -671,7 +671,7 @@ export class MajikKeyStore {
   }
 
   /**
-   * Drop-in for KeyStore.importIdentityFromMnemonicBackup().
+   * Drop-in for MajikKeyStore.importIdentityFromMnemonicBackup().
    * Fully upgrades the account: Argon2id KDF + ML-KEM keys in one step.
    */
   static async importFromMnemonicBackup(

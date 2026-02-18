@@ -1,5 +1,5 @@
 import styled from "styled-components";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 
 import DuoButton from "./foundations/DuoButton";
 import CustomInputField from "./foundations/CustomInputField";
@@ -24,7 +24,7 @@ const ModalContainer = styled.div`
   display: flex;
   flex-direction: column;
   gap: 10px;
-
+  color: ${({ theme }) => theme.colors.textPrimary};
   padding: 1rem 50px;
 `;
 
@@ -38,31 +38,6 @@ const ExtraButtonContainer = styled.div`
   gap: 15px;
 
   padding: 1rem 50px;
-`;
-
-const ScrollContainer = styled.div`
-  width: fit-content;
-  -webkit-overflow-scrolling: touch; // IMPORTANT for iOS
-  touch-action: pan-y; // Allows drag scroll
-  display: flex;
-  flex-direction: column;
-
-  max-height: calc(85vh - 180px);
-  overflow-y: auto;
-
-  &::-webkit-scrollbar {
-    width: 5px;
-  }
-
-  &::-webkit-scrollbar-track {
-    background: ${({ theme }) => theme.colors.secondaryBackground};
-    border-radius: 8px;
-  }
-
-  &::-webkit-scrollbar-thumb {
-    background: ${({ theme }) => theme.gradients.primary};
-    border-radius: 8px;
-  }
 `;
 
 // const SignOutButton = styled(ChoiceButton)`
@@ -79,6 +54,7 @@ interface UnlockModalProps {
   strict?: boolean;
   onSwitchAccount: (account: MajikContact) => void;
   onReset?: () => void;
+  isUnlocking?: boolean;
 }
 
 // ======== Main Component ========
@@ -92,56 +68,16 @@ const UnlockModal: React.FC<UnlockModalProps> = ({
   strict = false,
   onSwitchAccount,
   onReset,
+  isUnlocking = false,
 }) => {
   // const navigate = useNavigate();
   // const { majikah } = useMajikah();
   const [pass, setPass] = useState("");
-  const [isValid, setIsValid] = useState(false);
-  const [isChecking, setIsChecking] = useState(false);
+
   const [, setRefreshKey] = useState<number>(0);
 
   // prevents multiple auto-unlocks
   const hasUnlockedRef = useRef(false);
-
-  useEffect(() => {
-    if (!identityId) return;
-
-    const trimmed = pass.trim();
-
-    // reset state when empty
-    if (!trimmed) {
-      setIsValid(false);
-      setIsChecking(false);
-      return;
-    }
-
-    let cancelled = false;
-    setIsChecking(true);
-
-    // small debounce to avoid crypto spam
-    const timeout = setTimeout(async () => {
-      try {
-        const ok = await majik.isPassphraseValid(trimmed, identityId);
-        if (!cancelled) setIsValid(ok);
-      } finally {
-        if (!cancelled) setIsChecking(false);
-      }
-    }, 250);
-
-    return () => {
-      cancelled = true;
-      clearTimeout(timeout);
-    };
-  }, [pass, majik, identityId]);
-
-  // AUTO-UNLOCK when valid
-  useEffect(() => {
-    if (!isValid || hasUnlockedRef.current) return;
-
-    hasUnlockedRef.current = true;
-    onSubmit(pass.trim());
-    setPass("");
-  }, [isValid, pass, onSubmit]);
 
   const handleCancel = (): void => {
     onCancel();
@@ -151,7 +87,7 @@ const UnlockModal: React.FC<UnlockModalProps> = ({
   // const handleSignOut = async (): Promise<void> => {
   //   await majikah.signOut();
   //   majik.clearAllCaches();
-  //   // navigate("/majikah");
+  //   navigate("/majikah");
   //   onSignout?.();
   // };
 
@@ -163,7 +99,7 @@ const UnlockModal: React.FC<UnlockModalProps> = ({
   };
 
   const handleReset = async (): Promise<void> => {
-    const userProfile: string = "default";
+    const userProfile: string = import.meta.env.VITE_USER_PROFILE;
     await majik.resetData(userProfile);
     onReset?.();
     // navigate("/accounts");
@@ -186,59 +122,59 @@ const UnlockModal: React.FC<UnlockModalProps> = ({
               </strong>
             </DialogDescription>
           </DialogHeader>
-          <ScrollContainer>
-            <ModalContainer>
-              <MajikMessageAccountSelector
-                currentAccountId={identityId}
-                onChange={handleSwitchAccount}
-              />
-              <CustomInputField
-                currentValue={pass}
-                label="Enter Password"
-                onChange={(value) => {
-                  hasUnlockedRef.current = false; // reset if user edits
-                  setPass(value);
-                  setRefreshKey((prev) => prev + 1);
-                }}
-                type={"password"}
-                passwordType="NONE"
-                key={identityId}
-                autofocus
-              />
-            </ModalContainer>
-
-            <DuoButton
-              textButtonA="Cancel"
-              textButtonB={isChecking ? "Checking…" : "Unlock"}
-              onClickButtonA={handleCancel}
-              onClickButtonB={() => onSubmit(pass.trim())}
-              isDisabledButtonB={!pass.trim() || !isValid}
-              isDisabledButtonA={strict}
-              enableColumn
-              direction="column"
+          <ModalContainer>
+            <MajikMessageAccountSelector
+              currentAccountId={identityId}
+              onChange={handleSwitchAccount}
             />
-            <Divider>or</Divider>
-            <ExtraButtonContainer>
-              <ConfirmationButton
-                requiredText="CLEAR MY DATA"
-                text="Reset Local Accounts"
-                strict
-                alertTextTitle="Reset Local Accounts"
-                descriptionText="This will permanently remove all locally stored accounts, identities, and contacts on this device. You will be signed out and this action cannot be undone.
+            <CustomInputField
+              currentValue={pass}
+              label="Enter Password"
+              onChange={(value) => {
+                hasUnlockedRef.current = false; // reset if user edits
+                setPass(value);
+                setRefreshKey((prev) => prev + 1);
+              }}
+              type={"password"}
+              passwordType="NONE"
+              key={identityId}
+              autofocus
+            />
+            Majik Message uses Argon2. This may take several seconds, and your
+            screen may temporarily freeze. Please do not close or refresh.
+          </ModalContainer>
+
+          <DuoButton
+            textButtonA="Cancel"
+            textButtonB={isUnlocking ? "Unlocking..." : "Unlock"}
+            onClickButtonA={handleCancel}
+            onClickButtonB={() => onSubmit(pass.trim())}
+            isDisabledButtonB={!pass.trim() || isUnlocking}
+            isDisabledButtonA={strict}
+            enableColumn
+            direction="column"
+          />
+          <Divider>or</Divider>
+          <ExtraButtonContainer>
+            <ConfirmationButton
+              requiredText="CLEAR MY DATA"
+              text="Reset Local Accounts"
+              strict
+              alertTextTitle="Reset Local Accounts"
+              descriptionText="This will permanently remove all locally stored accounts, identities, and contacts on this device. You will be signed out and this action cannot be undone.
 
 However, you can re-import your accounts at any time using your saved JSON files containing the seed phrases."
-                onClick={handleReset}
-              />
+              onClick={handleReset}
+            />
 
-              {/* <SignOutButton
-              variant="secondary"
+            {/* <SignOutButton
+              $variant="secondary"
               onClick={handleSignOut}
               disabled={!majikah.isAuthenticated}
             >
               Sign Out
             </SignOutButton> */}
-            </ExtraButtonContainer>
-          </ScrollContainer>
+          </ExtraButtonContainer>
         </DialogContent>
       </DialogOverlay>
     </AlertDialog.Root>

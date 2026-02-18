@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import ContactsPanel from "../components/panels/ContactsPanel";
 import ScannerPanel from "../components/panels/ScannerPanel";
 import UnlockModal from "../components/UnlockModal";
-import { KeyStore, MajikContact } from "@majikah/majik-message";
+import { MajikKeyStore, MajikContact } from "@majikah/majik-message";
 
 import AccountsPanel from "../components/panels/AccountsPanel";
 
@@ -35,16 +35,16 @@ const RootContainer = styled.div`
 function App() {
   const { majik, loading, updateInstance } = useMajik();
   const [unlockId, setUnlockId] = useState<string | null>(null);
+  const [isUnlocking, setIsUnlocking] = useState(false);
   const [unlockResolver, setUnlockResolver] = useState<
     ((s: string) => void) | null
   >(null);
 
-  const [refreshKey, setRefreshKey] = useState<number>(0);
+  const [, setRefreshKey] = useState<number>(0);
   const [unlocked, setUnlocked] = useState<boolean>(false);
-
   useEffect(() => {
-    // Wire KeyStore.onUnlockRequested to present our React modal
-    KeyStore.onUnlockRequested = (id: string) => {
+    // Wire MajikKeyStore.onUnlockRequested to present our React modal
+    MajikKeyStore.onUnlockRequested = (id: string) => {
       return new Promise<string>((resolve) => {
         setUnlockId(id);
         setUnlockResolver(() => resolve);
@@ -52,36 +52,33 @@ function App() {
     };
 
     return () => {
-      KeyStore.onUnlockRequested = undefined;
+      MajikKeyStore.onUnlockRequested = undefined;
     };
   }, []);
 
   useEffect(() => {
-    // define an async function inside useEffect
-    const unlockIdentity = async () => {
-      try {
-        if (!majik) return;
-        const activeAccount = majik.getActiveAccount();
-        if (!activeAccount) return;
-        await majik.ensureIdentityUnlocked(activeAccount.id);
-        toast.success("Access granted", {
-          description: "Your identity has been securely unlocked.",
-          id: "toast-success-unlock",
-        });
+    if (!majik) return;
 
-        console.log("Access granted: Identity unlocked");
-      } catch (err) {
-        toast.error("Unlock failed", {
-          description: `${err}`,
-          id: "toast-error-unlock",
-        });
-        console.warn("Failed to unlock identity:", err);
+    const active = majik.getActiveAccount();
+    if (!active) return;
+
+    try {
+      // Try accessing private key
+      MajikKeyStore.getPrivateKey(active.id);
+
+      // If no error → already unlocked
+      setUnlocked(true);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (err: any) {
+      const needsUnlock =
+        err instanceof Error &&
+        /must be unlocked|unlockIdentity/.test(err.message);
+
+      if (needsUnlock) {
+        setUnlockId(active.id);
       }
-    };
-
-    // call the async function
-    unlockIdentity();
-  }, [majik]); // add dependencies as needed
+    }
+  }, [majik]);
 
   const handleCancel = (): void => {
     if (unlockResolver) unlockResolver("");
@@ -101,24 +98,33 @@ function App() {
       id: "toast-success-unlock",
     });
   };
-
-  const handleSubmit = (pass: string): void => {
+  const handleSubmit = async (pass: string): Promise<void> => {
+    if (!majik || !unlockId || isUnlocking) return;
     if (unlockResolver) unlockResolver(pass);
-    setUnlockId(null);
-    setUnlockResolver(null);
-    setUnlocked(true);
+    try {
+      setIsUnlocking(true);
+
+      await MajikKeyStore.unlockIdentity(unlockId, pass);
+
+      toast.success("Access granted", {
+        description: "Your identity has been securely unlocked.",
+      });
+
+      setUnlockId(null);
+      setUnlockResolver(null);
+      setUnlocked(true);
+    } catch {
+      toast.error("Incorrect passphrase. Please try again.");
+      // modal stays open
+    } finally {
+      setIsUnlocking(false);
+    }
   };
 
   const handleRefreshInstance = (data: MajikMessageDatabase): void => {
     updateInstance(data);
     setRefreshKey((prev) => prev + 1);
   };
-
-  const userAccounts = useMemo(() => {
-    if (!majik) return [];
-
-    return majik.listOwnAccounts();
-  }, [majik, refreshKey]);
 
   if (!!loading) {
     return (
@@ -139,13 +145,7 @@ function App() {
       id: "accounts",
       icon: UserIcon,
       name: "Accounts",
-      content: (
-        <AccountsPanel
-          majik={majik}
-          onUpdate={handleRefreshInstance}
-          accounts={userAccounts}
-        />
-      ),
+      content: <AccountsPanel majik={majik} onUpdate={handleRefreshInstance} />,
     },
     {
       id: "contacts",
@@ -157,7 +157,7 @@ function App() {
       id: "messsage",
       name: "Message",
       icon: EnvelopeIcon,
-      content: <MessagePanel majik={majik} onUpdate={handleRefreshInstance} />,
+      content: <MessagePanel majik={majik} />,
     },
     {
       id: "scanner",
@@ -179,6 +179,7 @@ function App() {
         onSignout={() => setUnlockId(null)}
         onSwitchAccount={handleSwitchAccount}
         onReset={handleCancel}
+        isUnlocking={isUnlocking}
       />
       <Toaster expand={true} position="top-right" />
     </RootContainer>

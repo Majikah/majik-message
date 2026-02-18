@@ -4,14 +4,13 @@ import styled from "styled-components";
 import DuoButton from "./DuoButton";
 import { isDevEnvironment } from "../../utils/utils";
 import { ButtonPrimaryConfirm } from "../../globals/buttons";
-
 // Styled component for the frosted glass effect and full space usage
 const RootContainer = styled.div`
   display: flex;
   flex-direction: column;
   justify-content: center;
 
-  height: inherit;
+  height: auto;
   user-select: none;
 `;
 
@@ -21,6 +20,7 @@ const ScrollContainer = styled.div`
   touch-action: pan-y; // Allows drag scroll
   display: flex;
   flex-direction: column;
+  height: 100%;
 
   padding: 1rem 50px;
   max-height: calc(85vh - 180px);
@@ -50,7 +50,10 @@ interface ScrollableFormProps {
   onClickProceed: () => void;
   isDisabledCancel?: boolean;
   isDisabledProceed?: boolean;
+  hideButtonA?: boolean;
+  hideButtonB?: boolean;
   onDebug?: () => void;
+  confirmationText?: string;
 }
 
 // Stateless functional component
@@ -62,7 +65,10 @@ const ScrollableForm: React.FC<ScrollableFormProps> = ({
   onClickProceed,
   isDisabledCancel = false,
   isDisabledProceed = false,
+  hideButtonA = false,
+  hideButtonB = false,
   onDebug,
+  confirmationText = "Are you sure you want to proceed with this action?",
 }) => {
   return (
     <RootContainer>
@@ -76,6 +82,9 @@ const ScrollableForm: React.FC<ScrollableFormProps> = ({
         isDisabledButtonA={isDisabledCancel}
         isDisabledButtonB={isDisabledProceed}
         strictMode={true}
+        hideButtonA={hideButtonA}
+        hideButtonB={hideButtonB}
+        confirmationText={confirmationText}
       />
       {isDevEnvironment() && !!onDebug && (
         <ButtonPrimaryConfirm onClick={onDebug}>

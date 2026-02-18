@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from "../../globals/styled-dialogs";
 import ScrollableForm from "./ScrollableForm";
+import DynamicPlaceholder from "./DynamicPlaceholder";
 
 const Button = styled(ActionButton)`
   min-width: 100px;
@@ -26,6 +27,7 @@ const ModalContainer = styled.div`
 `;
 
 interface PopUpFormButtonProps {
+  id?: string;
   text?: string;
   disabled?: boolean;
   icon?: React.ComponentType;
@@ -43,17 +45,23 @@ interface PopUpFormButtonProps {
       onClick?: () => void;
       isDisabled?: boolean;
       hide?: boolean;
+      confirmationText?: string;
     };
   };
   modal: {
     title: string;
     description: string;
   };
+  loading?: {
+    isLoading?: boolean;
+    text?: string;
+  };
   isOpen?: boolean;
   onOpenChange?: (open: boolean) => void;
 }
 
 const PopUpFormButton: React.FC<PopUpFormButtonProps> = ({
+  id,
   text = "Confirm",
   disabled = false,
   icon,
@@ -69,11 +77,16 @@ const PopUpFormButton: React.FC<PopUpFormButtonProps> = ({
       text: "Confirm",
       isDisabled: false,
       hide: false,
+      confirmationText: "Are you sure you want to proceed with this action?",
     },
   },
   modal = {
     title: "Confirm Action",
     description: "Are you sure you want to proceed with this action?",
+  },
+  loading = {
+    isLoading: false,
+    text: "Loading...",
   },
   isOpen,
   onOpenChange,
@@ -102,9 +115,10 @@ const PopUpFormButton: React.FC<PopUpFormButtonProps> = ({
           onClick={() => setOpen(true)}
           disabled={disabled}
           title={`${text}: ${modal.description}`}
+          id={id}
         />
       ) : (
-        <Button onClick={() => setOpen(true)} disabled={disabled}>
+        <Button onClick={() => setOpen(true)} disabled={disabled} id={id}>
           {text}
         </Button>
       )}
@@ -118,7 +132,11 @@ const PopUpFormButton: React.FC<PopUpFormButtonProps> = ({
               <DialogDescription>{modal.description} </DialogDescription>
             </DialogHeader>
 
-            {scrollable ? (
+            {loading.isLoading ? (
+              <ModalContainer>
+                <DynamicPlaceholder loading>{loading.text} </DynamicPlaceholder>
+              </ModalContainer>
+            ) : scrollable ? (
               <ScrollableForm
                 onClickCancel={handleOnCancel}
                 onClickProceed={handleOnConfirm}
@@ -126,6 +144,7 @@ const PopUpFormButton: React.FC<PopUpFormButtonProps> = ({
                 isDisabledProceed={buttons.confirm.isDisabled}
                 textCancelButton={buttons.cancel.text}
                 textProceedButton={buttons.confirm.text}
+                confirmationText={buttons.confirm.confirmationText}
               >
                 {[children]}
               </ScrollableForm>
@@ -142,6 +161,7 @@ const PopUpFormButton: React.FC<PopUpFormButtonProps> = ({
                   isDisabledButtonB={buttons.confirm.isDisabled}
                   hideButtonA={buttons.cancel.hide}
                   hideButtonB={buttons.confirm.hide}
+                  confirmationText={buttons.confirm.confirmationText}
                 />
               </>
             )}
