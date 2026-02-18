@@ -626,7 +626,8 @@ export class MajikMessage {
     if (!recipientPublicKeys.length)
       throw new Error("At least one recipient is required");
 
-    const recipients = await this._resolveRecipientsByPublicKey(recipientPublicKeys);
+    const recipients =
+      await this._resolveRecipientsByPublicKey(recipientPublicKeys);
     const sender = this.getActiveAccount();
 
     const envelope = await MajikEnvelope.encrypt({
@@ -692,18 +693,18 @@ export class MajikMessage {
    */
   async encryptTextForScanner(
     plaintext: string,
-    recipientIds: string[] = [],
+    recipientPubKeys: string[] = [],
     cache = true,
   ): Promise<string | null> {
     if (!plaintext?.trim()) return null;
 
     try {
-      if (!recipientIds.length) {
+      if (!recipientPubKeys.length) {
         const first = this.listOwnAccounts()[0];
         if (!first) throw new Error("No own account available for encryption");
-        recipientIds = [first.id];
+        recipientPubKeys = [first.id];
       }
-      return await this.composeMessage(recipientIds, plaintext, cache);
+      return await this.composeMessage(recipientPubKeys, plaintext, cache);
     } catch (err) {
       console.warn("Error: ", err);
       this.emit("error", err, { context: "encryptTextForScanner" });

@@ -157,10 +157,15 @@ const NewMessageForm: React.FC<NewMessageFormProps> = ({ majikah, majik, onUpdat
       return
     }
 
-    const recipientIds = recipients.map((contact) => contact.id)
+    const recipientPubKeys = await Promise.all(
+      recipients.map(async (r) => {
+        const rBase64 = await r.getPublicKeyBase64()
+        return rBase64
+      })
+    )
 
-    const encryptedMessage = await majik.encryptTextForScanner(input, recipientIds, false)
-    setOutput(encryptedMessage ?? '')
+    const encrypted = await majik.encryptTextForScanner(input, recipientPubKeys, false)
+    setOutput(encrypted ?? '')
   }
 
   const processSend = async (

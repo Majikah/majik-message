@@ -1,3 +1,4 @@
+// encryption-engine.ts from @majikah/majik-message
 import { mnemonicToSeedSync } from "@scure/bip39";
 import * as ed25519 from "@stablelib/ed25519";
 import ed2curve from "ed2curve";

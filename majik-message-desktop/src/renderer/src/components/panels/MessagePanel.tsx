@@ -281,8 +281,14 @@ const MessagePanel: React.FC<MessagePanelProps> = ({ majik }) => {
     if (!myAccount) return 'No active account found.'
     if (!recipients || recipients.length === 0) return 'No recipients selected.'
 
-    const recipientIds = recipients.map((c) => c.id)
-    const encrypted = await majik.encryptTextForScanner(input, recipientIds, false)
+    const recipientPubKeys = await Promise.all(
+      recipients.map(async (r) => {
+        const rBase64 = await r.getPublicKeyBase64()
+        return rBase64
+      })
+    )
+
+    const encrypted = await majik.encryptTextForScanner(input, recipientPubKeys, false)
     return encrypted ?? ''
   }
 
