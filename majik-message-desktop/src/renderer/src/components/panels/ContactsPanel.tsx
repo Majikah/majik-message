@@ -321,7 +321,7 @@ const AccountsPanel: React.FC<AccountsPanelProps> = ({ majik, onUpdate }) => {
             <CustomInputField
               currentValue={inviteKey}
               onChange={(e) => setInviteKey(e)}
-              maxChar={500}
+              maxChar={5000}
               label="Invite Key"
               required
               importProp={{

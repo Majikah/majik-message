@@ -371,7 +371,6 @@ const CBaseUserAccount: React.FC<CBaseUserAccountProps> = ({
     passphrase: { old: '', new: '' }
   })
   const [newName, setNewName] = useState<string | null>(itemData?.meta?.label || null)
-  const [isValid, setIsValid] = useState<boolean>(false)
   const [isChecking, setIsChecking] = useState<boolean>(false)
   const [publicKey, setPublicKey] = useState<string>('Loading…')
   const [isAccountOnline, setIsAccountOnline] = useState<boolean | undefined>(
@@ -421,34 +420,6 @@ const CBaseUserAccount: React.FC<CBaseUserAccountProps> = ({
     }
   }, [majik, itemData.id, isAccountOnline, majikah.isAuthenticated])
 
-  // ── Passphrase validation (debounced) ─────────────────────────────────────
-  useEffect(() => {
-    if (!majik || !itemData?.id) return
-    const trimmed = passphraseUpdate?.passphrase?.old?.trim()
-    if (!trimmed) {
-      setIsValid(false)
-      setIsChecking(false)
-      return
-    }
-
-    let cancelled = false
-    setIsChecking(true)
-
-    const timeout = setTimeout(async () => {
-      try {
-        const ok = await majik.isPassphraseValid(trimmed, itemData.id)
-        if (!cancelled) setIsValid(ok)
-      } finally {
-        if (!cancelled) setIsChecking(false)
-      }
-    }, 250)
-
-    return () => {
-      cancelled = true
-      clearTimeout(timeout)
-    }
-  }, [passphraseUpdate?.passphrase?.old, majik, itemData.id])
-
   // ── Handlers ───────────────────────────────────────────────────────────────
   const handleOnPressed = (): void => {
     if (isDevEnvironment()) console.log('Account pressed:', itemData)
@@ -456,7 +427,23 @@ const CBaseUserAccount: React.FC<CBaseUserAccountProps> = ({
     onPressed?.(itemData)
   }
 
-  const handleSubmitPassphraseUpdate = (): void => {
+  const processUpdatePassphrase = async (): Promise<string> => {
+    const isOldPasswordValid = await majik.isPassphraseValid(
+      passphraseUpdate.passphrase.old.trim(),
+      itemData.id
+    )
+
+    if (!isOldPasswordValid) {
+      throw new Error('Old password is invalid')
+    }
+
+    onUpdatePassphrase?.(passphraseUpdate)
+    resetSubmission()
+
+    return `Password for ${itemData.meta?.label || itemData.id} updated successfully.`
+  }
+
+  const handleUpdatePassphrase = (): void => {
     if (!itemData) return
     if (passphraseUpdate.passphrase.old === passphraseUpdate.passphrase.new) {
       toast.error('Invalid Password', {
@@ -465,8 +452,27 @@ const CBaseUserAccount: React.FC<CBaseUserAccountProps> = ({
       resetSubmission()
       return
     }
-    onUpdatePassphrase?.(passphraseUpdate)
-    resetSubmission()
+
+    setIsChecking(true)
+
+    toast.promise(processUpdatePassphrase(), {
+      loading: 'Updating password...',
+      success: (msg) => {
+        window.electron.notify(
+          'Password Updated Successfully',
+          `Password for updated successfully.`
+        )
+        setIsChecking(false)
+
+        return msg
+      },
+      error: (err) => {
+        console.error(err)
+        setIsChecking(false)
+
+        return `${err}`
+      }
+    })
   }
 
   const handleSubmitNameUpdate = (): void => {
@@ -607,19 +613,25 @@ const CBaseUserAccount: React.FC<CBaseUserAccountProps> = ({
                 text="Change Passphrase"
                 modal={{
                   title: 'Change Passphrase',
-                  description: 'Update your account passphrase.'
+                  description:
+                    'Updating your account passphrase using Argon2. This process may take several seconds, and your screen may temporarily freeze. Please do not close or refresh.'
                 }}
                 buttons={{
                   cancel: { text: 'Cancel' },
                   confirm: {
-                    text: 'Save Changes',
+                    text: isChecking ? 'Updating...' : 'Save Changes',
                     isDisabled:
                       !passphraseUpdate?.id?.trim() ||
-                      !isValid ||
                       !passphraseUpdate?.passphrase?.old?.trim() ||
-                      !passphraseUpdate?.passphrase?.new?.trim(),
-                    onClick: handleSubmitPassphraseUpdate
+                      !passphraseUpdate?.passphrase?.new?.trim() ||
+                      isChecking,
+                    onClick: handleUpdatePassphrase,
+                    confirmationText:
+                      'Are you sure you want to proceed with this action? This may take up to a few seconds to complete.'
                   }
+                }}
+                loading={{
+                  isLoading: isChecking
                 }}
               >
                 <CustomInputField
@@ -634,7 +646,7 @@ const CBaseUserAccount: React.FC<CBaseUserAccountProps> = ({
                   passwordType="NONE"
                   currentValue={passphraseUpdate.passphrase.old}
                 />
-                {!isChecking && isValid && (
+                {passphraseUpdate.passphrase.old?.trim() && (
                   <CustomInputField
                     label="Enter New Password"
                     onChange={(value) =>
@@ -646,7 +658,6 @@ const CBaseUserAccount: React.FC<CBaseUserAccountProps> = ({
                     type="password"
                     passwordType="NONE"
                     currentValue={passphraseUpdate.passphrase.new}
-                    disabled={!isValid}
                   />
                 )}
               </PopUpFormButton>

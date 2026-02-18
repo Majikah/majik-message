@@ -1,5 +1,5 @@
 import styled from 'styled-components'
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 
 import DuoButton from './foundations/DuoButton'
 import CustomInputField from './foundations/CustomInputField'
@@ -24,7 +24,7 @@ const ModalContainer = styled.div`
   display: flex;
   flex-direction: column;
   gap: 10px;
-
+  color: ${({ theme }) => theme.colors.textPrimary};
   padding: 1rem 50px;
 `
 
@@ -54,6 +54,7 @@ interface UnlockModalProps {
   strict?: boolean
   onSwitchAccount: (account: MajikContact) => void
   onReset?: () => void
+  isUnlocking?: boolean
 }
 
 // ======== Main Component ========
@@ -66,57 +67,17 @@ const UnlockModal: React.FC<UnlockModalProps> = ({
   onSignout,
   strict = false,
   onSwitchAccount,
-  onReset
+  onReset,
+  isUnlocking = false
 }) => {
   const navigate = useNavigate()
   const { majikah } = useMajikah()
   const [pass, setPass] = useState('')
-  const [isValid, setIsValid] = useState(false)
-  const [isChecking, setIsChecking] = useState(false)
+
   const [, setRefreshKey] = useState<number>(0)
 
   // prevents multiple auto-unlocks
   const hasUnlockedRef = useRef(false)
-
-  useEffect(() => {
-    if (!identityId) return
-
-    const trimmed = pass.trim()
-
-    // reset state when empty
-    if (!trimmed) {
-      setIsValid(false)
-      setIsChecking(false)
-      return
-    }
-
-    let cancelled = false
-    setIsChecking(true)
-
-    // small debounce to avoid crypto spam
-    const timeout = setTimeout(async () => {
-      try {
-        const ok = await majik.isPassphraseValid(trimmed, identityId)
-        if (!cancelled) setIsValid(ok)
-      } finally {
-        if (!cancelled) setIsChecking(false)
-      }
-    }, 250)
-
-    return () => {
-      cancelled = true
-      clearTimeout(timeout)
-    }
-  }, [pass, majik, identityId])
-
-  // AUTO-UNLOCK when valid
-  useEffect(() => {
-    if (!isValid || hasUnlockedRef.current) return
-
-    hasUnlockedRef.current = true
-    onSubmit(pass.trim())
-    setPass('')
-  }, [isValid, pass, onSubmit])
 
   const handleCancel = (): void => {
     onCancel()
@@ -177,14 +138,16 @@ const UnlockModal: React.FC<UnlockModalProps> = ({
               key={identityId}
               autofocus
             />
+            Majik Message uses Argon2. This may take several seconds, and your screen may
+            temporarily freeze. Please do not close or refresh.
           </ModalContainer>
 
           <DuoButton
             textButtonA="Cancel"
-            textButtonB={isChecking ? 'Checking…' : 'Unlock'}
+            textButtonB={isUnlocking ? 'Unlocking...' : 'Unlock'}
             onClickButtonA={handleCancel}
             onClickButtonB={() => onSubmit(pass.trim())}
-            isDisabledButtonB={!pass.trim() || !isValid}
+            isDisabledButtonB={!pass.trim() || isUnlocking}
             isDisabledButtonA={strict}
             enableColumn
             direction="column"
@@ -203,7 +166,7 @@ However, you can re-import your accounts at any time using your saved JSON files
             />
 
             <SignOutButton
-              variant="secondary"
+              $variant="secondary"
               onClick={handleSignOut}
               disabled={!majikah.isAuthenticated}
             >

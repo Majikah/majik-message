@@ -9,6 +9,8 @@ import { arrayToBase64, autogenerateID } from "../../utils/utilities";
 import { MajikMessageIdentity } from "../system/identity";
 import { MajikMessageChatJSON, RedisKey } from "./types";
 
+const MAX_MESSAGE_SIZE = 1024 * 1024; // 1MB
+
 /**
  * Represents a temporary, compressed message with automatic expiration.
  * Messages are automatically compressed on creation and stored in Redis by default.
@@ -160,7 +162,7 @@ export class MajikMessageChat {
    * Creates a new message instance with automatic compression.
    * @param account - Majik Message identity account of the message sender
    * @param message - Plain text message that will be automatically compressed
-   * @param recipients - Array of recipient user IDs
+   * @param recipients - Array of recipient public keys
    * @param expiresInMs - Time until expiration in milliseconds (default: 24 hours)
    * @returns Promise resolving to new MajikMessageChat instance with compressed message
    * @throws Error if validation or compression fails
@@ -168,7 +170,7 @@ export class MajikMessageChat {
   static async create(
     account: MajikMessageIdentity,
     message: string,
-    recipients: string[],
+    recipients: MajikMessagePublicKey[],
     expiresInMs: number = 24 * 60 * 60 * 1000,
     permanent: boolean = false,
   ): Promise<MajikMessageChat> {
@@ -718,5 +720,10 @@ export class MajikMessageChat {
       typeof json.expires_at === "string" &&
       Array.isArray(json.read_by)
     );
+  }
+
+  static trimMessage(message: string): string {
+    // Basic sanitization - adjust based on your needs
+    return message.trim().slice(0, MAX_MESSAGE_SIZE);
   }
 }

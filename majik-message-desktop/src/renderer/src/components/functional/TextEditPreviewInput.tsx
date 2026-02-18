@@ -269,6 +269,7 @@ interface TextEditPreviewInputProps {
   onDecrypt: (input: string) => Promise<string>
   onModeChange?: (mode: Mode) => void
   downloadName?: string
+  externalRefreshKey?: number
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -276,7 +277,8 @@ const TextEditPreviewInput: React.FC<TextEditPreviewInputProps> = ({
   onEncrypt,
   onDecrypt,
   onModeChange,
-  downloadName
+  downloadName,
+  externalRefreshKey
 }) => {
   const [mode, setMode] = useState<Mode>('encrypt')
   const [input, setInput] = useState('')
@@ -311,7 +313,7 @@ const TextEditPreviewInput: React.FC<TextEditPreviewInputProps> = ({
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [input, mode])
+  }, [input, mode, externalRefreshKey])
 
   // ── Mode switch ────────────────────────────────────────────────────────────
   /**

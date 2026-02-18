@@ -257,6 +257,7 @@ export class MajikContactDirectory {
       const contact = MajikContact.create(
         item.id,
         publicKey as any,
+        item.mlKey,
         item.fingerprint,
         item.meta,
       );

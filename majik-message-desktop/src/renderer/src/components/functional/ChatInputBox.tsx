@@ -554,8 +554,6 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
 
     if (!composed) return
 
-    console.log('Sending', composed)
-
     try {
       await onSend(composed)
       setValue('')

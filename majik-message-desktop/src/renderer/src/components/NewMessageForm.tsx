@@ -181,13 +181,12 @@ const NewMessageForm: React.FC<NewMessageFormProps> = ({ majikah, majik, onUpdat
       throw new Error('Assign recipients first.')
     }
 
-    const messageRecipients = (
-      await Promise.all(
-        recipients.filter((r) => r.isMajikahRegistered()).map(async (r) => r.getPublicKeyBase64())
-      )
-    ).filter((pk) => pk !== senderPublicKey)
+    const messageRecipients = await Promise.all(
+      recipients.filter((r) => r.isMajikahRegistered()).map(async (r) => r.getPublicKeyBase64())
+    )
+    // .filter((pk) => pk !== senderPublicKey)
 
-    const sendMessageResponse = await majik.createMessage(messageRecipients, text)
+    const sendMessageResponse = await majik.sendMessage(messageRecipients, text)
 
     if (
       sendMessageResponse !== null &&

@@ -198,18 +198,8 @@ const MessagePanel: React.FC<MessagePanelProps> = ({ majik }) => {
     return active ? [active] : []
   })
 
-  // ── Decrypt-mode: contacts extracted from the envelope ────────────────────
-  /**
-   * Populated by `handleDecryptMessage` after a successful decryption.
-   * Cleared whenever the mode switches back to "encrypt" or input is cleared.
-   *
-   * Extraction strategy:
-   *   - Parse the raw envelope string with `MessageEnvelope.fromMatchedString`
-   *   - Solo message (isSolo): one fingerprint via `extractFingerprint()`
-   *   - Group message (isGroup): many fingerprints from `payload.keys[].fingerprint`
-   *   - Resolve fingerprints → MajikContact via `majik.listContacts(true)`
-   *     (true = include own accounts so self-addressed messages also resolve)
-   */
+  const [recipientsVersion, setRecipientsVersion] = useState(0)
+
   const [detectedContacts, setDetectedContacts] = useState<MajikContact[]>([])
 
   // ── Unlock identity on mount ───────────────────────────────────────────────
@@ -265,10 +255,12 @@ const MessagePanel: React.FC<MessagePanelProps> = ({ majik }) => {
     } else {
       setRecipients(updated)
     }
+    setRecipientsVersion((v) => v + 1)
   }
 
   const handleRecipientsClear = (): void => {
     setRecipients(myAccount ? [myAccount] : [])
+    setRecipientsVersion((v) => v + 1)
   }
 
   // ── Mode change callback from TextEditPreviewInput ────────────────────────
@@ -294,22 +286,6 @@ const MessagePanel: React.FC<MessagePanelProps> = ({ majik }) => {
     return encrypted ?? ''
   }
 
-  // ── Decrypt + extract recipients from envelope ─────────────────────────────
-  /**
-   * After decryption, we parse the same input string as a MessageEnvelope
-   * to extract which fingerprints were addressed, then resolve them to
-   * MajikContact objects so the selector can display them in read-only mode.
-   *
-   * Envelope anatomy:
-   *   Solo:  [version 1 byte][fingerprint 32 bytes][encrypted payload JSON]
-   *          → extractFingerprint() → one fingerprint
-   *   Group: [version 1 byte][marker 32 bytes][payload JSON with keys[].fingerprint]
-   *          → extractEncryptedPayload().keys[].fingerprint → N fingerprints
-   *
-   * Fingerprint resolution:
-   *   majik.listContacts(true) includes own accounts (true = all contacts).
-   *   Match contact.fingerprint === envelopeFingerprint.
-   */
   const handleDecryptMessage = async (input: string): Promise<string> => {
     if (!input?.trim()) {
       setDetectedContacts([])
@@ -319,7 +295,7 @@ const MessagePanel: React.FC<MessagePanelProps> = ({ majik }) => {
 
     // Step 1: Decrypt
     const envelope = MessageEnvelope.fromMatchedString(input)
-    const decrypted = await majik.decryptEnvelope(envelope, true)
+    const decrypted = await majik.decryptEnvelope(envelope)
 
     // Step 2: Extract fingerprints from the same envelope
     try {
@@ -328,7 +304,7 @@ const MessagePanel: React.FC<MessagePanelProps> = ({ majik }) => {
 
       let resolved: MajikContact[] = []
 
-      if (envelope.isSolo()) {
+      if (envelope.isSingle()) {
         // Single fingerprint at bytes [1..32]
         const fp = envelope.extractFingerprint()
         const contact = fingerprintMap.get(fp)
@@ -365,18 +341,6 @@ const MessagePanel: React.FC<MessagePanelProps> = ({ majik }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [majik, refreshKey])
 
-  // ── Derived: which contacts + which mode to show in the selector ───────────
-  /**
-   * In decrypt mode:
-   *   - `selectorContacts` = empty (no dropdown needed)
-   *   - `selectorValue`    = detectedContacts (read-only display)
-   *   - `disabled`         = true
-   *
-   * In encrypt mode:
-   *   - `selectorContacts` = full contact list (for dropdown)
-   *   - `selectorValue`    = user-selected recipients
-   *   - `disabled`         = false
-   */
   const isDecryptMode = mode === 'decrypt'
   const selectorContacts = isDecryptMode ? [] : contacts
   const selectorValue = isDecryptMode ? detectedContacts : recipients
@@ -481,6 +445,7 @@ const MessagePanel: React.FC<MessagePanelProps> = ({ majik }) => {
             onDecrypt={handleDecryptMessage}
             onModeChange={handleModeChange}
             downloadName={`Message from ${myAccount?.meta?.label || myAccount?.id}`}
+            externalRefreshKey={recipientsVersion}
           />
         </Body>
       )}

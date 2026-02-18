@@ -15,6 +15,11 @@ if (process.contextIsolated) {
       ...electronAPI,
       importAccount: () => ipcRenderer.invoke('import-account'),
       importContact: () => ipcRenderer.invoke('import-contact'),
+      unlockIdentity: (majikKeyJson: any, passphrase: string) =>
+        ipcRenderer.invoke('unlock-identity', {
+          majikKeyJson,
+          passphrase
+        }),
       // Add listeners for menu events
       onToggleDarkMode: (callback: any) => {
         ipcRenderer.on('trigger-toggle-dark-mode', callback)

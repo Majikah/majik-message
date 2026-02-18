@@ -3,6 +3,7 @@
  * ================================ */
 
 import { customAlphabet } from "nanoid";
+import { MnemonicJSON } from "../types";
 
 // utils/utilities.ts
 export function arrayToBase64(data: Uint8Array): string {
@@ -54,7 +55,7 @@ export function utf8ToBase64(str: string): string {
 
 export function concatArrayBuffers(
   a: ArrayBuffer,
-  b: ArrayBuffer
+  b: ArrayBuffer,
 ): ArrayBuffer {
   const tmp = new Uint8Array(a.byteLength + b.byteLength);
   tmp.set(new Uint8Array(a), 0);
@@ -69,19 +70,13 @@ export function concatUint8Arrays(a: Uint8Array, b: Uint8Array): Uint8Array {
   return out;
 }
 
-export interface MnemonicJSON {
-  seed: string[];
-  id: string;
-  phrase?: string;
-}
-
 /**
  * Converts a space-separated seed phrase string into MnemonicJSON
  */
 export function seedToJSON(
   seed: string,
   id: string,
-  phrase?: string
+  phrase?: string,
 ): MnemonicJSON {
   return {
     seed: seed
@@ -119,7 +114,7 @@ export function autogenerateID(prefix: string = "mjkmsg"): string {
   // Create the generator function ONCE with your custom alphabet and length
   const generateID = customAlphabet(
     "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
-    8
+    8,
   );
 
   // Call the generator function to produce the actual ID string

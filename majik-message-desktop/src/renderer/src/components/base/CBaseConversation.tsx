@@ -238,7 +238,7 @@ export const CBaseConversation: React.FC<CBaseConversationProps> = ({
     }
 
     majik
-      .decryptEnvelope(envelope, true)
+      .decryptEnvelope(envelope)
       .then((plaintext) => {
         if (isMounted.current) {
           setDecryptedMessage(plaintext ?? '')

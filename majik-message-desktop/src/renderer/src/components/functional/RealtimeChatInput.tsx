@@ -64,13 +64,25 @@ export const RealtimeChatInput: React.FC<RealtimeChatInputProps> = ({
       throw new Error('A valid sender public key is required.')
     }
 
+    if (!majik.currentIdentity) {
+      throw new Error('You must have an active identity set.')
+    }
+
     if (!conversationID?.trim()) {
       throw new Error('Select a conversation first.')
     }
 
-    const recipients = participants.filter((account) => !account.includes(senderPublicKey))
+    // const recipients = participants.filter((account) => !account.includes(senderPublicKey))
 
-    client.sendMessage(text, recipients)
+    const composedChatMessage = await majik.createEncryptedMajikMessageChat(
+      majik.currentIdentity,
+      participants,
+      text
+    )
+
+    console.log('Result: ', composedChatMessage)
+
+    client.sendMessage(composedChatMessage.messageChat)
     return `Message sent!`
   }
 

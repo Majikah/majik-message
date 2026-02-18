@@ -338,22 +338,25 @@ const CBaseChatBubble: React.FC<CBaseChatBubbleProps> = ({
     let envelope: MessageEnvelope
     try {
       envelope = MessageEnvelope.fromMatchedString(message.getCompressedMessage())
-    } catch {
+    } catch (error) {
+      console.warn('Problem parsing Envelope: ', error)
       setText('[Unable to decrypt message]')
       return
     }
 
     if (!envelope) {
+      console.warn('Envelope not found')
       setText('[Unable to decrypt message]')
       return
     }
 
     majik
-      .decryptEnvelope(envelope, true)
+      .decryptEnvelope(envelope)
       .then((msg: string) => {
         if (isMounted.current) setText(msg ?? '')
       })
-      .catch(() => {
+      .catch((error) => {
+        console.warn('Problem Decrypting: ', error)
         if (isMounted.current) setText('[Unable to decrypt message]')
       })
 

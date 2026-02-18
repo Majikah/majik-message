@@ -42,6 +42,7 @@ interface DuoButtonProps {
   enableColumn?: boolean
   strictMode?: boolean
   direction?: 'row' | 'column'
+  confirmationText?: string
 }
 
 const DuoButton: React.FC<DuoButtonProps> = ({
@@ -55,7 +56,8 @@ const DuoButton: React.FC<DuoButtonProps> = ({
   hideButtonB = false,
   enableColumn = false,
   strictMode = false,
-  direction = 'row'
+  direction = 'row',
+  confirmationText = 'Are you sure you want to proceed with this action?'
 }) => {
   const [open, setOpen] = useState<boolean>(false)
 
@@ -97,9 +99,7 @@ const DuoButton: React.FC<DuoButtonProps> = ({
           <DialogContent $zOffset={999}>
             <DialogHeader>
               <DialogTitle>Confirm Action</DialogTitle>
-              <DialogDescription>
-                Are you sure you want to proceed with this action?
-              </DialogDescription>
+              <DialogDescription>{confirmationText}</DialogDescription>
             </DialogHeader>
             <RowContainer $enableColumn={enableColumn}>
               <ChoiceButton $variant="secondary" onClick={handleOnCancel}>

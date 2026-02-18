@@ -197,67 +197,68 @@ const AccountsPanel: React.FC<AccountsPanelProps> = ({ majik, onUpdate }) => {
   }, [majik])
 
   // ── Create account ─────────────────────────────────────────────────────────
-  const handleCreate = async (): Promise<void> => {
-    try {
-      let accountID = 'Unknown'
 
-      if (mnemonic?.trim().length > 0) {
-        if (!passphrase?.trim()) {
-          toast.error('Failed to create account', {
-            description: 'Password must be a non-empty string.',
-            id: 'toast-error-create'
-          })
-          return
-        }
+  const processCreateAccount = async (): Promise<string> => {
+    let accountID = 'Unknown'
 
-        const createdAccount = await majik.createAccountFromMnemonic(
-          mnemonic.trim(),
-          passphrase,
-          label
-        )
-        accountID = createdAccount.id
+    const createdAccount = await majik.createAccountFromMnemonic(mnemonic.trim(), passphrase, label)
+    accountID = createdAccount.id
 
-        const jsonData: MnemonicJSON = {
-          id: createdAccount.backup,
-          seed: seedStringToArray(mnemonic.trim()),
-          phrase: passphrase?.trim() ? passphrase.trim() : undefined
-        }
-
-        setMnemonicJSON(jsonData)
-        const blob = new Blob([JSON.stringify(jsonData)], {
-          type: 'application/json;charset=utf-8'
-        })
-        downloadBlob(blob, 'json', `${label} | ${createdAccount.id} | SEED KEY`)
-      } else {
-        const res = await majik.createAccount(passphrase, label)
-        accountID = res.id
-        const blob = new Blob([res.backup], {
-          type: 'application/octet-stream'
-        })
-        downloadBlob(blob, 'txt', `${label} | ${res.id} | BACKUP KEY`)
-      }
-
-      toast.success('Account Created Successfully', {
-        description: `New account for ${label || accountID} created.`,
-        id: `toast-success-create-${label}`
-      })
-
-      window.electron.notify(
-        'Account Created Successfully',
-        `New Account for ${label || accountID} created successfully.`
-      )
-
-      resetForm()
-      onUpdate?.(majik)
-      setRefreshKey((prev) => prev + 1)
-    } catch (err) {
-      console.error(err)
-      toast.error('Account Creation Failed', {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        description: (err as any)?.message || err,
-        id: 'error-majik-message-account-create'
-      })
+    const jsonData: MnemonicJSON = {
+      id: createdAccount.backup,
+      seed: seedStringToArray(mnemonic.trim()),
+      phrase: passphrase?.trim() ? passphrase.trim() : undefined
     }
+
+    setMnemonicJSON(jsonData)
+    const blob = new Blob([JSON.stringify(jsonData)], {
+      type: 'application/json;charset=utf-8'
+    })
+    downloadBlob(blob, 'json', `${label} | ${createdAccount.id} | SEED KEY`)
+
+    toast.success('Account Created Successfully', {
+      description: `New account for ${label || accountID} created.`,
+      id: `toast-success-create-${label}`
+    })
+
+    resetForm()
+    onUpdate?.(majik)
+    setRefreshKey((prev) => prev + 1)
+
+    return `New Account for ${label || accountID} created successfully.`
+  }
+
+  const handleCreateAccount = async (): Promise<void> => {
+    if (!mnemonic?.trim()) {
+      toast.error('Failed to create account', {
+        description: 'Mnemonic Seed Phrase must be a non-empty string.',
+        id: 'toast-error-create'
+      })
+      return
+    }
+
+    if (!passphrase?.trim()) {
+      toast.error('Failed to create account', {
+        description: 'Password must be a non-empty string.',
+        id: 'toast-error-create'
+      })
+      return
+    }
+
+    toast.promise(processCreateAccount(), {
+      loading: 'Creating your account...',
+      success: (msg) => {
+        window.electron.notify(
+          'Account Created Successfully',
+          `New Account for ${label || 'Unknown'} created successfully.`
+        )
+        return msg
+      },
+      error: (err) => {
+        console.error(err)
+        return "Oh no... There's a problem while creating your account."
+      }
+    })
   }
 
   // ── Edit label ─────────────────────────────────────────────────────────────
@@ -330,9 +331,9 @@ const AccountsPanel: React.FC<AccountsPanelProps> = ({ majik, onUpdate }) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (majik as any).keyStore?.deleteIdentity?.(id).catch?.(() => {})
       try {
-        const { KeyStore } = await import('@majikah/majik-message')
+        const { MajikKeyStore } = await import('@majikah/majik-message')
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        await (KeyStore as any).deleteIdentity(id)
+        await (MajikKeyStore as any).deleteIdentity(id)
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
       } catch (e) {
         /* ignore */
@@ -539,7 +540,9 @@ const AccountsPanel: React.FC<AccountsPanelProps> = ({ majik, onUpdate }) => {
                   !mnemonicJSON ||
                   mnemonicJSON.seed.length === 0 ||
                   !passphrase?.trim(),
-                onClick: handleLoadMnemonicAccount
+                onClick: handleLoadMnemonicAccount,
+                confirmationText:
+                  'Importing your account and deriving the passphrase using Argon2. This may take several seconds, and your screen may temporarily freeze. Please do not close or refresh.'
               }
             }}
           >
@@ -578,7 +581,9 @@ const AccountsPanel: React.FC<AccountsPanelProps> = ({ majik, onUpdate }) => {
               confirm: {
                 text: 'Create Account',
                 isDisabled: !label?.trim() || !mnemonicJSON || !passphrase?.trim(),
-                onClick: handleCreate
+                onClick: handleCreateAccount,
+                confirmationText:
+                  'Creating your account and deriving the passphrase using Argon2. This may take several seconds, and your screen may temporarily freeze. Please do not close or refresh.'
               }
             }}
           >

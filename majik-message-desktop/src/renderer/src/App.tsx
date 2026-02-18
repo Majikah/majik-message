@@ -15,7 +15,7 @@ import {
 import { useMajik } from './components/majik-context-wrapper/use-majik'
 import {
   jsonToSeed,
-  KeyStore,
+  MajikKeyStore,
   MajikContact,
   seedStringToArray,
   type MnemonicJSON
@@ -66,6 +66,7 @@ function App(): JSX.Element {
   const [unlockId, setUnlockId] = useState<string | null>(null)
   const [unlockResolver, setUnlockResolver] = useState<((s: string) => void) | null>(null)
   const [unlocked, setUnlocked] = useState<boolean>(false)
+  const [isUnlocking, setIsUnlocking] = useState(false)
 
   const [isCreatingAccount, setIsCreatingAccount] = useState<boolean>(false)
   const [isAddingContact, setIsAddingContact] = useState<boolean>(false)
@@ -79,8 +80,8 @@ function App(): JSX.Element {
   const [inviteKey, setInviteKey] = useState<string>('')
 
   useEffect(() => {
-    // Wire KeyStore.onUnlockRequested to present our React modal
-    KeyStore.onUnlockRequested = (id: string) => {
+    // Wire MajikKeyStore.onUnlockRequested to present our React modal
+    MajikKeyStore.onUnlockRequested = (id: string) => {
       return new Promise<string>((resolve) => {
         setUnlockId(id)
         setUnlockResolver(() => resolve)
@@ -88,36 +89,32 @@ function App(): JSX.Element {
     }
 
     return () => {
-      KeyStore.onUnlockRequested = undefined
+      MajikKeyStore.onUnlockRequested = undefined
     }
   }, [])
 
   useEffect(() => {
-    // define an async function inside useEffect
-    const unlockIdentity = async (): Promise<void> => {
-      try {
-        if (!majik) return
-        const activeAccount = majik.getActiveAccount()
-        if (!activeAccount) return
-        await majik.ensureIdentityUnlocked(activeAccount.id)
-        toast.success('Access granted', {
-          description: 'Your identity has been securely unlocked.',
-          id: 'toast-success-unlock'
-        })
+    if (!majik) return
 
-        console.log('Access granted: Identity unlocked')
-      } catch (err) {
-        toast.error('Unlock failed', {
-          description: `Incorrect passphrase. Please try again. ${err}`,
-          id: 'toast-error-unlock'
-        })
-        console.warn('Failed to unlock identity:', err)
+    const active = majik.getActiveAccount()
+    if (!active) return
+
+    try {
+      // Try accessing private key
+      MajikKeyStore.getPrivateKey(active.id)
+
+      // If no error → already unlocked
+      setUnlocked(true)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (err: any) {
+      const needsUnlock =
+        err instanceof Error && /must be unlocked|unlockIdentity/.test(err.message)
+
+      if (needsUnlock) {
+        setUnlockId(active.id)
       }
     }
-
-    // call the async function
-    unlockIdentity()
-  }, [majik]) // add dependencies as needed
+  }, [majik])
 
   // Handle import from Electron menu
   useEffect(() => {
@@ -248,59 +245,52 @@ function App(): JSX.Element {
   }, [majik])
 
   const handleCreate = async (): Promise<void> => {
+    if (!mnemonic?.trim()) {
+      toast.error('Failed to create account', {
+        description: 'Mnemonic Seed Phrase must be a non-empty string.',
+        id: 'toast-error-create'
+      })
+      return
+    }
+
     try {
-      let accountID: string = 'Unknown'
-      if (mnemonic && mnemonic.trim().length > 0) {
-        if (!passphrase?.trim()) {
-          toast.error('Failed to create account', {
-            description: 'Password must be a non-empty string.',
-            id: `toast-error-create`
-          })
-          return
-        }
+      let accountID = 'Unknown'
 
-        const createdAccount = await majik.createAccountFromMnemonic(
-          mnemonic.trim(),
-          passphrase,
-          label
-        )
-
-        accountID = createdAccount.id
-
-        const jsonData: MnemonicJSON = {
-          id: createdAccount.backup,
-          seed: seedStringToArray(mnemonic.trim()),
-          phrase: passphrase?.trim() ? passphrase.trim() : undefined
-        }
-
-        const jsonString = JSON.stringify(jsonData)
-
-        const blob = new Blob([jsonString], {
-          type: 'application/json;charset=utf-8'
+      if (!passphrase?.trim()) {
+        toast.error('Failed to create account', {
+          description: 'Password must be a non-empty string.',
+          id: 'toast-error-create'
         })
-        downloadBlob(blob, 'json', `${label} | ${createdAccount.id} | SEED KEY`)
-      } else {
-        const res = await majik.createAccount(passphrase, label)
-        accountID = res.id
-        // provide backup for download immediately
-        const blob = new Blob([res.backup], {
-          type: 'application/octet-stream'
-        })
-        downloadBlob(blob, 'txt', `${label} | ${res.id} | BACKUP KEY`)
+        return
       }
 
+      const createdAccount = await majik.createAccountFromMnemonic(
+        mnemonic.trim(),
+        passphrase,
+        label
+      )
+      accountID = createdAccount.id
+
+      const jsonData: MnemonicJSON = {
+        id: createdAccount.backup,
+        seed: seedStringToArray(mnemonic.trim()),
+        phrase: passphrase?.trim() ? passphrase.trim() : undefined
+      }
+
+      const blob = new Blob([JSON.stringify(jsonData)], {
+        type: 'application/json;charset=utf-8'
+      })
+      downloadBlob(blob, 'json', `${label} | ${createdAccount.id} | SEED KEY`)
+
       toast.success('Account Created Successfully', {
-        description: `New Account for ${label || accountID} created successfully.`,
+        description: `New account for ${label || accountID} created.`,
         id: `toast-success-create-${label}`
       })
+
       window.electron.notify(
         'Account Created Successfully',
         `New Account for ${label || accountID} created successfully.`
       )
-
-      setLabel('')
-      setPassphrase('')
-      setMnemonic('')
 
       setRefreshKey((prev) => prev + 1)
     } catch (err) {
@@ -355,11 +345,27 @@ function App(): JSX.Element {
     })
   }
 
-  const handleSubmit = (pass: string): void => {
+  const handleSubmit = async (pass: string): Promise<void> => {
+    if (!majik || !unlockId || isUnlocking) return
     if (unlockResolver) unlockResolver(pass)
-    setUnlockId(null)
-    setUnlockResolver(null)
-    setUnlocked(true)
+    try {
+      setIsUnlocking(true)
+
+      await MajikKeyStore.unlockIdentity(unlockId, pass)
+
+      toast.success('Access granted', {
+        description: 'Your identity has been securely unlocked.'
+      })
+
+      setUnlockId(null)
+      setUnlockResolver(null)
+      setUnlocked(true)
+    } catch {
+      toast.error('Incorrect passphrase. Please try again.')
+      // modal stays open
+    } finally {
+      setIsUnlocking(false)
+    }
   }
 
   const handleRefreshInstance = (data: MajikMessageDatabase): void => {
@@ -454,6 +460,7 @@ function App(): JSX.Element {
         onSignout={() => setUnlockId(null)}
         onSwitchAccount={handleSwitchAccount}
         onReset={handleCancel}
+        isUnlocking={isUnlocking}
       />
       <DynamicPopUp
         scrollable

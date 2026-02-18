@@ -6,8 +6,13 @@ import { arrayBufferToBase64, base64ToArrayBuffer } from "../utils/utilities";
  * Types
  * ------------------------------- */
 
-export type SerializedMajikContact = Omit<MajikContactData, "publicKey"> & {
+export type SerializedMajikContact = {
+  id: string;
+  fingerprint: string;
+  meta?: MajikContactMeta;
   publicKeyBase64: string;
+  mlKey: string;
+  majikah_registered?: boolean;
 };
 
 export interface MajikContactMeta {
@@ -23,6 +28,7 @@ export interface MajikContactData {
   // publicKey may be a WebCrypto `CryptoKey` or a raw-key wrapper { raw: Uint8Array }
   publicKey: CryptoKey | { raw: Uint8Array };
   fingerprint: string;
+  mlKey: string;
   meta?: MajikContactMeta;
   majikah_registered?: boolean;
 }
@@ -32,6 +38,7 @@ export interface MajikContactCard {
   publicKey: string;
   fingerprint: string;
   label: string;
+  mlKey: string;
 }
 
 /* -------------------------------
@@ -55,17 +62,20 @@ export class MajikContact {
   public readonly id: string;
   public readonly publicKey: CryptoKey | { raw: Uint8Array };
   public readonly fingerprint: string;
+  public readonly mlKey: string;
   public meta: MajikContactMeta;
   private majikah_registered?: boolean;
 
   constructor(data: MajikContactData) {
     this.assertId(data.id);
     this.assertPublicKey(data.publicKey);
+    this.assertMLKey(data.mlKey);
     this.assertFingerprint(data.fingerprint);
 
     this.id = data.id;
     this.publicKey = data.publicKey;
     this.fingerprint = data.fingerprint;
+    this.mlKey = data.mlKey;
 
     this.meta = {
       label: data.meta?.label || "",
@@ -79,6 +89,7 @@ export class MajikContact {
   static create(
     id: string,
     publicKey: CryptoKey | { raw: Uint8Array },
+    mlKey: string,
     fingerprint: string,
     meta?: Partial<MajikContactMeta>,
   ): MajikContact {
@@ -87,12 +98,19 @@ export class MajikContact {
       publicKey,
       fingerprint,
       meta,
+      mlKey,
     });
   }
 
   private assertId(id: string) {
     if (!id || typeof id !== "string") {
       throw new MajikContactError("Contact ID must be a non-empty string");
+    }
+  }
+
+  private assertMLKey(key: string) {
+    if (!key || typeof key !== "string") {
+      throw new MajikContactError("ML Key must be a non-empty string");
     }
   }
 
@@ -202,6 +220,7 @@ export class MajikContact {
       meta: { ...this.meta },
       publicKeyBase64: await this.getPublicKeyBase64(),
       majikah_registered: this.majikah_registered,
+      mlKey: this.mlKey,
     };
   }
 
@@ -220,6 +239,7 @@ export class MajikContact {
         meta: serialized.meta,
         publicKey: { raw: publicKeyRaw },
         majikah_registered: serialized.majikah_registered,
+        mlKey: serialized.mlKey,
       });
     } catch (err) {
       throw new MajikContactError("Failed to deserialize MajikContact", err);
@@ -248,6 +268,7 @@ export class MajikContact {
           blocked: identityJSON.restricted,
         },
         majikah_registered: true,
+        mlKey: identityJSON.ml_key,
       };
 
       return new MajikContact(contactData);

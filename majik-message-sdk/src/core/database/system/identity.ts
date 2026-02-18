@@ -1,4 +1,4 @@
-import { MajikUser } from '@thezelijah/majik-user'
+import { MajikUser } from "@thezelijah/majik-user";
 
 import { SerializedMajikContact } from "../../contacts/majik-contact";
 import { hash } from "@stablelib/sha256";
@@ -31,6 +31,7 @@ export interface MajikMessageIdentityJSON {
   id: string;
   user_id: string;
   public_key: string;
+  ml_key: string;
   phash: string;
   label: string;
   timestamp: string;
@@ -46,6 +47,7 @@ export class MajikMessageIdentity {
   private readonly _id: string;
   private readonly _userId: string;
   private readonly _publicKey: string;
+  private readonly _mlKey: string;
   private readonly _phash: string;
   private _label: string;
   private readonly _timestamp: string;
@@ -58,6 +60,7 @@ export class MajikMessageIdentity {
     id: string;
     userId: string;
     publicKey: string;
+    mlKey: string;
     phash: string;
     label: string;
     timestamp: string;
@@ -66,6 +69,7 @@ export class MajikMessageIdentity {
     assertString(params.id, "id");
     assertString(params.userId, "user_id");
     assertString(params.publicKey, "public_key");
+    assertString(params.mlKey, "ml_key");
     assertString(params.phash, "phash");
     assertString(params.label, "label");
     assertISODate(params.timestamp, "timestamp");
@@ -77,6 +81,7 @@ export class MajikMessageIdentity {
     this._id = params.id;
     this._userId = params.userId;
     this._publicKey = params.publicKey;
+    this._mlKey = params.mlKey;
     this._phash = params.phash;
     this._label = params.label;
     this._timestamp = params.timestamp;
@@ -114,12 +119,15 @@ export class MajikMessageIdentity {
     const timestamp = new Date().toISOString();
 
     const publicKey = account.publicKeyBase64;
-    const phash = sha256(`${user.id}:${publicKey}:${account.id}`);
+    const phash = sha256(
+      `${user.id}:${publicKey}:${account.id}:${account.mlKey}`,
+    );
 
     return new MajikMessageIdentity({
       id: account.id,
       userId: user.id,
       publicKey: publicKey,
+      mlKey: account.mlKey,
       phash,
       label,
       timestamp,
@@ -187,7 +195,9 @@ export class MajikMessageIdentity {
    * Detects tampering of id/public_key
    */
   validateIntegrity(): boolean {
-    const expected = sha256(`${this._userId}:${this._publicKey}:${this._id}`);
+    const expected = sha256(
+      `${this._userId}:${this._publicKey}:${this._id}:${this._mlKey}`,
+    );
     return expected === this._phash;
   }
 
@@ -198,7 +208,7 @@ export class MajikMessageIdentity {
     assertString(userId, "userId");
     assertString(publicKey, "publicKey");
 
-    const hash = sha256(`${userId}:${publicKey}:${this._id}`);
+    const hash = sha256(`${userId}:${publicKey}:${this._id}:${this._mlKey}`);
     return hash === this._phash;
   }
 
@@ -211,6 +221,7 @@ export class MajikMessageIdentity {
       id: this._id,
       user_id: this._userId,
       public_key: this._publicKey,
+      ml_key: this._mlKey,
       phash: this._phash,
       label: this._label,
       timestamp: this._timestamp,
@@ -228,6 +239,7 @@ export class MajikMessageIdentity {
       id: obj.id as string,
       userId: obj.user_id as string,
       publicKey: obj.public_key as string,
+      mlKey: obj.ml_key as string,
       phash: obj.phash as string,
       label: obj.label as string,
       timestamp: obj.timestamp as string,

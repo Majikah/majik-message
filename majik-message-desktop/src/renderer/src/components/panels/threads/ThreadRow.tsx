@@ -295,7 +295,7 @@ const ThreadRow: React.FC<ThreadRowProps> = ({
     if (!envelope) return
 
     majik
-      .decryptEnvelope(envelope, true)
+      .decryptEnvelope(envelope)
       .then((msg) => {
         if (mounted) setText(msg)
       })

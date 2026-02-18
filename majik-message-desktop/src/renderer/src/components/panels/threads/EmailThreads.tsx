@@ -575,7 +575,7 @@ const EmailThreads: React.FC<EmailThreadsProps> = ({
       <Root>
         <ListPane $hasSelection={false}>
           <DynamicPlaceholder>
-            To use <strong>Chats</strong>, you need a registered Majik Key (local seed phrase
+            To use <strong>Threads</strong>, you need a registered Majik Key (local seed phrase
             account). Create a new account and register it online, or select an existing one to
             continue.
             <SubRow>

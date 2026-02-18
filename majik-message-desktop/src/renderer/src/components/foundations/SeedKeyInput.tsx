@@ -5,7 +5,7 @@ import React, { type JSX, useEffect, useId, useState } from 'react'
 import styled from 'styled-components'
 import { Tooltip } from 'react-tooltip'
 import CustomInputField from './CustomInputField'
-import { KeyStore } from '@majikah/majik-message'
+import { MajikKeyStore } from '@majikah/majik-message'
 
 /* -------------------------------
  * Styled Components
@@ -136,7 +136,7 @@ export const SeedKeyInput: React.FC<SeedKeyInputProps> = ({
     id: currentValue?.id || '',
     seed:
       currentValue?.seed || !!allowGenerate
-        ? seedStringToArray(KeyStore.generateMnemonic())
+        ? seedStringToArray(MajikKeyStore.generateMnemonic())
         : [...EMPTY_SEED],
     phrase: currentValue?.phrase
   })
@@ -311,7 +311,7 @@ export const SeedKeyInput: React.FC<SeedKeyInputProps> = ({
   }
 
   const handleGenerateMnemonic = (): void => {
-    const m = KeyStore.generateMnemonic()
+    const m = MajikKeyStore.generateMnemonic()
 
     const seedArray = seedStringToArray(m)
     setWords(seedArray)

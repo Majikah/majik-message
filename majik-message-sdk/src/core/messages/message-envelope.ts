@@ -1,8 +1,17 @@
-import type {
-  EnvelopePayload,
-  RecipientKeys,
-  SingleRecipientPayload,
-} from "../types";
+/**
+ * MessageEnvelope.ts
+ *
+ * LEGACY binary envelope parser.
+ *
+ * This class is now a thin wrapper around raw binary envelope blobs.
+ * It extracts version bytes, fingerprints, and JSON payloads but does NOT
+ * perform encryption or decryption — that's MajikEnvelope's job.
+ *
+ * Kept for backward compatibility with existing scanner infrastructure.
+ * New code should use MajikEnvelope directly.
+ */
+
+import type { EnvelopePayload, SinglePayload, GroupKey } from "../types";
 import { base64ToArrayBuffer, arrayBufferToBase64 } from "../utils/utilities";
 
 /* -------------------------------
@@ -75,12 +84,16 @@ export class MessageEnvelope {
     );
   }
 
+  /**
+   * Get the envelope version byte.
+   * Returns 1, 2, or 3 (v3 = post-quantum ML-KEM).
+   */
   getVersion(): number {
     const view = new Uint8Array(this.encryptedBlob);
     if (view.length < 1) {
       throw new MessageEnvelopeError(
         "VALIDATION_ERROR",
-        "Encrypted blob too short to contain version byte"
+        "Encrypted blob too short to contain version byte",
       );
     }
     return view[0];
@@ -94,7 +107,7 @@ export class MessageEnvelope {
     if (typeof raw !== "string") {
       throw new MessageEnvelopeError(
         "INVALID_INPUT",
-        "Envelope input must be a string"
+        "Envelope input must be a string",
       );
     }
 
@@ -104,7 +117,7 @@ export class MessageEnvelope {
       throw new MessageEnvelopeError(
         "VALIDATION_ERROR",
         "Envelope exceeds maximum allowed length",
-        raw
+        raw,
       );
     }
 
@@ -113,7 +126,7 @@ export class MessageEnvelope {
       throw new MessageEnvelopeError(
         "FORMAT_ERROR",
         `Invalid envelope format. Expected ${ENVELOPE_PREFIX}:<base64>`,
-        raw
+        raw,
       );
     }
 
@@ -124,7 +137,7 @@ export class MessageEnvelope {
       throw new MessageEnvelopeError(
         "VALIDATION_ERROR",
         "Base64 payload failed to decode",
-        raw
+        raw,
       );
     }
 
@@ -132,7 +145,7 @@ export class MessageEnvelope {
       throw new MessageEnvelopeError(
         "VALIDATION_ERROR",
         "Decoded payload is empty",
-        raw
+        raw,
       );
     }
 
@@ -140,7 +153,7 @@ export class MessageEnvelope {
       throw new MessageEnvelopeError(
         "VALIDATION_ERROR",
         "Decoded payload exceeds size limit",
-        raw
+        raw,
       );
     }
 
@@ -148,24 +161,24 @@ export class MessageEnvelope {
   }
 
   /* -------------------------------
-   * Extract Fingerprint (first one)
+   * Extract Fingerprint
    * ------------------------------- */
 
   extractFingerprint(
-    fingerprintLength = MessageEnvelope.DEFAULT_FINGERPRINT_LENGTH
+    fingerprintLength = MessageEnvelope.DEFAULT_FINGERPRINT_LENGTH,
   ): string {
     const view = new Uint8Array(this.encryptedBlob);
     if (view.length < 1 + fingerprintLength) {
       throw new MessageEnvelopeError(
         "VALIDATION_ERROR",
-        "Encrypted blob too short to contain fingerprint"
+        "Encrypted blob too short to contain fingerprint",
       );
     }
 
     const fingerprintBytes = view.slice(1, 1 + fingerprintLength);
     const ab = fingerprintBytes.buffer.slice(
       fingerprintBytes.byteOffset,
-      fingerprintBytes.byteOffset + fingerprintBytes.length
+      fingerprintBytes.byteOffset + fingerprintBytes.length,
     );
 
     return arrayBufferToBase64(ab);
@@ -175,6 +188,14 @@ export class MessageEnvelope {
    * Extract Encrypted Payload
    * ------------------------------- */
 
+  /**
+   * Extract and parse the JSON payload from the binary blob.
+   * Works for v1, v2, and v3 envelopes — the JSON structure is parsed
+   * as-is without validation beyond basic well-formedness.
+   *
+   * Type discrimination (v1 vs v2 vs v3) is done by the caller using
+   * type guards from types.ts.
+   */
   extractEncryptedPayload(): EnvelopePayload {
     const view = new Uint8Array(this.encryptedBlob);
     const versionLength = 1;
@@ -183,7 +204,7 @@ export class MessageEnvelope {
     if (view.length < versionLength + fingerprintLength + 1) {
       throw new MessageEnvelopeError(
         "VALIDATION_ERROR",
-        "Encrypted blob too short to contain payload"
+        "Encrypted blob too short to contain payload",
       );
     }
 
@@ -196,33 +217,21 @@ export class MessageEnvelope {
     } catch {
       throw new MessageEnvelopeError(
         "VALIDATION_ERROR",
-        "Failed to parse encrypted payload JSON"
+        "Failed to parse encrypted payload JSON",
       );
     }
 
-    // Validate multi-recipient
-    if ("keys" in parsed) {
-      if (
-        !parsed.iv ||
-        !parsed.ciphertext ||
-        !parsed.ephemeralPublicKey ||
-        !Array.isArray(parsed.keys)
-      ) {
-        throw new MessageEnvelopeError(
-          "VALIDATION_ERROR",
-          "Multi-recipient payload missing required fields"
-        );
-      }
-
-      for (const k of parsed.keys) {
-        if (!k.fingerprint || !k.ephemeralEncryptedKey || !k.nonce) {
-          throw new MessageEnvelopeError(
-            "VALIDATION_ERROR",
-            "Invalid key entry in multi-recipient payload"
-          );
-        }
-      }
+    // Basic validation: ensure it looks like an envelope payload
+    if (!parsed.iv || !parsed.ciphertext) {
+      throw new MessageEnvelopeError(
+        "VALIDATION_ERROR",
+        "Payload missing required fields (iv, ciphertext)",
+      );
     }
+
+    // Note: We do NOT validate v3-specific fields here (mlKemCiphertext, etc.)
+    // because this class is format-agnostic. Type discrimination happens
+    // upstream in MajikEnvelope or the caller.
 
     return parsed;
   }
@@ -232,9 +241,10 @@ export class MessageEnvelope {
    * ------------------------------- */
 
   /**
-   * Returns the ephemeral encrypted key for a given fingerprint
+   * Returns the ephemeral encrypted key for a given fingerprint.
+   * Works for v2 (X25519) and v3 (ML-KEM) group messages.
    */
-  getRecipientKey(fingerprint: string): RecipientKeys | undefined {
+  getRecipientKey(fingerprint: string): GroupKey | undefined {
     const payload = this.extractEncryptedPayload();
 
     if ("keys" in payload) {
@@ -244,13 +254,13 @@ export class MessageEnvelope {
     return undefined;
   }
 
-  getSingleRecipientPayload(): SingleRecipientPayload | undefined {
+  getSingleRecipientPayload(): SinglePayload | undefined {
     const payload = this.extractEncryptedPayload();
-    return "keys" in payload ? undefined : payload;
+    return "keys" in payload ? undefined : (payload as SinglePayload);
   }
 
   /**
-   * Checks if this envelope contains a key for the given fingerprint
+   * Checks if this envelope contains a key for the given fingerprint.
    */
   hasRecipient(fingerprint: string): boolean {
     return !!this.getRecipientKey(fingerprint);
@@ -261,7 +271,14 @@ export class MessageEnvelope {
     return "keys" in payload;
   }
 
-  isSolo(): boolean {
+  isSingle(): boolean {
     return !this.isGroup();
+  }
+
+  /**
+   * Check if this is a v3 (post-quantum ML-KEM) envelope.
+   */
+  isPostQuantum(): boolean {
+    return this.getVersion() === 3;
   }
 }

@@ -54,6 +54,7 @@ interface ScrollableFormProps {
   hideButtonA?: boolean
   hideButtonB?: boolean
   onDebug?: () => void
+  confirmationText?: string
 }
 
 // Stateless functional component
@@ -67,7 +68,8 @@ const ScrollableForm: React.FC<ScrollableFormProps> = ({
   isDisabledProceed = false,
   hideButtonA = false,
   hideButtonB = false,
-  onDebug
+  onDebug,
+  confirmationText = 'Are you sure you want to proceed with this action?'
 }) => {
   return (
     <RootContainer>
@@ -83,6 +85,7 @@ const ScrollableForm: React.FC<ScrollableFormProps> = ({
         strictMode={true}
         hideButtonA={hideButtonA}
         hideButtonB={hideButtonB}
+        confirmationText={confirmationText}
       />
       {isDevEnvironment() && !!onDebug && (
         <ButtonPrimaryConfirm onClick={onDebug}>View Class Instance</ButtonPrimaryConfirm>
