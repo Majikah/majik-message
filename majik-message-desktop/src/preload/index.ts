@@ -1,6 +1,15 @@
+// preload/index.ts from electron
+
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
+import {
+  NOTIFICATION_RECEIVED,
+  NOTIFICATION_SERVICE_ERROR,
+  NOTIFICATION_SERVICE_STARTED,
+  START_NOTIFICATION_SERVICE,
+  TOKEN_UPDATED
+} from 'firebase-electron/dist/electron/consts'
 
 // Custom APIs for renderer
 const api = {}
@@ -52,6 +61,36 @@ if (process.contextIsolated) {
       onAuthChanged: (value: boolean) => {
         ipcRenderer.send('auth-state-changed', value)
       },
+
+      startNotificationService: (config: {
+        apiKey: string
+        appId: string
+        projectId: string
+        vapidKey?: string
+      }) => ipcRenderer.send(START_NOTIFICATION_SERVICE, config), // ← was 'start-notification-service'
+
+      onTokenUpdated: (callback: (event: any, token: string) => void) => {
+        ipcRenderer.on(TOKEN_UPDATED, callback) // ← was 'TOKEN_UPDATED' string
+        return () => ipcRenderer.removeListener(TOKEN_UPDATED, callback)
+      },
+
+      onNotificationReceived: (callback: (event: any, notification: any) => void) => {
+        ipcRenderer.on(NOTIFICATION_RECEIVED, callback) // ← was 'NOTIFICATION_RECEIVED' string
+        return () => ipcRenderer.removeListener(NOTIFICATION_RECEIVED, callback)
+      },
+
+      onNotificationServiceStarted: (callback: (event: any, token: string) => void) => {
+        ipcRenderer.on(NOTIFICATION_SERVICE_STARTED, callback)
+        return () => ipcRenderer.removeListener(NOTIFICATION_SERVICE_STARTED, callback)
+      },
+
+      onNotificationServiceError: (callback: (event: any, error: any) => void) => {
+        ipcRenderer.on(NOTIFICATION_SERVICE_ERROR, callback)
+        return () => ipcRenderer.removeListener(NOTIFICATION_SERVICE_ERROR, callback)
+      },
+
+      sendPushToken: (token: string) => ipcRenderer.send('send-push-token', token),
+
       notify: (title: string, body: string) =>
         ipcRenderer.send('show-notification', { title, body })
     })

@@ -67,7 +67,7 @@ const TabButton = styled.button<{ $active: boolean }>`
   all: unset;
   width: 100%;
   cursor: pointer;
-  padding: 0.75rem 3rem;
+  padding: 0.75rem 2rem;
   display: flex;
   align-items: center;
   gap: 1rem;
@@ -90,7 +90,7 @@ const TabButton = styled.button<{ $active: boolean }>`
     }
   }
 
-  @media (max-width: 728px) {
+  @media (max-width: 1250px) {
     padding: 15px 10px;
     gap: 0px;
     width: 100%;
@@ -127,7 +127,11 @@ const ContentWrapper = styled.div`
   }
 `
 
-const TabNameText = styled.p<{ $active?: boolean }>``
+const TabNameText = styled.p<{ $active?: boolean }>`
+  @media (max-width: 500px) {
+    display: none;
+  }
+`
 
 const IconContainer = styled.div<{ $active?: boolean }>`
   display: flex;

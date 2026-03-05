@@ -31,11 +31,16 @@ async function initMajik() {
   return majikInstance;
 }
 
-// Fetch contacts dynamically (replace with your real method)
+// Fetch contacts dynamically
 async function getContacts(): Promise<string[]> {
   const majik = await initMajik();
-  // Example: return ["Alice", "Bob", "Charlie"];
-  return majik.listContacts(false).map((c) => c.meta?.label || c.id) || [];
+
+  return await Promise.all(
+    majik.listContacts(false).map(async (c) => {
+      const pubkey = await c.getPublicKeyBase64();
+      return c.meta?.label || pubkey;
+    }) || [],
+  );
 }
 
 // Create context menus on startup
@@ -144,6 +149,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       const contacts = await getContacts();
       target = contacts[index];
     }
+
 
     if (target) {
       const majik = await initMajik();

@@ -24,8 +24,6 @@ import {
   arrayToBase64,
   base64ToArrayBuffer,
   base64ToUint8Array,
-  base64ToUtf8,
-  utf8ToBase64,
 } from "./core/utils/utilities";
 import {
   autoSaveMajikFileData,
@@ -37,7 +35,13 @@ import {
   idbLoadBlob,
   idbSaveBlob,
 } from "./core/utils/idb-majik-system";
-import type { MAJIK_API_RESPONSE, MajikMessagePublicKey } from "./core/types";
+import type {
+  DecryptFileOptions,
+  EncryptFileOptions,
+  EncryptFileResult,
+  MAJIK_API_RESPONSE,
+  MajikMessagePublicKey,
+} from "./core/types";
 import { MajikMessageChat } from "./core/database/chat/majik-message-chat";
 import { MajikMessageIdentity } from "./core/database/system/identity";
 import { MajikKey } from "@majikah/majik-key";
@@ -45,9 +49,15 @@ import {
   MajikEnvelope,
   type MajikRecipient,
   type MajikIdentity,
-} from "./core/messages/majik-envelope";
+} from "@majikah/majik-envelope";
+import {
+  MajikFile,
+  MajikFileError,
+  type MajikFileIdentity,
+  type MajikFileRecipient,
+} from "@majikah/majik-file";
 
-import { strToU8, gzipSync, gunzipSync } from "fflate";
+import { gzipSync, gunzipSync } from "fflate";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -220,6 +230,106 @@ export class MajikMessage {
       fingerprint: key.fingerprint,
       mlKemSecretKey: key.getMlKemSecretKey(),
     } satisfies MajikIdentity;
+  }
+
+  /**
+   * Resolve the full MajikFileIdentity for an own account.
+   *
+   * Carries both the public key (needed for encryption) and the secret key
+   * (needed for decryption), unlike _resolveIdentity() which only returns the
+   * secret key for MajikEnvelope.
+   *
+   * @param accountId  Own account ID. Defaults to the active account.
+   */
+  private async _resolveFileIdentity(
+    accountId?: string,
+  ): Promise<MajikFileIdentity> {
+    const id = accountId ?? this.getActiveAccount()?.id;
+    if (!id)
+      throw new Error("No active account — call setActiveAccount() first");
+
+    await MajikKeyStore.ensureUnlocked(id);
+    const key = MajikKeyStore.get(id);
+    if (!key) throw new Error(`Account not found in keystore: "${id}"`);
+    if (!key.hasMlKem) {
+      throw new Error(
+        `Account "${id}" has no ML-KEM keys. ` +
+          `Re-import via importAccountFromMnemonicBackup() to upgrade.`,
+      );
+    }
+
+    return {
+      userId: key.id,
+      fingerprint: key.fingerprint,
+      mlKemPublicKey: key.mlKemPublicKey,
+      mlKemSecretKey: key.getMlKemSecretKey(),
+    } satisfies MajikFileIdentity;
+  }
+
+  /**
+   * Resolve a list of contact IDs into MajikFileRecipient objects.
+   *
+   * Used for group file encryption — each recipient only needs their ML-KEM
+   * public key. Secret keys never leave their respective devices.
+   *
+   * @param ids  Contact IDs from the contact directory.
+   */
+  private async _resolveFileRecipients(
+    ids: string[],
+  ): Promise<MajikFileRecipient[]> {
+    return Promise.all(
+      ids.map(async (id) => {
+        const contact = this.contactDirectory.getContact(id);
+        if (!contact) throw new Error(`No contact found for id "${id}"`);
+
+        const mlPubKey = base64ToUint8Array(contact.mlKey);
+        if (!mlPubKey || mlPubKey.length === 0) {
+          throw new Error(
+            `Contact "${id}" has no ML-KEM public key. ` +
+              `They may need to upgrade their account via importFromMnemonicBackup().`,
+          );
+        }
+
+        return {
+          fingerprint: contact.fingerprint,
+          mlKemPublicKey: mlPubKey,
+        } satisfies MajikFileRecipient;
+      }),
+    );
+  }
+
+  /**
+   * Resolve a list of contact IDs into MajikFileRecipient objects.
+   *
+   * Used for group file encryption — each recipient only needs their ML-KEM
+   * public key. Secret keys never leave their respective devices.
+   *
+   * @param ids  Contact IDs from the contact directory.
+   */
+  private async _resolveFileRecipientsByPublicKey(
+    publicKeys: MajikMessagePublicKey[],
+  ): Promise<MajikFileRecipient[]> {
+    return Promise.all(
+      publicKeys.map(async (pkey) => {
+        const contact =
+          await this.contactDirectory.getContactByPublicKeyBase64(pkey);
+        if (!contact)
+          throw new Error(`No contact found for public key "${pkey}"`);
+
+        const mlPubKey = base64ToUint8Array(contact.mlKey);
+
+        if (!mlPubKey) {
+          throw new Error(
+            `Contact "${pkey}" has no ML-KEM public key. ` +
+              `They may need to upgrade their account via importFromMnemonicBackup().`,
+          );
+        }
+        return {
+          fingerprint: contact.fingerprint,
+          mlKemPublicKey: mlPubKey,
+        } satisfies MajikFileRecipient;
+      }),
+    );
   }
 
   /** Canonical source for the scanner hostname tag. */
@@ -693,7 +803,7 @@ export class MajikMessage {
    */
   async encryptTextForScanner(
     plaintext: string,
-    recipientPubKeys: string[] = [],
+    recipientPubKeys: MajikMessagePublicKey[] = [],
     cache = true,
   ): Promise<string | null> {
     if (!plaintext?.trim()) return null;
@@ -716,10 +826,10 @@ export class MajikMessage {
    * Encrypt the current browser selection.
    */
   async encryptSelectedTextForScanner(
-    recipientIds: string[] = [],
+    recipientPublicKeys: MajikMessagePublicKey[] = [],
   ): Promise<string | null> {
     const plaintext = window.getSelection()?.toString().trim() ?? "";
-    return this.encryptTextForScanner(plaintext, recipientIds);
+    return this.encryptTextForScanner(plaintext, recipientPublicKeys);
   }
 
   /**
@@ -826,6 +936,218 @@ export class MajikMessage {
       this.emit("error", err, { context: "decryptMajikMessageChat" });
       throw err;
     }
+  }
+
+  // ── File Encryption / Decryption ──────────────────────────────────────────
+
+  /**
+   * Encrypt a binary file and return everything the caller needs to persist it.
+   *
+   * Flow:
+   *  1. Resolve the active account's full MajikFileIdentity from MajikKeyStore.
+   *  2. Resolve each recipientId into a MajikFileRecipient (public key only).
+   *     MajikFile.create() silently deduplicates and strips the sender's own ID
+   *     from the recipient list, so callers don't have to filter it out.
+   *  3. Delegate entirely to MajikFile.create() — it handles:
+   *       • SHA-256 content hash (dedup)
+   *       • WebP conversion for chat_image / chat_attachment image contexts
+   *       • Zstd compression for compressible formats
+   *       • ML-KEM encapsulation (single or group)
+   *       • AES-256-GCM encryption
+   *       • .mjkb binary encoding
+   *  4. Return the MajikFile instance, Supabase-ready metadata, and R2-ready Blob.
+   *
+   * The caller is responsible for:
+   *   • Uploading `result.binary` to R2 at `result.metadata.r2_key`
+   *   • Inserting `result.metadata` into the majik_files Supabase table
+   *
+   * @throws Error if no active account, account has no ML-KEM keys, or a
+   *         recipient cannot be resolved from the contact directory.
+   * @throws MajikFileError on validation failures or crypto errors (re-thrown
+   *         from MajikFile.create() so the caller gets typed errors).
+   *
+   * @example — self-encrypted user upload
+   * ```ts
+   * const result = await majik.encryptFile({
+   *   data: fileBytes,
+   *   context: "user_upload",
+   *   originalName: "document.pdf",
+   * });
+   * await r2.put(result.metadata.r2_key, result.binary);
+   * await supabase.from("majik_files").insert(result.metadata);
+   * ```
+   *
+   * @example — group chat image
+   * ```ts
+   * const result = await majik.encryptFile({
+   *   data: imageBytes,
+   *   context: "chat_image",
+   *   originalName: "photo.png",
+   *   conversationId: "conv_abc123",
+   *   recipientIds: ["contact_id_1", "contact_id_2"],
+   *   isTemporary: true,
+   *   expiresAt: MajikFile.buildExpiryDate(15),
+   * });
+   * ```
+   */
+  async encryptFile(options: EncryptFileOptions): Promise<EncryptFileResult> {
+    const {
+      data,
+      context,
+      originalName,
+      mimeType,
+      recipients = [],
+      conversationId,
+      isTemporary = false,
+      expiresAt,
+      bypassSizeLimit = false,
+      chatMessageId,
+      threadMessageId,
+    } = options;
+
+    // ── 1. Resolve sender identity ──────────────────────────────────────────
+    // Builds MajikFileIdentity with both public + secret keys from keystore.
+    const identity = await this._resolveFileIdentity();
+
+    // ── 2. Resolve additional recipients ───────────────────────────────────
+    // MajikFile.create() will silently drop the sender's own fingerprint if
+    // it appears in this list, and will deduplicate any repeated entries.
+    // An empty list → single-recipient (self-encrypted) file.
+    const recipientPubKeys =
+      recipients.length > 0
+        ? await this._resolveFileRecipientsByPublicKey(recipients)
+        : [];
+
+    // ── 3. Delegate to MajikFile.create() ──────────────────────────────────
+    const file = await MajikFile.create({
+      data,
+      identity,
+      context,
+      recipients: recipientPubKeys,
+      originalName,
+      mimeType,
+      conversationId,
+      isTemporary,
+      expiresAt,
+      bypassSizeLimit,
+      chatMessageId,
+      threadMessageId,
+    });
+
+    // ── 4. Package the result ───────────────────────────────────────────────
+    return {
+      file,
+      metadata: file.toJSON(),
+      binary: file.toMJKB(),
+    };
+  }
+
+  /**
+   * Decrypt a .mjkb binary and return the original raw bytes.
+   *
+   * Flow:
+   *  1. If `accountId` is provided, that account is tried first.
+   *     Otherwise the active account is tried first.
+   *  2. For group files (multiple recipients), if the first account fails,
+   *     every own account is tried in sequence until one succeeds.
+   *     This mirrors the behaviour of decryptEnvelope() for group messages.
+   *  3. Delegates to MajikFile.decrypt() — which handles:
+   *       • .mjkb binary parsing and magic-byte validation
+   *       • Single vs group payload discrimination
+   *       • ML-KEM decapsulation
+   *       • AES-256-GCM decryption
+   *       • Zstd decompression (if the file was compressed)
+   *
+   * @returns Raw plaintext bytes — the original file content before encryption.
+   *
+   * @throws Error if no own account can decrypt the file.
+   * @throws MajikFileError (re-thrown) on corrupt binary, wrong key, or format
+   *         errors — callers can import MajikFileError for typed catch blocks.
+   *
+   * @example — basic usage
+   * ```ts
+   * const mjkbBlob = await r2.get(metadata.r2_key);
+   * const rawBytes = await majik.decryptFile({ source: mjkbBlob });
+   * const url = URL.createObjectURL(new Blob([rawBytes], { type: metadata.mime_type }));
+   * ```
+   *
+   * @example — explicit account (e.g. non-active account in a multi-account UI)
+   * ```ts
+   * const rawBytes = await majik.decryptFile({
+   *   source: mjkbBytes,
+   *   accountId: "acc_xyz",
+   * });
+   * ```
+   */
+  async decryptFile(options: DecryptFileOptions): Promise<{
+    bytes: Uint8Array;
+    originalName: string | null;
+    mimeType: string | null;
+  }> {
+    const { source, accountId } = options;
+
+    // Build a prioritised list of own accounts to try.
+    // If an explicit accountId was requested, put that account first so it is
+    // tried before falling back to the full list — saves unnecessary work for
+    // single-recipient files and the common case where the caller knows which
+    // account holds the key.
+    const allAccounts = this.listOwnAccounts();
+    const orderedAccounts: typeof allAccounts = [];
+
+    if (accountId) {
+      const preferred = this.getOwnAccountById(accountId);
+      if (!preferred) throw new Error(`Account not found: "${accountId}"`);
+      orderedAccounts.push(preferred);
+    }
+
+    // Append any remaining accounts not already in the list
+    for (const account of allAccounts) {
+      if (!orderedAccounts.some((a) => a.id === account.id)) {
+        orderedAccounts.push(account);
+      }
+    }
+
+    if (orderedAccounts.length === 0) {
+      throw new Error("No own accounts available for decryption");
+    }
+
+    let lastError: unknown;
+
+    for (const account of orderedAccounts) {
+      try {
+        // Resolve the secret key for this account.
+        // _resolveFileIdentity() calls ensureUnlocked() internally, so the
+        // keystore will prompt for a passphrase if the account is locked.
+        const identity = await this._resolveFileIdentity(account.id);
+
+        const {
+          bytes: rawBytes,
+          originalName,
+          mimeType,
+        } = await MajikFile.decryptWithMetadata(source, {
+          fingerprint: identity.fingerprint,
+          mlKemSecretKey: identity.mlKemSecretKey,
+        });
+
+        return { bytes: rawBytes, originalName, mimeType };
+      } catch (err) {
+        // MajikFileError.decryptionFailed means the key didn't match — keep
+        // trying. Any other error (corrupt binary, format error) is terminal
+        // and re-thrown immediately so the caller gets an accurate diagnosis.
+        if (err instanceof MajikFileError && err.code === "DECRYPTION_FAILED") {
+          lastError = err;
+          continue;
+        }
+        throw err;
+      }
+    }
+
+    // None of the own accounts could decrypt the file
+    throw new Error(
+      `None of your accounts can decrypt this file. ` +
+        `It may have been encrypted for different recipients. ` +
+        `Last error: ${lastError instanceof Error ? lastError.message : String(lastError)}`,
+    );
   }
 
   // ── Envelope Cache ────────────────────────────────────────────────────────

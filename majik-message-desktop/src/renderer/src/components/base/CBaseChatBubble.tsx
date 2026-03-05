@@ -158,6 +158,7 @@ const Bubble = styled.div<{ $isOwn: boolean; $hasGif: boolean }>`
   position: relative;
   overflow: hidden;
   color: ${({ theme }) => theme.colors.textPrimary};
+  max-width: 400px;
 
   ${({ $isOwn, theme }) =>
     $isOwn

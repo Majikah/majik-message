@@ -15,6 +15,34 @@ export interface ElectronAPI {
   onAuthChanged: (value: boolean) => void
   onSignInTriggered: (callback: () => void) => () => void
   onSignOutTriggered: (callback: () => void) => () => void
+
+  // ===== Firebase Electron Push =====
+
+  startNotificationService: (config: {
+    apiKey: string
+    appId: string
+    projectId: string
+    vapidKey?: string
+    messagingSenderId: string
+  }) => void
+
+  onTokenUpdated: (callback: (event: unknown, token: string) => void) => () => void
+
+  onNotificationReceived: (
+    callback: (
+      event: unknown,
+      notification: {
+        title?: string
+        body?: string
+        data?: { conversationId?: string }
+      }
+    ) => void
+  ) => () => void
+
+  // ✅ token param added — NOTIFICATION_SERVICE_STARTED emits the token
+  onNotificationServiceStarted: (callback: (event: unknown, token: string) => void) => () => void
+
+  onNotificationServiceError: (callback: (event: unknown, error: unknown) => void) => () => void
 }
 
 declare global {

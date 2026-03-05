@@ -281,6 +281,8 @@ export const ConversationMessages = forwardRef<
           description: `Message deleted by ${data.deletedBy}`,
           id: `toast-success-message-deleted-${data.messageId}`
         })
+
+        window.electron.notify('Majik Message', `Message deleted by ${data.deletedBy}`)
       }
     })
 

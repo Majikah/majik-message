@@ -1,3 +1,9 @@
+import type {
+  FileContext,
+  MajikFile,
+  MajikFileJSON,
+} from "@majikah/majik-file";
+
 export type ISODateString = string;
 
 export type MajikMessageAccountID = string;
@@ -115,4 +121,99 @@ export interface MajikKeyMetadata {
   isLocked: boolean;
   kdfVersion: number;
   hasMlKem: boolean;
+}
+
+// ─── MajikFile integration types ─────────────────────────────────────────────
+
+/**
+ * Options for MajikMessage.encryptFile().
+ *
+ * Wraps MajikFile.CreateOptions in MajikMessage terms — callers pass contact
+ * IDs rather than raw key material. The orchestrator resolves everything from
+ * MajikKeyStore and the contact directory internally.
+ */
+export interface EncryptFileOptions {
+  /** Raw binary content of the file to encrypt. */
+  data: Uint8Array | ArrayBuffer;
+  /**
+   * File context — drives storage routing, WebP conversion, and R2 key prefix.
+   *   "user_upload"      → permanent storage,  no WebP conversion
+   *   "chat_attachment"  → permanent storage,  images converted to WebP
+   *   "chat_image"       → conversation-scoped, always WebP, requires conversationId
+   *   "thread_attachment"→ permanent storage,  no WebP conversion
+   */
+  context: FileContext;
+  /** Original filename (e.g. "photo.jpg"). Optional but strongly recommended. */
+  originalName?: string;
+  /** MIME type (e.g. "image/jpeg"). Falls back to extension inference when omitted. */
+  mimeType?: string;
+  /**
+   * Public keys of additional recipients beyond the sender.
+   * The active account (sender) is always included automatically.
+   * Duplicates and the sender's own public key are silently discarded.
+   * When empty or omitted, a single-recipient (self-encrypted) file is produced.
+   */
+  recipients?: MajikMessagePublicKey[];
+  /**
+   * Conversation ID — required when context is "chat_image".
+   * Scopes the R2 key: images/chats/<conversationId>/<userId>_<hash>.mjkb
+   */
+  conversationId?: string;
+  /**
+   * Store under files/public/ with 15-day auto-deletion by R2 lifecycle policy.
+   * Requires expiresAt. Use MajikFile.buildExpiryDate() to generate.
+   * @default false
+   */
+  isTemporary?: boolean;
+  /** ISO-8601 expiry timestamp. Required when isTemporary is true. */
+  expiresAt?: string;
+  /** Bypass the 100 MB file size limit. @default false */
+  bypassSizeLimit?: boolean;
+  /** Foreign-key association with a chat message. */
+  chatMessageId?: string;
+  /** Foreign-key association with a thread message. */
+  threadMessageId?: string;
+}
+
+/**
+ * Returned by MajikMessage.encryptFile().
+ *
+ * MajikMessage does NOT upload to R2 or insert into Supabase — that is the
+ * caller's responsibility so it can handle its own error handling, progress
+ * reporting, and transaction semantics.
+ */
+export interface EncryptFileResult {
+  /**
+   * The fully-initialised MajikFile instance.
+   * Use file.toMJKB()  → Blob  for R2 upload.
+   * Use file.toJSON()  → row   for Supabase insert.
+   */
+  file: MajikFile;
+  /**
+   * Supabase-ready metadata row. Equivalent to file.toJSON().
+   * Provided as a convenience so callers do not need to call toJSON() themselves.
+   */
+  metadata: MajikFileJSON;
+  /**
+   * .mjkb Blob for R2 upload. Equivalent to file.toMJKB().
+   */
+  binary: Blob;
+}
+
+/**
+ * Options for MajikMessage.decryptFile().
+ */
+export interface DecryptFileOptions {
+  /**
+   * The encrypted .mjkb binary to decrypt.
+   * Accepts a Blob (from R2 fetch), Uint8Array, or ArrayBuffer.
+   */
+  source: Blob | Uint8Array | ArrayBuffer;
+  /**
+   * ID of the own account to use for decryption.
+   * When omitted the active account is tried first.
+   * For group files, if the active account fails, all own accounts are tried
+   * automatically — you rarely need to set this explicitly.
+   */
+  accountId?: string;
 }

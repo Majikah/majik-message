@@ -216,6 +216,16 @@ const ConversationSidePanel: React.FC<ConversationSidePanelProps> = ({ majik }) 
     [fetchedConversations, selectedConversationId]
   )
 
+  // ── Read conversationID from URL params on mount ──────────────────────────
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    const raw = params.get('conversationID')
+    if (!raw) return
+    const decoded = decodeURIComponent(raw)
+    setSelectedConversationId(decoded)
+  }, [])
+
   // ── Fetch conversations ────────────────────────────────────────────────────
   const refreshConversations = useCallback(async () => {
     if (!majikah?.isAuthenticated) return
@@ -306,7 +316,7 @@ const ConversationSidePanel: React.FC<ConversationSidePanelProps> = ({ majik }) 
       {/* ── Left: conversation list ── */}
       <ListPane id="section-chats" $hasSelection={!!selectedConversation?.conversation_id?.trim()}>
         <GuideHelper
-          docsPath="/products/majik-message/docs/chats-realtime-documentation"
+          docsPath="https://majikah.solutions/products/majik-message/docs/chats-realtime-documentation"
           startTour={() => launchTutorialChats(tour)}
         />
         <PaneHeader>

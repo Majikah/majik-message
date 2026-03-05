@@ -904,10 +904,11 @@ export class MajikMessageThread {
 
       // Update metadata with final stats
       const finalMetadata: ThreadMetadata = {
-        ...this._metadata,
         messageCount,
         lastActivity: new Date().toISOString(),
         tags: mergedTags.length > 0 ? mergedTags : undefined,
+        priority: this._metadata.priority,
+        category: this._metadata.category,
       };
 
       // Determine final status

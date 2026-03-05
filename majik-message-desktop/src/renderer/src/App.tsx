@@ -8,6 +8,7 @@ import {
   AddressBookIcon,
   ChatIcon,
   EnvelopeIcon,
+  FileLockIcon,
   PaperPlaneIcon,
   StarFourIcon,
   UserIcon
@@ -42,6 +43,8 @@ import { useMajikah } from './components/majikah-session-wrapper/use-majikah'
 import EmailThreads from './components/panels/threads/EmailThreads'
 import { useDispatch } from 'react-redux'
 import { toggleTheme } from './redux/slices/system'
+import { useFirebaseElectronPush } from './lib/firebase/use-firebase-notifications'
+import FilePanel from './components/panels/FilePanel'
 
 const RootContainer = styled.div`
   display: flex;
@@ -56,6 +59,14 @@ const RootContainer = styled.div`
 const isElectron = (): false | ElectronAPI => typeof window !== 'undefined' && window.electron
 
 const MAX_ACCOUNT_LIMIT = 25
+
+const firebaseConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY!,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID!,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID!,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID!,
+  vapidKey: import.meta.env.VITE_VAPID_PUBLIC_KEY!
+}
 
 function App(): JSX.Element {
   const navigate = useNavigate()
@@ -78,6 +89,13 @@ function App(): JSX.Element {
   const [mnemonic, setMnemonic] = useState<string>('')
 
   const [inviteKey, setInviteKey] = useState<string>('')
+
+  useFirebaseElectronPush({
+    config: firebaseConfig,
+    publicKey: majik?.currentIdentity?.publicKey || null,
+    session: majikah,
+    enabled: true
+  })
 
   useEffect(() => {
     // Wire MajikKeyStore.onUnlockRequested to present our React modal
@@ -438,6 +456,13 @@ function App(): JSX.Element {
       name: 'Message',
       icon: EnvelopeIcon,
       element: <MessagePanel majik={majik} />
+    },
+    {
+      id: 'files',
+      route: '/files',
+      name: 'File Vault',
+      icon: FileLockIcon,
+      element: <FilePanel majik={majik} />
     },
     {
       id: 'majikah',
