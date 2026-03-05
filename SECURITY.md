@@ -4,10 +4,9 @@
 
 ## Overview
 
-**Majik Message** is an end-to-end encrypted messaging library and platform developed by **Majikah**.  
-Security, privacy, and user trust are core principles of this project.
+**Majik Message** is a post-quantum secure, end-to-end encrypted messaging platform. Security, privacy, and user sovereignty are our core principles. 
 
-This document explains how we approach security, how to responsibly disclose vulnerabilities, and what users and contributors can expect from us.
+This policy outlines our security model, cryptographic standards, and vulnerability disclosure process.
 
 ---
 
@@ -22,31 +21,33 @@ This document explains how we approach security, how to responsibly disclose vul
 ---
 
 ## Security Model
+Majik Message is built on a Zero-Trust, Local-First architecture:
 
-Majik Message is designed with the following security goals:
+- **Post-Quantum End-to-End Encryption (PQ-E2EE)**: Messages are protected by a hybrid cryptographic scheme designed to remain secure against future quantum computer attacks.
 
-- **End-to-End Encryption (E2EE)**  
-  Message content is encrypted client-side and is not readable by servers or intermediaries.
+- **Cryptographic Identity**: Accounts are derived entirely from 12-word seed phrases (BIP-39). We do not use phone numbers, emails, or central registries for identity.
 
-- **Zero-Knowledge Principles**  
-  Servers do not have access to plaintext messages, private keys, or decrypted content.
+- **Immutable Hash-Chain Integrity**: "Threads" utilize SHA-256 hash-chaining to create a tamper-evident record where messages cannot be silently altered or deleted.
 
-- **Key Ownership**  
-  Users retain control of their cryptographic keys. Private keys are never transmitted or stored in plaintext.
+- **Collaborative Deletion**: Permanent records (Threads) require the cryptographic consent of all participants before they can be purged from the relay network.
 
-- **Minimal Trust Surface**  
-  Backend services are treated as untrusted transport and storage layers only.
+- **Local Secret Management**: Private keys are encrypted at rest using Argon2id and never leave the user's device.
 
 ---
 
 ## Cryptography
 
-Majik Message uses modern, industry-standard cryptographic primitives where applicable, including but not limited to:
+We utilize NIST-standardized and industry-vetted primitives in a hybrid construction:
 
-- Public-key cryptography for identity and message exchange
-- Authenticated encryption for message confidentiality and integrity
-- Secure random number generation
-- Forward-secrecy–friendly patterns where supported
+- **Key Encapsulation**: ML-KEM-768 (FIPS-203) for post-quantum security, layered with X25519 for classical identity verification.
+
+- **Authenticated Encryption**: AES-256-GCM for message confidentiality and tamper detection.
+
+- **Key Derivation (KDF)**: Argon2id (64MB memory, 3 iterations) for securing local keys against brute-force and GPU-based attacks.
+
+- **Identity Fingerprinting**: SHA-256 hashes of public keys are used for verifiable contact identification.
+
+- **Integrity**: SHA-256 for linking messages in Thread chains to prevent history manipulation.
 
 ⚠️ **Important:**  
 Majik Message does **not** claim to be formally audited or mathematically proven secure unless explicitly stated. Use in high-risk environments should be evaluated accordingly.
@@ -54,13 +55,16 @@ Majik Message does **not** claim to be formally audited or mathematically proven
 ---
 
 ## Supported Versions
+We actively support and provide security patches for:
 
-We actively support the **latest published version** of:
+- Version 1.1.0 and higher: Our current stable, post-quantum era release.
 
-- The NPM package `@majikah/majik-message`
-- The `main` branch of the GitHub repository
+- NPM Package: [@majikah/majik-message](https://www.npmjs.com/package/@majikah/majik-message) (latest).
 
-Older versions may contain unpatched vulnerabilities and are **not guaranteed** to receive security fixes.
+- Main Branch: The main branch of this repository.
+
+⚠️ **Note**:
+Versions prior to 1.1.0 use legacy PBKDF2 and do not support post-quantum encryption. Users are encouraged to upgrade immediately.
 
 ---
 
@@ -121,20 +125,16 @@ The following are generally considered **out of scope** unless they demonstrate 
 
 ## Security Best Practices for Users
 
-We strongly recommend that developers using Majik Message:
-
-- Protect private keys and secrets at rest
-- Use secure storage mechanisms (OS keychain, secure enclaves, etc.)
-- Validate and sanitize all untrusted input
-- Keep dependencies and runtime environments up to date
-- Avoid logging sensitive cryptographic material
-
+- **Seed Phrase Safety**: Your 12-word seed phrase is your only recovery method. If lost, your account and all encrypted archives are unrecoverable.
+- **Verify Fingerprints**: Always verify a contact’s public key fingerprint (available in the Contact Card) through an out-of-band channel.
+- **Session Security**: When using the Chrome Extension, ensure your host machine is secure, as keys are held in memory during your active session.
+  
 ---
 
 ## Disclaimer
 
-Majik Message is provided **“as is”**, without warranty of any kind.  
-While we strive to maintain high security standards, no system is completely immune to vulnerabilities.
+Majik Message is provided **“as is.”** While we use state-of-the-art post-quantum primitives (ML-KEM-768), this software has not undergone a formal third-party mathematical audit. 
+Use in high-stakes or life-critical environments should be preceded by an independent security review.
 
 Use at your own risk.
 
@@ -156,7 +156,7 @@ Thank you for helping keep **Majik Message** secure.
 [![Developed by Zelijah](https://img.shields.io/badge/Developed%20by-Zelijah-red?logo=github&logoColor=white)](https://thezelijah.world) ![GitHub Sponsors](https://img.shields.io/github/sponsors/jedlsf?style=plastic&label=Sponsors&link=https%3A%2F%2Fgithub.com%2Fsponsors%2Fjedlsf)
 
 
-**Majik Message** is a secure messaging platform built on cryptographic identity. Your account *is* your encryption keys—no phone numbers, no passwords, just your 12-word seed phrase and complete privacy.
+**Majik Message** is a post-quantum secure messaging platform built on cryptographic identity. Your account is your encryption keys—no phone numbers, no passwords, just your 12-word seed phrase and complete privacy. Safe from quantum computers.
 
 ![npm](https://img.shields.io/npm/v/@majikah/majik-message) ![npm downloads](https://img.shields.io/npm/dm/@majikah/majik-message) ![npm bundle size](https://img.shields.io/bundlephobia/min/%40majikah%2Fmajik-message) [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0) ![TypeScript](https://img.shields.io/badge/TypeScript-Ready-blue)
 
@@ -164,7 +164,7 @@ Thank you for helping keep **Majik Message** secure.
 
 [Read more about Majik Message here](https://majikah.solutions/products/majik-message)
 
-[![Majik Message Thumbnail](https://storage.majikah.solutions/public/Majikah_MajikMessage_SocialCard.webp)](https://message.majikah.solutions)
+[![Majik Message Thumbnail](https://github.com/user-attachments/assets/d433c6b8-1841-4fa1-a6da-b348029d1dbe)](https://message.majikah.solutions)
 
 > Click the image to try Majik Message live.
 
