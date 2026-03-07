@@ -12,12 +12,13 @@ import { MajikMessageIdentity } from "../../system/identity";
 
 import { ThreadStatus } from "../enums";
 import { MajikMessageThread } from "../majik-message-thread";
+import { FileContext, MajikFile } from "@majikah/majik-file";
 
 // ==================== Types & Interfaces ====================
 
 export interface MailMetadata {
   subject?: string;
-  attachments?: string[];
+  attachments?: MailAttachmentRef[];
   priority?: "low" | "medium" | "high" | "urgent";
   labels?: string[];
   isForwarded?: boolean;
@@ -37,6 +38,23 @@ export interface MajikMessageMailJSON {
   p_hash: string; // Previous hash (blockchain-like)
   previous_mail_id?: MajikMessageMailID;
   read_by: MajikMessagePublicKey[];
+}
+
+export interface MailAttachmentRef {
+  /** MajikFile UUID — used to fetch the .mjkb from R2 via your file service */
+  fileId: string;
+  /** SHA-256 hex of original bytes — for dedup checks */
+  fileHash: string;
+  /** Original filename for display (e.g. "resume.pdf") */
+  originalName: string | null;
+  /** MIME type for icon/preview logic */
+  mimeType: string | null;
+  /** Original size in bytes — for "2.3 MB" display */
+  sizeOriginal: number;
+  /** R2 key — lets the Worker fetch directly without a DB lookup */
+  r2Key: string;
+  /** context from MajikFile — so the UI knows if it's a thread_attachment */
+  context: FileContext;
 }
 
 // ==================== Custom Errors ====================
@@ -192,6 +210,7 @@ export class MajikMessageMail {
    * @param message - Plain text message (encrypted)
    * @param recipients - Array of recipient public keys (excluding sender)
    * @param metadata - Optional mail metadata
+   * @param id - Optional ID to use
    * @returns Promise resolving to new MajikMessageMail instance
    * @throws Error if validation fails or thread is closed
    */
@@ -201,6 +220,7 @@ export class MajikMessageMail {
     message: string,
     recipients: MajikMessagePublicKey[],
     metadata: MailMetadata = {},
+    id?: MajikMessageMailID,
   ): Promise<MajikMessageMail> {
     try {
       // Validate thread
@@ -286,12 +306,13 @@ export class MajikMessageMail {
       const normalizedRecipients = [...recipients].sort();
 
       // Generate ID and timestamp
-      const id = uuidv4();
+      const generatedID = uuidv4();
+      const finalID = id || generatedID;
       const timestamp = new Date();
 
       // Generate hash for this mail item
       const hash = this.generateHash(
-        id,
+        finalID,
         message.trim(),
         senderPublicKey,
         normalizedRecipients,
@@ -308,7 +329,7 @@ export class MajikMessageMail {
       };
 
       return new MajikMessageMail(
-        id,
+        finalID,
         thread.id,
         accountID,
         message.trim(),
@@ -345,6 +366,7 @@ export class MajikMessageMail {
    * @param message - Plain text message (encrypted)
    * @param recipients - Array of recipient public keys (excluding sender)
    * @param metadata - Optional mail metadata
+   * @param id - Optional ID to use
    * @returns Promise resolving to new MajikMessageMail instance
    * @throws Error if validation fails or thread is closed
    */
@@ -355,6 +377,7 @@ export class MajikMessageMail {
     message: string,
     recipients: MajikMessagePublicKey[],
     metadata: MailMetadata = {},
+    id?: MajikMessageMailID,
   ): Promise<MajikMessageMail> {
     try {
       // Validate thread
@@ -455,12 +478,13 @@ export class MajikMessageMail {
       const normalizedRecipients = [...recipients].sort();
 
       // Generate ID and timestamp
-      const id = uuidv4();
+      const generatedID = uuidv4();
+      const finalID = id || generatedID;
       const timestamp = new Date();
 
       // Generate hash for this mail item
       const hash = this.generateHash(
-        id,
+        finalID,
         message.trim(),
         senderPublicKey,
         normalizedRecipients,
@@ -477,7 +501,7 @@ export class MajikMessageMail {
       };
 
       return new MajikMessageMail(
-        id,
+        finalID,
         thread.id,
         accountID,
         message.trim(),
@@ -500,6 +524,105 @@ export class MajikMessageMail {
         }`,
       );
     }
+  }
+
+  // In MajikMessageMail
+
+  /**
+   * Attach a MajikFile to this mail.
+   * Automatically wires thread_id and thread_message_id from the instance.
+   *
+   * @throws MailValidationError if the file context is not "thread_attachment"
+   * @throws MailOperationError if this file is already attached (by fileId or fileHash)
+   */
+  attachFile(file: MajikFile): MailAttachmentRef {
+    // Enforce context — only thread attachments belong on mail
+    if (file.context !== "thread_attachment") {
+      throw new MailValidationError(
+        `attachFile: file must have context "thread_attachment" (got "${file.context}")`,
+      );
+    }
+
+    const existing = (this._metadata.attachments ?? []) as MailAttachmentRef[];
+
+    // Guard: duplicate by fileId
+    if (existing.some((a) => a.fileId === file.id)) {
+      throw new MailOperationError(
+        `attachFile: file "${file.id}" is already attached to this mail`,
+      );
+    }
+
+    // Guard: duplicate by content hash (same file re-encrypted)
+    if (existing.some((a) => a.fileHash === file.fileHash)) {
+      throw new MailOperationError(
+        `attachFile: a file with hash "${file.fileHash.slice(0, 8)}…" is already attached`,
+      );
+    }
+
+    // Wire thread context onto the file if not already bound.
+    // bindToThreadMail is a no-op guard — it throws if already set,
+    // so we only call it when both IDs are missing.
+    if (!file.threadId && !file.threadMessageId) {
+      file.bindToThreadMail(this._threadID, this._id);
+    } else if (
+      file.threadId !== this._threadID ||
+      file.threadMessageId !== this._id
+    ) {
+      // File was pre-bound to a DIFFERENT mail/thread — that's a real error
+      throw new MailOperationError(
+        `attachFile: file "${file.id}" is already bound to a different thread/mail`,
+      );
+    }
+
+    const ref: MailAttachmentRef = {
+      fileId: file.id,
+      fileHash: file.fileHash,
+      originalName: file.originalName,
+      mimeType: file.mimeType,
+      sizeOriginal: file.sizeOriginal,
+      r2Key: file.r2Key,
+      context: file.context!,
+    };
+
+    this._metadata = {
+      ...this._metadata,
+      attachments: [...existing, ref],
+    };
+
+    return ref;
+  }
+
+  /**
+   * Remove an attached file by fileId.
+   * Returns true if removed, false if it wasn't attached.
+   */
+  detachFile(fileId: string): boolean {
+    const existing = (this._metadata.attachments ?? []) as MailAttachmentRef[];
+    const filtered = existing.filter((a) => a.fileId !== fileId);
+    if (filtered.length === existing.length) return false;
+    this._metadata = { ...this._metadata, attachments: filtered };
+    return true;
+  }
+
+  /** Returns all attachment refs on this mail, typed correctly. */
+  get attachments(): MailAttachmentRef[] {
+    return [...((this._metadata.attachments ?? []) as MailAttachmentRef[])];
+  }
+
+  /** Returns true if this mail has at least one attachment. */
+  get hasAttachments(): boolean {
+    return (
+      ((this._metadata.attachments ?? []) as MailAttachmentRef[]).length > 0
+    );
+  }
+
+  /** Returns the attachment ref for a given fileId, or null if not found. */
+  getAttachment(fileId: string): MailAttachmentRef | null {
+    return (
+      ((this._metadata.attachments ?? []) as MailAttachmentRef[]).find(
+        (a) => a.fileId === fileId,
+      ) ?? null
+    );
   }
 
   // ==================== Hash Generation Methods ====================
@@ -699,12 +822,6 @@ export class MajikMessageMail {
           error instanceof Error ? error.message : "Unknown error"
         }`,
       );
-    }
-  }
-
-  private validateMessage(message: string): void {
-    if (!message || typeof message !== "string" || message.trim() === "") {
-      throw new Error("Invalid message: must be a non-empty string");
     }
   }
 
@@ -1064,6 +1181,23 @@ export class MajikMessageMail {
         );
       }
 
+      if (data.metadata?.attachments !== undefined) {
+        if (!Array.isArray(data.metadata.attachments)) {
+          throw new MailValidationError(
+            "Invalid JSON: metadata.attachments must be an array",
+          );
+        }
+        for (let i = 0; i < data.metadata.attachments.length; i++) {
+          if (
+            !MajikMessageMail.isValidAttachmentRef(data.metadata.attachments[i])
+          ) {
+            throw new MailValidationError(
+              `Invalid JSON: metadata.attachments[${i}] is not a valid MailAttachmentRef`,
+            );
+          }
+        }
+      }
+
       // Parse timestamp
       const timestamp = new Date(data.timestamp);
       if (isNaN(timestamp.getTime())) {
@@ -1123,6 +1257,20 @@ export class MajikMessageMail {
           `Current length: ${message.length}`,
       );
     }
+  }
+
+  private static isValidAttachmentRef(a: any): a is MailAttachmentRef {
+    return (
+      a &&
+      typeof a === "object" &&
+      typeof a.fileId === "string" &&
+      typeof a.fileHash === "string" &&
+      typeof a.r2Key === "string" &&
+      typeof a.sizeOriginal === "number" &&
+      (a.originalName === null || typeof a.originalName === "string") &&
+      (a.mimeType === null || typeof a.mimeType === "string") &&
+      typeof a.context === "string"
+    );
   }
 
   private static isValidJSON(json: any): json is MajikMessageMailJSON {

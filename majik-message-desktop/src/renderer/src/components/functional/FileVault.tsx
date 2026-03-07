@@ -1,6 +1,7 @@
-import React, { useCallback, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import styled, { css, keyframes } from 'styled-components'
 import { toast } from 'sonner'
+import { CubeIcon, FolderIcon, KeyIcon } from '@phosphor-icons/react'
 
 // ─── Local tokens ─────────────────────────────────────────────────────────────
 const FONT_MONO = "'Fira Mono', 'JetBrains Mono', monospace"
@@ -959,11 +960,17 @@ export interface FileVaultProps {
   onDecrypt: (file: File) => Promise<DecryptResult>
   onModeChange?: (mode: Mode) => void
   externalRefreshKey?: number
+  decryptFile?: File
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-const FileVault: React.FC<FileVaultProps> = ({ onEncrypt, onDecrypt, onModeChange }) => {
+const FileVault: React.FC<FileVaultProps> = ({
+  onEncrypt,
+  onDecrypt,
+  onModeChange,
+  decryptFile
+}) => {
   const [mode, setMode] = useState<Mode>('encrypt')
 
   // File input state
@@ -981,6 +988,20 @@ const FileVault: React.FC<FileVaultProps> = ({ onEncrypt, onDecrypt, onModeChang
   const [resultBlob, setResultBlob] = useState<Blob | null>(null)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (!decryptFile) return
+
+    setMode('decrypt')
+
+    acceptDecryptFile(decryptFile)
+
+    // optional
+    setTimeout(() => {
+      handleDecrypt()
+    }, 50)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [decryptFile])
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -1270,7 +1291,9 @@ const FileVault: React.FC<FileVaultProps> = ({ onEncrypt, onDecrypt, onModeChang
             {!inputFile ? (
               // ── Empty state ──
               <>
-                <DropIconWrap $mode={mode}>{mode === 'encrypt' ? '📁' : '🔑'}</DropIconWrap>
+                <DropIconWrap $mode={mode}>
+                  {mode === 'encrypt' ? <FolderIcon size={28} /> : <KeyIcon size={28} />}
+                </DropIconWrap>
                 <div
                   style={{ display: 'flex', flexDirection: 'column', gap: 5, alignItems: 'center' }}
                 >
@@ -1293,8 +1316,8 @@ const FileVault: React.FC<FileVaultProps> = ({ onEncrypt, onDecrypt, onModeChang
                   <FileLeft>
                     <FileIconEmoji>{getFileIcon(inputFile.mime)}</FileIconEmoji>
                     <FileMeta>
-                      <FileName>{inputFile.file.name}</FileName>
-                      <FileSize>
+                      <FileName data-private>{inputFile.file.name}</FileName>
+                      <FileSize data-private>
                         {formatBytes(inputFile.file.size)} · {inputFile.mime}
                       </FileSize>
                     </FileMeta>
@@ -1305,7 +1328,7 @@ const FileVault: React.FC<FileVaultProps> = ({ onEncrypt, onDecrypt, onModeChang
                 {inputFile.valid ? (
                   <MimeRow>
                     <MimeChip $variant="neutral">Format</MimeChip>
-                    <MimeChip $variant={mode === 'encrypt' ? 'source' : 'mjkb'}>
+                    <MimeChip $variant={mode === 'encrypt' ? 'source' : 'mjkb'} data-private>
                       {inputFile.mime}
                     </MimeChip>
                     <MimeChip $variant="valid">
@@ -1352,7 +1375,9 @@ const FileVault: React.FC<FileVaultProps> = ({ onEncrypt, onDecrypt, onModeChang
           <OutputArea $hasResult={isProcessing || hasResult}>
             {!isProcessing && !hasResult && (
               <WaitingState>
-                <WaitingIcon>{mode === 'encrypt' ? '📦' : '🔑'}</WaitingIcon>
+                <WaitingIcon>
+                  {mode === 'encrypt' ? <CubeIcon size={28} /> : <KeyIcon size={28} />}
+                </WaitingIcon>
                 <WaitingText>
                   {mode === 'encrypt' ? 'Select a file to encrypt' : 'Upload a .mjkb to decrypt'}
                 </WaitingText>
@@ -1379,7 +1404,7 @@ const FileVault: React.FC<FileVaultProps> = ({ onEncrypt, onDecrypt, onModeChang
               <ResultCard>
                 <ResultRow>
                   <ResultLabel>Output file</ResultLabel>
-                  <ResultValue $accent="encrypt">
+                  <ResultValue $accent="encrypt" data-private>
                     {encryptResult.originalName.replace(/\.[^.]+$/, '')}_
                     {encryptResult.hash.slice(0, 8)}.mjkb
                   </ResultValue>
@@ -1390,19 +1415,23 @@ const FileVault: React.FC<FileVaultProps> = ({ onEncrypt, onDecrypt, onModeChang
                 </ResultRow>
                 <ResultRow>
                   <ResultLabel>Original size</ResultLabel>
-                  <ResultValue $accent="neutral">
+                  <ResultValue $accent="neutral" data-private>
                     {formatBytes(encryptResult.originalSize)}
                   </ResultValue>
                 </ResultRow>
                 <ResultRow>
                   <ResultLabel>Encrypted size</ResultLabel>
-                  <ResultValue $accent="encrypt">
+                  <ResultValue $accent="encrypt" data-private>
                     {formatBytes(encryptResult.encryptedSize)}
                   </ResultValue>
                 </ResultRow>
                 <ResultRow>
                   <ResultLabel>SHA-256</ResultLabel>
-                  <ResultValue $accent="neutral" style={{ fontSize: 9, letterSpacing: '0.03em' }}>
+                  <ResultValue
+                    $accent="neutral"
+                    style={{ fontSize: 9, letterSpacing: '0.03em' }}
+                    data-private
+                  >
                     {encryptResult.hash.slice(0, 24)}…
                   </ResultValue>
                 </ResultRow>
@@ -1413,25 +1442,33 @@ const FileVault: React.FC<FileVaultProps> = ({ onEncrypt, onDecrypt, onModeChang
               <ResultCard>
                 <ResultRow>
                   <ResultLabel>Recovered file</ResultLabel>
-                  <ResultValue $accent="decrypt">{decryptResult.originalName}</ResultValue>
+                  <ResultValue $accent="decrypt" data-private>
+                    {decryptResult.originalName}
+                  </ResultValue>
                 </ResultRow>
                 <ResultRow>
                   <ResultLabel>MIME type</ResultLabel>
-                  <ResultValue $accent="neutral">{decryptResult.mimeType}</ResultValue>
+                  <ResultValue $accent="neutral" data-private>
+                    {decryptResult.mimeType}
+                  </ResultValue>
                 </ResultRow>
                 <ResultRow>
                   <ResultLabel>Original size</ResultLabel>
-                  <ResultValue $accent="decrypt">
+                  <ResultValue $accent="decrypt" data-private>
                     {formatBytes(decryptResult.originalSize)}
                   </ResultValue>
                 </ResultRow>
                 <ResultRow>
                   <ResultLabel>Verified</ResultLabel>
-                  <ResultValue $accent="decrypt">✓ ML-KEM-768 match</ResultValue>
+                  <ResultValue $accent="decrypt" data-private>
+                    ✓ ML-KEM-768 match
+                  </ResultValue>
                 </ResultRow>
                 <ResultRow>
                   <ResultLabel>Decompressed</ResultLabel>
-                  <ResultValue $accent="neutral">Zstd lv.22</ResultValue>
+                  <ResultValue $accent="neutral" data-private>
+                    Zstd lv.22
+                  </ResultValue>
                 </ResultRow>
               </ResultCard>
             )}
@@ -1467,7 +1504,7 @@ const FileVault: React.FC<FileVaultProps> = ({ onEncrypt, onDecrypt, onModeChang
         <StatsRow>
           <StatChip>
             <StatLabel>Original</StatLabel>
-            <StatValue $accent="neutral">
+            <StatValue $accent="neutral" data-private>
               {mode === 'encrypt'
                 ? formatBytes(encryptResult!.originalSize)
                 : formatBytes(inputFile?.file.size ?? 0)}
@@ -1475,7 +1512,7 @@ const FileVault: React.FC<FileVaultProps> = ({ onEncrypt, onDecrypt, onModeChang
           </StatChip>
           <StatChip>
             <StatLabel>Output</StatLabel>
-            <StatValue $accent={mode}>
+            <StatValue $accent={mode} data-private>
               {mode === 'encrypt'
                 ? formatBytes(encryptResult!.encryptedSize)
                 : formatBytes(decryptResult!.originalSize)}
@@ -1483,7 +1520,7 @@ const FileVault: React.FC<FileVaultProps> = ({ onEncrypt, onDecrypt, onModeChang
           </StatChip>
           <StatChip>
             <StatLabel>Ratio</StatLabel>
-            <StatValue $accent="neutral">
+            <StatValue $accent="neutral" data-private>
               {mode === 'encrypt' && compressionRatio !== null
                 ? compressionRatio > 0
                   ? `${compressionRatio}% smaller`

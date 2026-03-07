@@ -2,6 +2,7 @@ import type {
   FileContext,
   MajikFile,
   MajikFileJSON,
+  TempFileDuration,
 } from "@majikah/majik-file";
 
 export type ISODateString = string;
@@ -135,6 +136,8 @@ export interface MajikKeyMetadata {
 export interface EncryptFileOptions {
   /** Raw binary content of the file to encrypt. */
   data: Uint8Array | ArrayBuffer;
+  /** UUID from auth.users — used for R2 key construction and ownership checks. */
+  userId?: string;
   /**
    * File context — drives storage routing, WebP conversion, and R2 key prefix.
    *   "user_upload"      → permanent storage,  no WebP conversion
@@ -165,14 +168,16 @@ export interface EncryptFileOptions {
    * @default false
    */
   isTemporary?: boolean;
-  /** ISO-8601 expiry timestamp. Required when isTemporary is true. */
-  expiresAt?: string;
+  /** TempFileDuration in days. Required when isTemporary is true. */
+  expiresAt?: TempFileDuration;
   /** Bypass the 100 MB file size limit. @default false */
   bypassSizeLimit?: boolean;
   /** Foreign-key association with a chat message. */
   chatMessageId?: string;
   /** Foreign-key association with a thread message. */
   threadMessageId?: string;
+  /** Foreign-key association with a thread. */
+  threadId?: string;
 }
 
 /**

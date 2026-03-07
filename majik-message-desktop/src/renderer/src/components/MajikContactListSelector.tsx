@@ -22,6 +22,7 @@ interface MajikContactListSelectorProps {
   emptyActionText?: string
   allowEmpty?: boolean
   disabled?: boolean
+  compact?: boolean // ← add
 }
 
 const arraysEqual = (a: MajikContact[], b: MajikContact[]): boolean =>
@@ -36,7 +37,8 @@ export function MajikContactListSelector({
   emptyActionButton,
   emptyActionText = 'Add New Contact',
   allowEmpty = true,
-  disabled = false
+  disabled = false,
+  compact = false
 }: MajikContactListSelectorProps): JSX.Element {
   const [list, setList] = useState<MajikContact[]>(value)
   const [showDropdown, setShowDropdown] = useState(false)
@@ -266,15 +268,16 @@ export function MajikContactListSelector({
 
   return (
     <SelectorWrapper ref={wrapperRef} id={id}>
-      <InputContainer>
+      <InputContainer $compact={compact}>
         {list.map((contact, index) => (
-          <Tag key={contact.id}>
+          <Tag key={contact.id} $compact={compact}>
             <span data-private>{getContactLabelSync(contact)}</span>
             {!disabled && <RemoveButton onClick={(e) => handleRemove(index, e)}>✕</RemoveButton>}
           </Tag>
         ))}
 
         <StyledInput
+          $compact={compact}
           ref={inputRef}
           type="text"
           value={query}
@@ -346,37 +349,6 @@ const SelectorWrapper = styled.div`
   width: 100%;
 `
 
-const InputContainer = styled.div`
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  min-height: 42px;
-  border: 1px solid ${({ theme }) => theme.colors.secondaryBackground};
-  border-radius: 8px;
-  padding: 6px 10px;
-  background: ${({ theme }) => theme.colors.secondaryBackground};
-  cursor: text;
-`
-
-const Tag = styled.span`
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 10px;
-  background-color: ${({ theme }) => theme.colors.primaryBackground};
-  color: ${({ theme }) => theme.colors.textPrimary};
-  border-radius: 6px;
-  font-size: 0.875rem;
-  white-space: nowrap;
-  transition: all 0.2s ease;
-
-  &:hover {
-    transform: scale(1.05);
-  }
-`
-
 const RemoveButton = styled.button`
   border: none;
   background: transparent;
@@ -393,13 +365,44 @@ const RemoveButton = styled.button`
   }
 `
 
-const StyledInput = styled.input`
+const InputContainer = styled.div<{ $compact?: boolean }>`
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: ${({ $compact }) => ($compact ? '30px' : '42px')};
+  border: 1px solid ${({ theme }) => theme.colors.secondaryBackground};
+  border-radius: ${({ $compact }) => ($compact ? '7px' : '8px')};
+  padding: ${({ $compact }) => ($compact ? '3px 7px' : '6px 10px')};
+  background: ${({ theme }) => theme.colors.secondaryBackground};
+  cursor: text;
+`
+
+const Tag = styled.span<{ $compact?: boolean }>`
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: ${({ $compact }) => ($compact ? '2px 6px' : '5px 10px')};
+  background-color: ${({ theme }) => theme.colors.primaryBackground};
+  color: ${({ theme }) => theme.colors.textPrimary};
+  border-radius: ${({ $compact }) => ($compact ? '5px' : '6px')};
+  font-size: ${({ $compact }) => ($compact ? '10px' : '0.875rem')};
+  white-space: nowrap;
+  transition: all 0.2s ease;
+
+  &:hover {
+    transform: scale(1.05);
+  }
+`
+
+const StyledInput = styled.input<{ $compact?: boolean }>`
   flex: 1;
-  min-width: 120px;
+  min-width: ${({ $compact }) => ($compact ? '70px' : '120px')};
   border: none;
   background: transparent;
   color: ${({ theme }) => theme.colors.textPrimary};
-  font-size: 0.875rem;
+  font-size: ${({ $compact }) => ($compact ? '10px' : '0.875rem')};
   outline: none;
   padding: 4px 0;
 

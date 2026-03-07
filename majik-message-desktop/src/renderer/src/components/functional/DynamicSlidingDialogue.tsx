@@ -1,7 +1,6 @@
 import React, { useState } from 'react'
 import styled from 'styled-components'
 
-import {} from '../../globals/styled-dialogs'
 import ScrollableForm from '../foundations/ScrollableForm'
 import DuoButton from '../foundations/DuoButton'
 import { Drawer } from 'vaul'
@@ -16,8 +15,9 @@ import {
 const ModalContainer = styled.div`
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  justify-content: flex-start
+
+  justify-content: flex-start;
+  width: 100%;
 
   padding: 1rem 50px;
 `
@@ -25,6 +25,7 @@ const ModalContainer = styled.div`
 interface DynamicSlidingDialogueProps {
   children: React.ReactNode
   scrollable?: boolean
+  preventDragClose?: boolean
   buttons: {
     cancel: {
       text: string
@@ -51,6 +52,7 @@ interface DynamicSlidingDialogueProps {
 const DynamicSlidingDialogue: React.FC<DynamicSlidingDialogueProps> = ({
   children,
   scrollable = false,
+  preventDragClose = false,
   buttons = {
     cancel: {
       text: 'Cancel',
@@ -88,7 +90,12 @@ const DynamicSlidingDialogue: React.FC<DynamicSlidingDialogueProps> = ({
 
   return (
     <>
-      <Drawer.Root open={open} onOpenChange={setOpen} direction="right">
+      <Drawer.Root
+        open={open}
+        onOpenChange={setOpen}
+        direction="right"
+        dismissible={!preventDragClose}
+      >
         <Drawer.Portal>
           <StyledDialogOverlay className="DialogOverlay" />
           <StyledDialogContent

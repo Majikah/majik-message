@@ -1,10 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import styled from 'styled-components'
-
+import styled, { css, keyframes } from 'styled-components'
 import { toast } from 'sonner'
-
-import { ButtonPrimaryConfirm } from '@renderer/globals/buttons'
-import { downloadBlob, isDevEnvironment } from '@renderer/utils/utils'
+import { PaperPlaneRightIcon, PaperclipIcon, LockSimpleIcon } from '@phosphor-icons/react'
 
 import type {
   MajikContact,
@@ -12,50 +9,286 @@ import type {
   MajikMessageThread
 } from '@majikah/majik-message'
 import type { MajikMessageDatabase } from '@renderer/components/majik-context-wrapper/majik-message-database'
-import MajikContactListSelector from '@renderer/components/MajikContactListSelector'
-import { ChatInputBox } from '@renderer/components/functional/ChatInputBox'
-import CustomInputField from '@renderer/components/foundations/CustomInputField'
-import type { MajikahSession } from '@renderer/components/majikah-session-wrapper/majikah-session'
 
-/* ---------------------------------------------
- * Styled Components
- * ------------------------------------------- */
+import { MailInputBox } from '@renderer/components/functional/MailInputBox'
+
+import { isDevEnvironment } from '@renderer/utils/utils'
+import ThreadAttachments from './ThreadAttachments'
+import type { MajikFile } from '@majikah/majik-file'
+
+// ─── Animations ───────────────────────────────────────────────────────────────
+
+const slideIn = keyframes`
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+`
+
+// ─── Local tokens ─────────────────────────────────────────────────────────────
+const FONT_MONO = "'Fira Mono', 'JetBrains Mono', monospace"
+
+// ─── Root — fills the DynamicSlidingDialogue body ─────────────────────────────
+
 const Root = styled.div`
-  width: 100%;
+  display: flex;
+  flex-direction: column;
   height: 100%;
-  display: flex;
-  flex-direction: column;
+  gap: 10px;
 
+  background: ${({ theme }) => theme.colors.primaryBackground};
+  animation: ${slideIn} 200ms ease both;
+  margin-top: 20px;
+`
+
+// ─── Compose header ────────────────────────────────────────────────────────────
+// Gmail-style header with thread title and close button (handled by parent).
+// Inside here we show the From field (read-only sender) and To (locked list).
+
+const ComposeHeader = styled.div`
+  flex-shrink: 0;
+  padding: 0 20px;
+  border-bottom: 1px solid ${({ theme }) => theme.colors.secondaryBackground};
+`
+
+const FieldRow = styled.div<{ $borderless?: boolean }>`
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 0;
+  min-height: 42px;
+  ${({ $borderless, theme }) =>
+    !$borderless &&
+    css`
+      border-bottom: 1px solid ${theme.colors.secondaryBackground}77;
+    `}
+`
+
+const FieldLabel = styled.span`
+  font-family: ${FONT_MONO};
+  font-size: 10px;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  opacity: 0.55;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  width: 36px;
+  flex-shrink: 0;
+
+  user-select: none;
+`
+
+const FieldValue = styled.div`
+  flex: 1;
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 0px 10px;
+  min-height: 42px;
+`
+
+const ContactChip = styled.span`
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0px 9px;
+  border-radius: 100px;
+  background: ${({ theme }) => theme.colors.secondaryBackground};
+  border: 1px solid ${({ theme }) => theme.colors.secondaryBackground};
+  font-size: 11px;
   color: ${({ theme }) => theme.colors.textPrimary};
-  gap: 25px;
+  font-weight: 500;
+  white-space: nowrap;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 `
 
-const Body = styled.div`
+const LockBadge = styled.span`
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  padding: 3px 8px;
+  border-radius: 100px;
+  background: ${({ theme }) => theme.colors.primary}15;
+  border: 1px solid ${({ theme }) => theme.colors.primary}2a;
+  font-family: ${FONT_MONO};
+  font-size: 9px;
+  color: ${({ theme }) => theme.colors.primary};
+  opacity: 0.75;
+  white-space: nowrap;
+  flex-shrink: 0;
+  align-self: center;
+`
+
+// ─── Subject field ────────────────────────────────────────────────────────────
+// Overrides CustomInputField to match the compose style.
+
+const SubjectWrap = styled.div`
   flex: 1;
+  padding: 0 0 0 10px;
   display: flex;
-  flex-direction: column;
+  align-items: center;
+
+  input,
+  textarea {
+    background: transparent;
+    border: none;
+    outline: none;
+    font-size: 13px;
+    color: ${({ theme }) => theme.colors.textPrimary};
+    width: 100%;
+    padding: 0;
+
+    &::placeholder {
+      color: ${({ theme }) => theme.colors.textSecondary};
+      opacity: 0.35;
+    }
+  }
 `
 
-const Section = styled.div`
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-`
-
-const PreviewActions = styled.div`
-  display: flex;
-  gap: 8px;
-  padding: 8px 16px;
-  border-top: 1px solid ${({ theme }) => theme.colors.secondaryBackground};
-`
-
-const ExportButton = styled(ButtonPrimaryConfirm)`
-  padding: 6px 20px;
+const SubjectInput = styled.input`
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: 13px;
+  font-weight: 500;
+  color: ${({ theme }) => theme.colors.textPrimary};
   width: 100%;
+  padding: 11px 0;
+
+  &::placeholder {
+    color: ${({ theme }) => theme.colors.textSecondary};
+    opacity: 0.35;
+    font-weight: 400;
+  }
 `
+
+// ─── Editor body ──────────────────────────────────────────────────────────────
+
+const ComposeBody = styled.div`
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 14px 20px 0;
+  overflow: hidden;
+`
+
+// ─── Footer toolbar ───────────────────────────────────────────────────────────
+
+const ComposeFooter = styled.div`
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px 16px;
+  border-top: 1px solid ${({ theme }) => theme.colors.secondaryBackground};
+  height: fit-content;
+`
+
+const SendBtn = styled.button<{ $canSend: boolean }>`
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 20px;
+  height: 36px;
+  border-radius: 9px;
+  border: none;
+  background: ${({ $canSend, theme }) =>
+    $canSend
+      ? (theme.gradients?.strong ?? theme.colors.primary)
+      : theme.colors.secondaryBackground};
+  color: ${({ $canSend, theme }) =>
+    $canSend ? theme.colors.primaryBackground : theme.colors.textSecondary};
+  font-size: 13px;
+  font-weight: 600;
+  cursor: ${({ $canSend }) => ($canSend ? 'pointer' : 'not-allowed')};
+  opacity: ${({ $canSend }) => ($canSend ? 1 : 0.5)};
+  transition:
+    opacity 150ms ease,
+    transform 120ms ease;
+  flex-shrink: 0;
+
+  &:hover:not(:disabled) {
+    opacity: 0.88;
+    transform: scale(1.02);
+  }
+`
+
+const FooterIconBtn = styled.button<{ $active?: boolean }>`
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  border: 1px solid ${({ theme }) => theme.colors.secondaryBackground};
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: ${({ $active, theme }) => ($active ? theme.colors.primary : theme.colors.textSecondary)};
+  transition: all 120ms ease;
+  flex-shrink: 0;
+
+  ${({ $active, theme }) =>
+    $active &&
+    css`
+      background: ${theme.colors.primary}18;
+      border-color: ${theme.colors.primary}33;
+    `}
+
+  &:hover:not(:disabled) {
+    background: ${({ theme }) => theme.colors.secondaryBackground};
+    color: ${({ theme }) => theme.colors.textPrimary};
+  }
+`
+
+const FooterSpacer = styled.div`
+  flex: 1;
+`
+
+const AttachmentCount = styled.span`
+  font-family: ${FONT_MONO};
+  font-size: 9px;
+  color: ${({ theme }) => theme.colors.primary};
+  background: ${({ theme }) => theme.colors.primary}18;
+  border: 1px solid ${({ theme }) => theme.colors.primary}33;
+  padding: 1px 5px;
+  border-radius: 100px;
+  margin-left: -4px;
+`
+
+const EncryptedHint = styled.span`
+  font-family: ${FONT_MONO};
+  font-size: 9px;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  opacity: 0.35;
+  letter-spacing: 0.04em;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+`
+
+// ─── Attachment panel container ───────────────────────────────────────────────
+
+const AttachPanelWrap = styled.div<{ $open: boolean }>`
+  flex-shrink: 0;
+  overflow: hidden;
+  max-height: ${({ $open }) => ($open ? '420px' : '0')};
+  transition: max-height 280ms cubic-bezier(0.4, 0, 0.2, 1);
+  border-top: ${({ $open, theme }) =>
+    $open ? `1px solid ${theme.colors.secondaryBackground}` : 'none'};
+`
+
+const AttachPanelInner = styled.div`
+  padding: 16px 20px;
+  height: 380px;
+  overflow: hidden;
+`
+
+// ─── Props ────────────────────────────────────────────────────────────────────
 
 interface NewMailFormProps {
-  majikah: MajikahSession
   majik: MajikMessageDatabase
   thread: MajikMessageThread
   onUpdate?: (message: string, subject?: string) => void
@@ -63,256 +296,224 @@ interface NewMailFormProps {
   reply?: boolean
 }
 
-/* ---------------------------------------------
- * Component
- * ------------------------------------------- */
-const NewMailForm: React.FC<NewMailFormProps> = ({ majikah, majik, thread, onUpdate, onSend }) => {
+// ─── Component ────────────────────────────────────────────────────────────────
+
+const NewMailForm: React.FC<NewMailFormProps> = ({ majik, thread, onUpdate, onSend }) => {
   const [input, setInput] = useState<string>('')
-  const [output, setOutput] = useState<string>('')
-  const [subject, setSubject] = useState<string | undefined>(undefined)
+  const [subject, setSubject] = useState<string>(thread.metadata?.subject ?? '')
+  const [attachPanelOpen, setAttachPanelOpen] = useState(false)
+  const [participants, setParticipants] = useState<MajikContact[]>([])
+  const [pendingAttachments, setPendingAttachments] = useState<MajikFile[]>([]) // ← ADD
+  const [hasPendingEncryption, setHasPendingEncryption] = useState(false) // ← ADD
 
-  const [myAccount] = useState<MajikContact | null>(() => {
-    const userAccount = majik.getActiveAccount()
-    if (!userAccount) return null
-    return userAccount
-  })
+  const myAccount = useMemo(() => majik.getActiveAccount() ?? null, [majik])
 
-  const [recipients, setRecipients] = useState<MajikContact[]>([])
-
-  const handleSetSubject = (inputSubject: string | undefined): void => {
-    if (!inputSubject?.trim()) {
-      setSubject(undefined)
-    } else {
-      setSubject(inputSubject)
-    }
-  }
-
-  const handleRecipientsUpdate = (updated: MajikContact[]): void => {
-    if (updated.length === 0) {
-      if (!myAccount) {
-        setRecipients([])
-      } else {
-        setRecipients([myAccount])
+  // ── Resolve participants ─────────────────────────────────────────────────────
+  useEffect(() => {
+    let cancelled = false
+    const resolve = async (): Promise<void> => {
+      if (!thread?.participants?.length) return
+      try {
+        const resolved = await Promise.all(
+          thread.participants.map((pKey) => majik.getContactByPublicKey(pKey))
+        )
+        const valid = resolved.filter((c): c is MajikContact => Boolean(c))
+        if (!cancelled) setParticipants(valid)
+      } catch (err) {
+        console.error('[NewMailForm] Failed to load participants', err)
       }
     }
-    setRecipients(updated)
-  }
-
-  const handleRecipientsClear = (): void => {
-    if (!myAccount) {
-      setRecipients([])
-    } else {
-      setRecipients([myAccount])
+    resolve()
+    return () => {
+      cancelled = true
     }
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [thread.id, majik])
 
-  const handleCopy = useCallback(() => {
-    if (!output?.trim()) {
-      toast.error('Failed to copy to clipboard', {
-        description: 'No text to copy.',
-        id: `toast-error-copy-${output}`
-      })
-      return
-    }
-    try {
-      navigator.clipboard.writeText(output)
-      toast.success('Copied to clipboard', {
-        description: output.length > 200 ? output.slice(0, 200) + '…' : output,
-        id: `toast-success-copy-${output}`
-      })
-    } catch (e) {
-      // fallback: show in prompt
-      toast.error('Failed to copy to clipboard', {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        description: (e as any)?.message || e,
-        id: `toast-error-copy-${output}`
-      })
-    }
-  }, [output])
+  // ── Handlers ─────────────────────────────────────────────────────────────────
 
-  const handleDownloadTxt = (): void => {
-    const blob = new Blob([output], {
-      type: 'application/octet-stream'
-    })
-    downloadBlob(blob, 'txt', `Message from ${myAccount?.meta?.label || myAccount?.id}`)
-  }
+  const handleAttachmentsChange = useCallback((files: MajikFile[]) => {
+    setPendingAttachments(files)
+    console.log('Received Attachments: ', files)
+  }, [])
 
-  const handleDownloadJson = (): void => {
-    const messageJSON = {
-      original: input,
-      encrypted: output
-    }
+  // Track whether any files are still encrypting (majikFile === undefined)
+  // so we can block send until all are ready
+  const handleEncryptionPending = useCallback((isPending: boolean) => {
+    setHasPendingEncryption(isPending)
+  }, [])
 
-    const jsonString = JSON.stringify(messageJSON)
+  const handleBodyChange = useCallback(
+    (markdown: string) => {
+      setInput(markdown)
+      onUpdate?.(markdown, subject)
+    },
+    [onUpdate, subject]
+  )
 
-    const blob = new Blob([jsonString], {
-      type: 'application/json;charset=utf-8'
-    })
-    downloadBlob(blob, 'json', `Message from ${myAccount?.meta?.label || myAccount?.id}`)
-  }
-
-  const handleEncryptMessage = async (input: string): Promise<void> => {
-    if (!input?.trim()) {
-      setInput('')
-      onUpdate?.('', subject)
-      return
-    }
-    setInput(input)
-    onUpdate?.(input, subject)
-
-    if (!myAccount) {
-      toast.error('No active account found.', { id: 'toast-error-no-account' })
-      return
-    }
-
-    if (!recipients || recipients.length === 0) {
-      toast.error('No recipients selected.', { id: 'toast-error-no-recipients' })
-      return
-    }
-
-    const recipientPubKeys = await Promise.all(
-      recipients.map(async (r) => {
-        const rBase64 = await r.getPublicKeyBase64()
-        return rBase64
-      })
-    )
-
-    const encrypted = await majik.encryptTextForScanner(input, recipientPubKeys, false)
-    setOutput(encrypted ?? '')
+  const handleSubjectChange = (e: React.ChangeEvent<HTMLInputElement>): void => {
+    setSubject(e.target.value)
+    onUpdate?.(input, e.target.value)
   }
 
   const processSend = async (
     senderPublicKey: MajikMessagePublicKey,
     text: string
   ): Promise<string> => {
-    if (isDevEnvironment()) console.log('Sending message from: ', senderPublicKey)
+    if (isDevEnvironment()) console.log('[NewMailForm] Sending from:', senderPublicKey)
 
-    if (!text?.trim()) {
-      throw new Error('A valid message is required.')
+    if (!text?.trim()) throw new Error('A valid message is required.')
+    if (!senderPublicKey?.trim()) throw new Error('A valid sender key is required.')
+    if (!participants || participants.length <= 1) throw new Error('Assign recipients first.')
+    console.log('Pending Attachments: ', pendingAttachments)
+    const subjectValue = subject?.trim() || undefined
+
+    // Pass ready MajikFile[] into the send call
+    const sendMessageResponse = await majik.createThreadMail(
+      thread,
+      text,
+      subjectValue,
+      pendingAttachments.length > 0 ? pendingAttachments : undefined
+    )
+
+    if (!sendMessageResponse?.mail.success) {
+      throw new Error("There's a problem while sending the message.")
     }
 
-    if (!senderPublicKey?.trim()) {
-      throw new Error('A valid sender public key is required.')
+    // Warn about partial upload failures without throwing
+    if (pendingAttachments.length > 0 && !sendMessageResponse.allAttachmentsUploaded) {
+      const failed = sendMessageResponse.attachments.filter((a) => !a.success)
+      toast.warning(
+        `Message sent, but ${failed.length} attachment${failed.length > 1 ? 's' : ''} failed to upload.`,
+        { description: failed.map((a) => a.originalName ?? a.fileId).join(', ') }
+      )
     }
 
-    if (!recipients || recipients.length <= 1) {
-      throw new Error('Assign recipients first.')
-    }
-
-    const sendMessageResponse = await majik.createThreadMail(thread, text, subject)
-
-    if (
-      sendMessageResponse !== null &&
-      sendMessageResponse.success &&
-      sendMessageResponse.message
-    ) {
-      onSend?.(text, subject)
-      return sendMessageResponse?.message || `Message sent successfully!`
-    } else {
-      return `Oh no... There's a problem while sending the message.`
-    }
+    onSend?.(text, subjectValue)
+    return sendMessageResponse.mail.message || 'Message sent successfully!'
   }
 
   const handleSend = async (): Promise<void> => {
     const activeAccount = majik.currentIdentity
     if (!activeAccount) return
-
-    const currentUserPublicKey = activeAccount.publicKey
-
-    if (!recipients || recipients.length <= 1) {
+    if (!participants || participants.length <= 1) {
       toast.error('Assign recipients first.')
       return
     }
-
-    toast.promise(processSend(currentUserPublicKey, input), {
-      loading: `Sending message...`,
-      success: (outputMessage) => {
-        setTimeout(() => {}, 1000)
-
-        return outputMessage
-      },
-      error: (error) => {
-        return `${error.message}`
-      }
+    toast.promise(processSend(activeAccount.publicKey, input), {
+      loading: 'Encrypting and sending…',
+      success: (msg) => msg,
+      error: (err) => `${err.message}`
     })
   }
 
-  useEffect(() => {
-    let cancelled = false
+  // Block send if files are still encrypting
+  const canSend = input.trim().length > 0 && participants.length > 1 && !hasPendingEncryption
+  // Display names for To: field
+  const toChips = participants.map((p) => ({
+    id: p.id,
+    label: p.meta?.label || p.id.slice(0, 6) + '…' + p.id.slice(-4)
+  }))
 
-    const loadRecipients = async (): Promise<void> => {
-      if (!thread?.participants?.length) return
-
-      try {
-        const resolved = await Promise.all(
-          thread.participants.map((pKey) => majik.getContactByPublicKey(pKey))
-        )
-
-        // filter out null / undefined if getContact can fail
-        const validRecipients = resolved.filter((c): c is MajikContact => Boolean(c))
-
-        if (!cancelled) {
-          setRecipients(validRecipients)
-        }
-      } catch (err) {
-        console.error('Failed to load recipients', err)
-        if (!cancelled) setRecipients(myAccount ? [myAccount] : [])
-      }
-    }
-
-    loadRecipients()
-
-    return () => {
-      cancelled = true
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [majik])
-
-  const contacts = useMemo(() => {
-    if (!majik) return []
-
-    return majik.listContacts(false, true)
-  }, [majik])
+  // Sender display
+  const fromLabel = myAccount?.meta?.label || 'You'
 
   return (
     <Root>
-      <MajikContactListSelector
-        id="message-recipients"
-        contacts={contacts}
-        value={recipients}
-        onUpdate={handleRecipientsUpdate}
-        onClearAll={handleRecipientsClear}
-        allowEmpty={false}
-        disabled={true}
-      />
-      <CustomInputField
-        label="Subject"
-        sensitive={true}
-        onChange={handleSetSubject}
-        maxChar={80}
-        capitalize="sentence"
-        currentValue={subject}
-      />
+      {/* ── Header: From / To / Subject ── */}
+      <ComposeHeader>
+        {/* From */}
+        <FieldRow>
+          <FieldLabel>From</FieldLabel>
+          <FieldValue>
+            <ContactChip data-private>{fromLabel}</ContactChip>
+          </FieldValue>
+          <LockBadge>
+            <LockSimpleIcon size={9} weight="fill" />
+            ML-KEM-768
+          </LockBadge>
+        </FieldRow>
 
-      <Body>
-        <Section>
-          <ChatInputBox
-            majikah={majikah}
-            onSend={handleSend}
-            onUpdate={handleEncryptMessage}
-            disabled={!recipients || recipients.length <= 1}
-            sendOnEnter={false}
-            enableGIF={false}
+        {/* To */}
+        <FieldRow>
+          <FieldLabel>To</FieldLabel>
+          <FieldValue data-private>
+            {toChips.length === 0 ? (
+              <span style={{ opacity: 0.35, fontSize: 12 }}>Loading participants…</span>
+            ) : (
+              toChips.map((c) => (
+                <ContactChip key={c.id} data-private>
+                  {c.label}
+                </ContactChip>
+              ))
+            )}
+          </FieldValue>
+        </FieldRow>
+
+        {/* Subject */}
+        <FieldRow $borderless>
+          <FieldLabel>Subj</FieldLabel>
+          <SubjectWrap data-private>
+            <SubjectInput
+              value={subject}
+              onChange={handleSubjectChange}
+              placeholder="Subject (optional)"
+              maxLength={80}
+              data-private
+            />
+          </SubjectWrap>
+        </FieldRow>
+      </ComposeHeader>
+
+      {/* ── Rich text editor body ── */}
+      <ComposeBody>
+        <MailInputBox onChange={handleBodyChange} placeholder="Write your message…" />
+      </ComposeBody>
+
+      {/* ── Attachment panel (collapse/expand) ── */}
+      <AttachPanelWrap $open={attachPanelOpen}>
+        <AttachPanelInner>
+          <ThreadAttachments
+            majik={majik}
+            thread={thread}
+            participants={participants}
+            composeMode={true}
+            onAttachmentsChange={handleAttachmentsChange}
+            onEncryptingChange={handleEncryptionPending}
           />
-          <PreviewActions>
-            <ExportButton onClick={handleCopy}>Copy</ExportButton>
-            <ExportButton onClick={handleDownloadTxt}>Download .txt</ExportButton>
-            <ExportButton onClick={handleDownloadJson}>Download .json</ExportButton>
-          </PreviewActions>
-        </Section>
-      </Body>
+        </AttachPanelInner>
+      </AttachPanelWrap>
+
+      {/* ── Footer toolbar ── */}
+      <ComposeFooter>
+        {/* Send */}
+        <SendBtn $canSend={canSend} onClick={handleSend} disabled={!canSend}>
+          <PaperPlaneRightIcon size={15} weight="bold" />
+          Send
+        </SendBtn>
+
+        {/* Attachment toggle — show count badge when files are ready */}
+        <FooterIconBtn
+          $active={attachPanelOpen}
+          onClick={() => setAttachPanelOpen((v) => !v)}
+          title={attachPanelOpen ? 'Hide attachments' : 'Manage attachments'}
+        >
+          <PaperclipIcon size={16} weight={attachPanelOpen ? 'fill' : 'regular'} />
+          {pendingAttachments.length > 0 && (
+            <AttachmentCount>{pendingAttachments.length}</AttachmentCount> // ← uncomment + use
+          )}
+        </FooterIconBtn>
+
+        <FooterSpacer />
+
+        <EncryptedHint>
+          <LockSimpleIcon size={9} weight="fill" />
+          End-to-end encrypted
+        </EncryptedHint>
+      </ComposeFooter>
     </Root>
   )
 }
 
+export { NewMailForm }
 export default NewMailForm

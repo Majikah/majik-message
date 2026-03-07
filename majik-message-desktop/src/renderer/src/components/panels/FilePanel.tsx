@@ -2,18 +2,22 @@
 
 import styled, { css, keyframes } from 'styled-components'
 import { useState, useEffect, useMemo } from 'react'
-import { ShieldCheckIcon, UserPlusIcon } from '@phosphor-icons/react'
+import { FolderOpenIcon, ShieldCheckIcon, UserPlusIcon } from '@phosphor-icons/react'
 import { toast } from 'sonner'
 
 import type { MajikMessageDatabase } from '../majik-context-wrapper/majik-message-database'
 import DynamicPlaceholder from '../foundations/DynamicPlaceholder'
 import { ChoiceButton } from '@renderer/globals/buttons'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import FileVault from '../functional/FileVault'
 import type { MajikContact } from '@majikah/majik-message'
 import MajikContactListSelector from '../MajikContactListSelector'
 import PopUpFormButton from '../foundations/PopUpFormButton'
 import CustomInputField from '../foundations/CustomInputField'
+import DynamicSlidingDialogue from '../functional/DynamicSlidingDialogue'
+import UserFiles from '../functional/UserFiles'
+import { useMajikah } from '../majikah-session-wrapper/use-majikah'
+import GuideHelper from '../functional/GuideHelper'
 
 // ─── Local tokens ─────────────────────────────────────────────────────────────
 const FONT_MONO = "'Fira Mono', 'JetBrains Mono', monospace"
@@ -191,6 +195,50 @@ const ModeBadge = styled.span<{ $mode: EditorMode }>`
         `}
 `
 
+// ─── My Files button ──────────────────────────────────────────────────────────
+
+const MyFilesButton = styled.button`
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 9px;
+  font-family: ${FONT_MONO};
+  font-size: 12px;
+  font-weight: 500;
+  background: ${({ theme }) => theme.colors.secondaryBackground};
+  border: 1px solid ${({ theme }) => theme.colors.primaryBackground};
+  color: ${({ theme }) => theme.colors.textSecondary};
+  cursor: pointer;
+  transition: all 0.15s;
+  flex-shrink: 0;
+
+  &:hover {
+    background: ${({ theme }) => theme.colors.primaryBackground};
+    color: ${({ theme }) => theme.colors.textPrimary};
+    border-color: ${({ theme }) => theme.colors.secondaryBackground};
+  }
+
+  &:disabled {
+    background: ${({ theme }) => theme.colors.primaryBackground};
+    color: ${({ theme }) => theme.colors.textSecondary};
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+`
+
+const DialogueBody = styled.div`
+  /* Fill available height inside the sliding panel */
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  /* Remove the ModalContainer padding that DynamicSlidingDialogue adds */
+  margin: -1rem -50px;
+  padding: 0 28px;
+  overflow: hidden;
+`
+
 // ─── Props ────────────────────────────────────────────────────────────────────
 interface FilePanelProps {
   majik: MajikMessageDatabase
@@ -198,7 +246,11 @@ interface FilePanelProps {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 const FilePanel: React.FC<FilePanelProps> = ({ majik }) => {
+  const { majikah } = useMajikah()
   const navigate = useNavigate()
+  const location = useLocation()
+
+  const [filesOpen, setFilesOpen] = useState(false)
 
   const [refreshKey, setRefreshKey] = useState<number>(0)
   const [inviteKey, setInviteKey] = useState<string>('')
@@ -216,6 +268,8 @@ const FilePanel: React.FC<FilePanelProps> = ({ majik }) => {
   const [recipientsVersion, setRecipientsVersion] = useState(0)
 
   const [detectedContacts, setDetectedContacts] = useState<MajikContact[]>([])
+
+  const [importedFile, setImportedFile] = useState<File | undefined>(undefined)
 
   // ── Unlock identity on mount ───────────────────────────────────────────────
   useEffect(() => {
@@ -236,6 +290,23 @@ const FilePanel: React.FC<FilePanelProps> = ({ majik }) => {
     }
     unlockIdentity()
   }, [majik])
+
+  useEffect(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const path = (location?.state as any)?.mjkbPath
+    if (!path) return
+
+    const loadFile = async (): Promise<void> => {
+      const response = await fetch(`file://${path}`)
+      const blob = await response.blob()
+
+      const file = new File([blob], path.split('/').pop() || 'file.mjkb')
+
+      setImportedFile(file)
+    }
+
+    loadFile()
+  }, [location.state])
 
   // ── Add contact ────────────────────────────────────────────────────────────
   const handleAddContact = async (): Promise<void> => {
@@ -317,7 +388,8 @@ const FilePanel: React.FC<FilePanelProps> = ({ majik }) => {
       mimeType,
       recipients: recipientPubKeys,
       isTemporary: false,
-      bypassSizeLimit: true // local use — no 100 MB cap
+      bypassSizeLimit: true, // local use — no 100 MB cap
+      userId: majikah?.user?.id
     })
     console.log('Encryption successful. File:', result)
 
@@ -392,10 +464,24 @@ const FilePanel: React.FC<FilePanelProps> = ({ majik }) => {
         </HeaderLeft>
 
         <HeaderActions>
-          {/* <GuideHelper
-            docsPath="https://majikah.solutions/products/majik-message/docs/message-local-documentation"
-            startTour={() => launchTutorialMessages(tour)}
-          /> */}
+          <GuideHelper
+            docsPath="https://majikah.solutions/products/majik-message/docs/file-vault"
+            // startTour={() => launchTutorialMessages(tour)}
+          />
+
+          {/* My Files button — opens the sliding panel */}
+          <MyFilesButton
+            onClick={() => setFilesOpen(true)}
+            disabled={!majikah.isAuthenticated}
+            title={
+              majikah.isAuthenticated
+                ? 'View and manage your encrypted files.'
+                : 'Login to access your files '
+            }
+          >
+            <FolderOpenIcon size={14} />
+            My Files
+          </MyFilesButton>
 
           <PopUpFormButton
             id="button-popup-messages-add-contact"
@@ -420,6 +506,7 @@ const FilePanel: React.FC<FilePanelProps> = ({ majik }) => {
               label="Invite Key"
               required
               importProp={{ type: 'txt' }}
+              sensitive
             />
           </PopUpFormButton>
         </HeaderActions>
@@ -481,9 +568,34 @@ const FilePanel: React.FC<FilePanelProps> = ({ majik }) => {
             onDecrypt={handleDecryptFile}
             onModeChange={handleModeChange}
             externalRefreshKey={recipientsVersion}
+            decryptFile={importedFile}
           />
         </Body>
       )}
+
+      <DynamicSlidingDialogue
+        isOpen={filesOpen}
+        onOpenChange={setFilesOpen}
+        modal={{
+          title: 'My Files',
+          description: 'Manage your encrypted MajikFile storage.'
+        }}
+        buttons={{
+          cancel: { text: 'Close', hide: true },
+          confirm: { text: 'Done', hide: true }
+        }}
+        scrollable={false}
+        width={950}
+      >
+        <DialogueBody>
+          <UserFiles
+            majik={majik}
+            uploadContext="user_upload"
+            contacts={contacts}
+            defaultRecipients={recipients}
+          />
+        </DialogueBody>
+      </DynamicSlidingDialogue>
     </PageRoot>
   )
 }

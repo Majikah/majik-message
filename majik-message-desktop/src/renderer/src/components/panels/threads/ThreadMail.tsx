@@ -1,14 +1,34 @@
 'use client'
 import React, { useCallback, useEffect, useState } from 'react'
 import styled, { css } from 'styled-components'
-import { BracketsCurlyIcon, CaretDownIcon, CopyIcon, TextAaIcon } from '@phosphor-icons/react'
+import {
+  BracketsCurlyIcon,
+  CaretDownIcon,
+  CopyIcon,
+  TextAaIcon,
+  PaperclipIcon,
+  FileIcon,
+  FileImageIcon,
+  FilePdfIcon,
+  FileZipIcon,
+  FileVideoIcon,
+  FileAudioIcon,
+  FileCodeIcon,
+  ArrowSquareOutIcon
+} from '@phosphor-icons/react'
 import moment from 'moment'
 import { MessageEnvelope, type MajikMessageMail } from '@majikah/majik-message'
 import type { MajikMessagePublicKey } from '@majikah/majik-message'
 import type { MajikMessageDatabase } from '@renderer/components/majik-context-wrapper/majik-message-database'
+import type { MailAttachmentRef } from '@majikah/majik-message' // adjust import path as needed
 import { downloadBlob } from '@renderer/utils/utils'
 import { toast } from 'sonner'
 import StyledIconButton from '@renderer/components/foundations/StyledIconButton'
+import { MajikFile } from '@majikah/majik-file'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import remarkIns from 'remark-ins'
+import remarkFlexibleMarkers from 'remark-flexible-markers'
 
 // ─── Local tokens ─────────────────────────────────────────────────────────────
 const FONT_MONO = "'Fira Mono', 'JetBrains Mono', monospace"
@@ -29,19 +49,12 @@ const pillBase = css`
 `
 
 // ─── Root card ────────────────────────────────────────────────────────────────
-/**
- * Single border radius, no margin — spacing handled by the parent list gap.
- * Border tints with primary when unread to subtly draw the eye.
- * $isUnread is passed through for the border color only.
- */
 const Card = styled.div<{ $isUnread: boolean }>`
   width: 100%;
   background: ${({ theme }) => theme.colors.primaryBackground};
   border: 1px solid
     ${({ theme, $isUnread }) =>
-      $isUnread
-        ? `${theme.colors.primary}40` /* ~25% opacity tint */
-        : theme.colors.secondaryBackground};
+      $isUnread ? `${theme.colors.primary}40` : theme.colors.secondaryBackground};
   border-radius: 10px;
   overflow: hidden;
   transition:
@@ -54,7 +67,7 @@ const Card = styled.div<{ $isUnread: boolean }>`
   }
 `
 
-// ─── Shared header row (collapsed + expanded share this shell) ────────────────
+// ─── Shared header row ────────────────────────────────────────────────────────
 const HeaderRow = styled.div<{ $clickable: boolean }>`
   display: flex;
   align-items: center;
@@ -93,11 +106,6 @@ const Avatar = styled.div<{ $hue: number }>`
 `
 
 // ─── Caret toggle ────────────────────────────────────────────────────────────
-/**
- * Single element — rotates 180° when expanded rather than swapping icons.
- * Disabled state shown via opacity, not cursor change, since the latest
- * message is always expanded and non-collapsible.
- */
 const Caret = styled.div<{ $isExpanded: boolean; $disabled: boolean }>`
   display: flex;
   align-items: center;
@@ -109,7 +117,7 @@ const Caret = styled.div<{ $isExpanded: boolean; $disabled: boolean }>`
   opacity: ${({ $disabled }) => ($disabled ? 0.3 : 1)};
 `
 
-// ─── Header body (sender + preview / recipients) ──────────────────────────────
+// ─── Header body ──────────────────────────────────────────────────────────────
 const HeaderBody = styled.div`
   flex: 1;
   min-width: 0;
@@ -134,10 +142,6 @@ const SenderName = styled.span<{ $bold: boolean }>`
   text-overflow: ellipsis;
 `
 
-/**
- * Public key shown as a monospaced chip — visually quieter than the
- * full key but still lets privacy-conscious users spot-check sender identity.
- */
 const KeyChip = styled.span`
   font-family: ${FONT_MONO};
   font-size: 10px;
@@ -168,7 +172,7 @@ const Preview = styled.div`
   opacity: 0.65;
 `
 
-// ─── Header right (timestamp + read pill) ─────────────────────────────────────
+// ─── Header right ─────────────────────────────────────────────────────────────
 const HeaderRight = styled.div`
   display: flex;
   flex-direction: column;
@@ -185,7 +189,6 @@ const Timestamp = styled.span`
   white-space: nowrap;
 `
 
-// Read pill: muted when read, primary-tinted when unread
 const ReadPill = styled.span<{ $isRead: boolean }>`
   ${pillBase}
   ${({ theme, $isRead }) =>
@@ -202,10 +205,6 @@ const ReadPill = styled.span<{ $isRead: boolean }>`
 `
 
 // ─── Metadata band ────────────────────────────────────────────────────────────
-/**
- * Sits between the header and body when subject/priority/attachments exist.
- * Uses secondaryBackground to visually separate it from the message body.
- */
 const MetaBand = styled.div`
   display: flex;
   flex-direction: column;
@@ -244,16 +243,59 @@ const Body = styled.div`
   font-size: 13px;
   line-height: 1.75;
   color: ${({ theme }) => theme.colors.textPrimary};
-  white-space: pre-wrap;
-  word-wrap: break-word;
+  word-wrap: break-word; // ← keep this
+  // white-space: pre-wrap;       // ← remove this
   border-top: 1px solid ${({ theme }) => theme.colors.secondaryBackground};
-`
+  user-select: text;
 
+  p {
+    user-select: text;
+    margin: 0 0 0.75em;
+    &:last-child {
+      margin-bottom: 0;
+    }
+  }
+
+  ul {
+    list-style: disc;
+    padding-left: 20px;
+    margin: 0 0 8px;
+  }
+  ol {
+    list-style: decimal;
+    padding-left: 20px;
+    margin: 0 0 8px;
+  }
+  li {
+    margin: 2px 0;
+  }
+
+  blockquote {
+    border-left: 3px solid ${({ theme }) => theme.colors.primary}55;
+    padding-left: 12px;
+    margin: 8px 0;
+    color: ${({ theme }) => theme.colors.textSecondary};
+    font-style: italic;
+  }
+
+  hr {
+    border: none;
+    border-top: 1px solid ${({ theme }) => theme.colors.textSecondary};
+    margin: 12px 0;
+  }
+
+  ins {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  mark {
+    background: ${({ theme }) => theme.colors.primary}33;
+    color: ${({ theme }) => theme.colors.textPrimary};
+    padding: 0 2px;
+    border-radius: 2px;
+  }
+`
 // ─── Action bar ───────────────────────────────────────────────────────────────
-/**
- * Subtle tinted background so the actions feel like a footer,
- * not just floating buttons on the card.
- */
 const ActionBar = styled.div`
   display: flex;
   align-items: center;
@@ -261,6 +303,137 @@ const ActionBar = styled.div`
   padding: 8px 12px;
   border-top: 1px solid ${({ theme }) => theme.colors.secondaryBackground};
   background: ${({ theme }) => theme.colors.secondaryBackground}33;
+`
+
+// ─── Attachment compact pill (collapsed / header) ─────────────────────────────
+/**
+ * Shown in the header right area when collapsed and attachments exist.
+ * Keeps the row minimal — just a paperclip + count.
+ */
+const AttachmentBadge = styled.span`
+  ${pillBase}
+  background: ${({ theme }) => theme.colors.secondaryBackground};
+  color: ${({ theme }) => theme.colors.textSecondary};
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  gap: 3px;
+  font-size: 9px;
+`
+
+// ─── Attachment section (expanded) ───────────────────────────────────────────
+const AttachmentSection = styled.div`
+  border-top: 1px solid ${({ theme }) => theme.colors.secondaryBackground};
+  padding: 10px 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+`
+
+const AttachmentSectionHeader = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 2px;
+`
+
+const AttachmentSectionLabel = styled.span`
+  font-family: ${FONT_MONO};
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  opacity: 0.5;
+`
+
+const AttachmentCount = styled.span`
+  font-family: ${FONT_MONO};
+  font-size: 10px;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  opacity: 0.4;
+`
+
+// ─── Individual attachment row ────────────────────────────────────────────────
+const AttachmentRow = styled.button`
+  all: unset;
+  box-sizing: border-box;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+  background: ${({ theme }) => theme.colors.secondaryBackground}66;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  transition:
+    background 130ms ease,
+    border-color 130ms ease;
+
+  &:hover {
+    background: ${({ theme }) => theme.colors.secondaryBackground};
+    border-color: rgba(255, 255, 255, 0.09);
+  }
+
+  &:active {
+    opacity: 0.75;
+  }
+
+  &:focus-visible {
+    outline: 2px solid ${({ theme }) => theme.colors.primary};
+    outline-offset: 2px;
+  }
+`
+
+const AttachmentIconWrap = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  border-radius: 6px;
+  background: ${({ theme }) => theme.colors.primaryBackground};
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  color: ${({ theme }) => theme.colors.textSecondary};
+  flex-shrink: 0;
+`
+
+const AttachmentInfo = styled.div`
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+`
+
+const AttachmentName = styled.span`
+  font-size: 12px;
+  font-weight: 500;
+  color: ${({ theme }) => theme.colors.textPrimary};
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+`
+
+const AttachmentMeta = styled.span`
+  font-family: ${FONT_MONO};
+  font-size: 10px;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  opacity: 0.5;
+  letter-spacing: 0.02em;
+`
+
+const AttachmentDownloadIcon = styled.div`
+  display: flex;
+  align-items: center;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  opacity: 0.35;
+  flex-shrink: 0;
+  transition: opacity 130ms ease;
+
+  ${AttachmentRow}:hover & {
+    opacity: 0.7;
+  }
 `
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -286,7 +459,6 @@ export const ThreadMail: React.FC<ThreadMailProps> = ({
   const [isExpanded, setIsExpanded] = useState(isLatest)
   const [text, setText] = useState<string>('')
 
-  // The latest message or a single message can't be collapsed
   const canCollapse = !isLatest && !isSingle
 
   // ── Decrypt ──────────────────────────────────────────────────────────────
@@ -366,6 +538,44 @@ export const ThreadMail: React.FC<ThreadMailProps> = ({
     )
   }
 
+  // ── Placeholder — wire this up later ─────────────────────────────────────
+
+  const handleDownloadAttachment = (_attachment: MailAttachmentRef): void => {
+    toast.promise(
+      (async () => {
+        const binary = await majik.downloadFileBinary(_attachment.fileId)
+        const blob = new Blob([binary as BlobPart], { type: 'application/octet-stream' })
+        const fileJSON = await majik.getFile(_attachment.fileId)
+        const instance = await MajikFile.fromJSONWithBlob(fileJSON, blob)
+        instance.validate()
+        const decrypted = await majik.decryptFile({
+          source: binary
+        })
+        const downloadBlob = new Blob([decrypted.bytes as BlobPart], {
+          type: decrypted.mimeType ?? 'application/octet-stream'
+        })
+        // const mjkb = instance.toMJKB()
+        const url = URL.createObjectURL(downloadBlob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = decrypted.originalName ?? _attachment.originalName ?? 'Downloaded File'
+        a.click()
+        URL.revokeObjectURL(url)
+        return `Downloaded "${_attachment.originalName}"`
+      })(),
+      {
+        loading: `Downloading…`,
+        success: (msg) => msg,
+        error: (err) => {
+          if (err.code === 'NOT_FOUND') {
+            return 'This file is no longer available for download. It may have been deleted by the sender.'
+          }
+          return err.message || 'There seems to be a problem while downloading this file.'
+        }
+      }
+    )
+  }
+
   // ── Derived values ────────────────────────────────────────────────────────
   const senderKey = mail.sender
   const senderName = displayNames[senderKey] || senderKey
@@ -381,18 +591,19 @@ export const ThreadMail: React.FC<ThreadMailProps> = ({
 
   const subject = mail.metadata?.subject || '(No Subject)'
   const priority = mail.metadata?.priority
-  const attachments = mail.metadata?.attachments || []
+  const attachments = mail.attachments // typed MailAttachmentRef[]
+
+  const hasAttachments = attachments.length > 0
+  const hasMetadata = subject || priority
 
   const avatarHue = getHue(senderName)
   const initials = getInitials(senderName)
   const shortKey = shortenKey(senderKey)
 
-  const hasMetadata = subject || priority || attachments.length > 0
-
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <Card $isUnread={isUnread}>
-      {/* ── Header (shared layout, caret rotates) ── */}
+      {/* ── Header ── */}
       <HeaderRow $clickable={canCollapse} onClick={handleToggleExpand}>
         <Caret $isExpanded={isExpanded} $disabled={!canCollapse}>
           <CaretDownIcon size={14} />
@@ -405,30 +616,33 @@ export const ThreadMail: React.FC<ThreadMailProps> = ({
             <SenderName $bold={isUnread} data-private>
               {senderName}
             </SenderName>
-            {/* Show key chip only when expanded — collapsed already tight on space */}
             {isExpanded && <KeyChip data-private>{shortKey}</KeyChip>}
             {isUnread && !isExpanded && <ReadPill $isRead={false}>New</ReadPill>}
           </SenderRow>
 
           {isExpanded ? (
-            // Expanded: show recipients line
             recipientNames && <RecipientsLine data-private>to {recipientNames}</RecipientsLine>
           ) : (
-            // Collapsed: show message preview
-            <Preview data-private>{text}</Preview>
+            <Preview data-private>{stripMarkdown(text)}</Preview>
           )}
         </HeaderBody>
 
         <HeaderRight>
           <Timestamp title={fullTime}>{relativeTime}</Timestamp>
-          {/* Read pill only when expanded — keeps collapsed rows minimal */}
+          {/* Compact attachment badge — only when collapsed and attachments exist */}
+          {!isExpanded && hasAttachments && (
+            <AttachmentBadge>
+              <PaperclipIcon size={9} weight="bold" />
+              {attachments.length}
+            </AttachmentBadge>
+          )}
           {isExpanded && !isOwn && (
             <ReadPill $isRead={hasUserRead}>{hasUserRead ? 'Read' : 'Unread'}</ReadPill>
           )}
         </HeaderRight>
       </HeaderRow>
 
-      {/* ── Metadata band (subject / priority / attachments) ── */}
+      {/* ── Metadata band (subject / priority only — attachments have own section) ── */}
       {isExpanded && hasMetadata && (
         <MetaBand>
           {subject && (
@@ -443,17 +657,60 @@ export const ThreadMail: React.FC<ThreadMailProps> = ({
               <MetaValue style={{ textTransform: 'capitalize' }}>{priority}</MetaValue>
             </MetaRow>
           )}
-          {attachments.length > 0 && (
-            <MetaRow>
-              <MetaLabel>Attachments</MetaLabel>
-              <MetaValue data-private>{attachments.join(', ')}</MetaValue>
-            </MetaRow>
-          )}
         </MetaBand>
       )}
 
       {/* ── Message body ── */}
-      {isExpanded && <Body>{text}</Body>}
+      {isExpanded && (
+        <Body data-private>
+          <ReactMarkdown remarkPlugins={[remarkGfm, remarkIns, remarkFlexibleMarkers]}>
+            {text}
+          </ReactMarkdown>
+        </Body>
+      )}
+
+      {/* ── Attachments section (expanded only) ── */}
+      {isExpanded && hasAttachments && (
+        <AttachmentSection>
+          <AttachmentSectionHeader>
+            <PaperclipIcon size={11} weight="bold" color="currentColor" style={{ opacity: 0.4 }} />
+            <AttachmentSectionLabel>Attachments</AttachmentSectionLabel>
+            <AttachmentCount>({attachments.length})</AttachmentCount>
+          </AttachmentSectionHeader>
+
+          {attachments.map((attachment) => (
+            <AttachmentRow
+              key={attachment.fileId}
+              onClick={() => handleDownloadAttachment(attachment)}
+              title={`Download ${attachment.originalName ?? attachment.fileId}`}
+              data-private
+            >
+              <AttachmentIconWrap>
+                <AttachmentFileIcon mimeType={attachment.mimeType} />
+              </AttachmentIconWrap>
+
+              <AttachmentInfo>
+                <AttachmentName data-private>
+                  {attachment.originalName ?? attachment.fileId}
+                </AttachmentName>
+                <AttachmentMeta>
+                  {formatFileSize(attachment.sizeOriginal)}
+                  {attachment.mimeType && (
+                    <>
+                      {' '}
+                      · <span data-private>{attachment.mimeType}</span>
+                    </>
+                  )}
+                </AttachmentMeta>
+              </AttachmentInfo>
+
+              <AttachmentDownloadIcon>
+                <ArrowSquareOutIcon size={13} weight="bold" />
+              </AttachmentDownloadIcon>
+            </AttachmentRow>
+          ))}
+        </AttachmentSection>
+      )}
 
       {/* ── Action bar ── */}
       {isExpanded && (
@@ -502,4 +759,75 @@ function getInitials(name: string): string {
 function shortenKey(key: string, chars = 4): string {
   const s = String(key)
   return `${s.slice(0, chars)}…${s.slice(-chars)}`
+}
+
+/**
+ * Formats a byte count into a human-readable size string.
+ * Auto-selects the most appropriate unit.
+ */
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
+}
+
+/**
+ * Returns the appropriate Phosphor icon for a given MIME type.
+ */
+function AttachmentFileIcon({ mimeType }: { mimeType: string | null }): React.ReactElement {
+  const size = 14
+
+  if (!mimeType) return <FileIcon size={size} />
+
+  if (mimeType.startsWith('image/')) return <FileImageIcon size={size} />
+  if (mimeType === 'application/pdf') return <FilePdfIcon size={size} />
+  if (
+    mimeType === 'application/zip' ||
+    mimeType === 'application/x-zip-compressed' ||
+    mimeType === 'application/x-rar-compressed' ||
+    mimeType === 'application/x-7z-compressed'
+  )
+    return <FileZipIcon size={size} />
+  if (mimeType.startsWith('video/')) return <FileVideoIcon size={size} />
+  if (mimeType.startsWith('audio/')) return <FileAudioIcon size={size} />
+  if (
+    mimeType.startsWith('text/') ||
+    mimeType.includes('javascript') ||
+    mimeType.includes('json') ||
+    mimeType.includes('xml')
+  )
+    return <FileCodeIcon size={size} />
+
+  return <FileIcon size={size} />
+}
+
+function stripMarkdown(md: string): string {
+  if (!md) return ''
+
+  // Normalize, split, find first meaningful line
+  const firstLine =
+    md
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+      .split('\n')
+      .map((l) => l.trim())
+      .find((l) => l.length > 0 && !/^[-*_]{3,}$/.test(l)) ?? // skip blank lines and hr
+    ''
+
+  // Strip markdown syntax from just that one line
+  return firstLine
+    .replace(/^#{1,6}\s*/, '') // leading heading
+    .replace(/^>\s*/, '') // leading blockquote
+    .replace(/^\s*[-*+]\s+/, '') // bullet
+    .replace(/^\s*\d+\.\s+/, '') // ordered list
+    .replace(/\*\*(.*?)\*\*/g, '$1') // bold
+    .replace(/\*(.*?)\*/g, '$1') // italic
+    .replace(/~~(.*?)~~/g, '$1') // strikethrough
+    .replace(/==(.*?)==/g, '$1') // highlight
+    .replace(/\+\+(.*?)\+\+/g, '$1') // underline
+    .replace(/`[^`]*`/g, '') // code
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // links
+    .replace(/[#~`*_>]/g, '') // nuke remaining
+    .trim()
 }

@@ -308,7 +308,7 @@ const UserAuth: React.FC<UserAuthProps> = ({ onSignIn, onSignUp, onResetPassword
         setIsOtpStep(true)
         return 'OTP has been sent to your email. Please verify.'
       } else {
-        return `Oh no... There's a problem while signing in.`
+        return error.message || `Oh no... There's a problem while signing in.`
       }
     }
     return `Oh no... There's a problem while signing in.`

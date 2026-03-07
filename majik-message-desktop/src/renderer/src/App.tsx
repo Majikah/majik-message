@@ -9,7 +9,7 @@ import {
   ChatIcon,
   EnvelopeIcon,
   FileLockIcon,
-  PaperPlaneIcon,
+  LinkIcon,
   StarFourIcon,
   UserIcon
 } from '@phosphor-icons/react'
@@ -234,6 +234,14 @@ function App(): JSX.Element {
       }
     }
 
+    const handleOpenMJKB = async (filePath: string): Promise<void> => {
+      console.log('MJKB opened:', filePath)
+
+      navigate('/files', {
+        state: { mjkbPath: filePath }
+      })
+    }
+
     const handleToggleDarkmode = async (): Promise<void> => {
       dispatch(toggleTheme())
     }
@@ -249,7 +257,10 @@ function App(): JSX.Element {
 
     const removeSignOutListener = window.electron.onSignOutTriggered(handleSignOut)
 
+    const removeOpenMJKBListener = window.electron.onOpenMJKB(handleOpenMJKB)
+
     return () => {
+      removeOpenMJKBListener()
       removeToggleDarkMode()
       removeImportListener()
 
@@ -439,7 +450,7 @@ function App(): JSX.Element {
       id: 'threads',
       route: '/threads',
       name: 'Threads',
-      icon: PaperPlaneIcon,
+      icon: LinkIcon,
       element: <EmailThreads majik={majik} onUpdate={handleRefreshInstance} />
       // notification: <NotificationDot />
     },

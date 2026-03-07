@@ -74,7 +74,7 @@ const NewThreadForm: React.FC<NewThreadFormProps> = ({ majik, onUpdate }) => {
       return
     }
     setThreadLabel(input)
-    onUpdate?.(recipients, threadLabel)
+    onUpdate?.(recipients, input)
   }
 
   const contacts = useMemo(() => {

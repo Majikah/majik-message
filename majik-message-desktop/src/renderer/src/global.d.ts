@@ -43,6 +43,8 @@ export interface ElectronAPI {
   onNotificationServiceStarted: (callback: (event: unknown, token: string) => void) => () => void
 
   onNotificationServiceError: (callback: (event: unknown, error: unknown) => void) => () => void
+
+  onOpenMJKB: (callback: (filePath: string) => void) => () => void
 }
 
 declare global {

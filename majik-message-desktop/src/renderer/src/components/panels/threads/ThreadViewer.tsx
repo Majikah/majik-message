@@ -32,6 +32,7 @@ import { launchTutorialThreadsMessages } from '@renderer/lib/shepherd-js/tutoria
 import { useShepherd } from '@renderer/lib/shepherd-js/use-shepherd'
 import DynamicPlaceholder from '@renderer/components/foundations/DynamicPlaceholder'
 import CustomToggleSwitch from '@renderer/components/foundations/CustomToggleSwitch'
+import DynamicSlidingDialogue from '@renderer/components/functional/DynamicSlidingDialogue'
 
 // ─── Local tokens ─────────────────────────────────────────────────────────────
 const FONT_MONO = "'Fira Mono', 'JetBrains Mono', monospace"
@@ -315,6 +316,16 @@ const LoadingWrap = styled.div`
   padding: 40px 20px;
 `
 
+const DialogueBody = styled.div`
+  /* Fill available height inside the sliding panel */
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  /* Remove the ModalContainer padding that DynamicSlidingDialogue adds */
+  margin: -1rem -50px;
+  padding: 0 28px;
+`
+
 // ─── Identity selector fallback ───────────────────────────────────────────────
 const IdentityPrompt = styled.div`
   display: flex;
@@ -373,6 +384,8 @@ export const ThreadViewer: React.FC<ThreadViewerProps> = ({
   const markedAsReadRef = useRef<Set<string>>(new Set())
   const batchTimeoutRef = useRef<number | null>(null)
 
+  const [isCreatingMail, setisCreatingMail] = useState(false)
+
   // ── Data fetching ──────────────────────────────────────────────────────────
   const refreshMails = useCallback(async () => {
     if (!majikah?.isAuthenticated) return
@@ -380,6 +393,7 @@ export const ThreadViewer: React.FC<ThreadViewerProps> = ({
     isRefreshingRef.current = true
 
     try {
+      setisCreatingMail(false)
       setIsLoading(true)
       const fetchResponse = await majik.getThreadMessages(thread.id)
       const mails = fetchResponse.messages
@@ -704,22 +718,16 @@ export const ThreadViewer: React.FC<ThreadViewerProps> = ({
         {/* ── Toolbar: actions + pagination ── */}
         <Toolbar>
           {/* New message */}
-          <PopUpFormButton
+
+          <StyledIconButton
             id="button-new-thread-message"
+            onClick={() => setisCreatingMail(true)}
+            aria-label="New Message"
             icon={PlusIcon}
-            text="New Message"
+            title="New Message: Create a new message in this thread"
+            size={22}
             disabled={isUserRestricted || thread.isClosed()}
-            modal={{
-              title: 'New Message',
-              description: 'Create a new mail message for this thread'
-            }}
-            buttons={{
-              cancel: { text: 'Cancel' },
-              confirm: { text: 'Create', hide: true }
-            }}
-          >
-            <NewMailForm majikah={majikah} majik={majik} onSend={refreshMails} thread={thread} />
-          </PopUpFormButton>
+          />
 
           {/* Rename thread */}
           <PopUpFormButton
@@ -902,6 +910,26 @@ export const ThreadViewer: React.FC<ThreadViewerProps> = ({
         )}
         <div ref={bottomRef} />
       </ScrollArea>
+
+      <DynamicSlidingDialogue
+        isOpen={isCreatingMail}
+        onOpenChange={setisCreatingMail}
+        modal={{
+          title: 'New Message',
+          description: 'Create a new mail message for this thread'
+        }}
+        buttons={{
+          cancel: { text: 'Cancel' },
+          confirm: { text: 'Create', hide: true }
+        }}
+        scrollable={true}
+        width={850}
+        preventDragClose
+      >
+        <DialogueBody>
+          <NewMailForm majik={majik} onSend={refreshMails} thread={thread} />
+        </DialogueBody>
+      </DynamicSlidingDialogue>
     </Root>
   )
 }

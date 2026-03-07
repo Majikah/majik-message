@@ -259,43 +259,11 @@ export class MajikMessage {
     }
 
     return {
-      userId: key.id,
+      publicKey: key.publicKeyBase64,
       fingerprint: key.fingerprint,
       mlKemPublicKey: key.mlKemPublicKey,
       mlKemSecretKey: key.getMlKemSecretKey(),
     } satisfies MajikFileIdentity;
-  }
-
-  /**
-   * Resolve a list of contact IDs into MajikFileRecipient objects.
-   *
-   * Used for group file encryption — each recipient only needs their ML-KEM
-   * public key. Secret keys never leave their respective devices.
-   *
-   * @param ids  Contact IDs from the contact directory.
-   */
-  private async _resolveFileRecipients(
-    ids: string[],
-  ): Promise<MajikFileRecipient[]> {
-    return Promise.all(
-      ids.map(async (id) => {
-        const contact = this.contactDirectory.getContact(id);
-        if (!contact) throw new Error(`No contact found for id "${id}"`);
-
-        const mlPubKey = base64ToUint8Array(contact.mlKey);
-        if (!mlPubKey || mlPubKey.length === 0) {
-          throw new Error(
-            `Contact "${id}" has no ML-KEM public key. ` +
-              `They may need to upgrade their account via importFromMnemonicBackup().`,
-          );
-        }
-
-        return {
-          fingerprint: contact.fingerprint,
-          mlKemPublicKey: mlPubKey,
-        } satisfies MajikFileRecipient;
-      }),
-    );
   }
 
   /**
@@ -327,6 +295,7 @@ export class MajikMessage {
         return {
           fingerprint: contact.fingerprint,
           mlKemPublicKey: mlPubKey,
+          publicKey: pkey,
         } satisfies MajikFileRecipient;
       }),
     );
@@ -942,25 +911,7 @@ export class MajikMessage {
 
   /**
    * Encrypt a binary file and return everything the caller needs to persist it.
-   *
-   * Flow:
-   *  1. Resolve the active account's full MajikFileIdentity from MajikKeyStore.
-   *  2. Resolve each recipientId into a MajikFileRecipient (public key only).
-   *     MajikFile.create() silently deduplicates and strips the sender's own ID
-   *     from the recipient list, so callers don't have to filter it out.
-   *  3. Delegate entirely to MajikFile.create() — it handles:
-   *       • SHA-256 content hash (dedup)
-   *       • WebP conversion for chat_image / chat_attachment image contexts
-   *       • Zstd compression for compressible formats
-   *       • ML-KEM encapsulation (single or group)
-   *       • AES-256-GCM encryption
-   *       • .mjkb binary encoding
-   *  4. Return the MajikFile instance, Supabase-ready metadata, and R2-ready Blob.
-   *
-   * The caller is responsible for:
-   *   • Uploading `result.binary` to R2 at `result.metadata.r2_key`
-   *   • Inserting `result.metadata` into the majik_files Supabase table
-   *
+
    * @throws Error if no active account, account has no ML-KEM keys, or a
    *         recipient cannot be resolved from the contact directory.
    * @throws MajikFileError on validation failures or crypto errors (re-thrown
@@ -1003,11 +954,15 @@ export class MajikMessage {
       bypassSizeLimit = false,
       chatMessageId,
       threadMessageId,
+      threadId,
+      userId,
     } = options;
 
     // ── 1. Resolve sender identity ──────────────────────────────────────────
     // Builds MajikFileIdentity with both public + secret keys from keystore.
     const identity = await this._resolveFileIdentity();
+
+    const finalUserID = userId ?? identity.publicKey;
 
     // ── 2. Resolve additional recipients ───────────────────────────────────
     // MajikFile.create() will silently drop the sender's own fingerprint if
@@ -1032,6 +987,8 @@ export class MajikMessage {
       bypassSizeLimit,
       chatMessageId,
       threadMessageId,
+      userId: finalUserID,
+      threadId: threadId,
     });
 
     // ── 4. Package the result ───────────────────────────────────────────────

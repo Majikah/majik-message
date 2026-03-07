@@ -91,6 +91,14 @@ if (process.contextIsolated) {
 
       sendPushToken: (token: string) => ipcRenderer.send('send-push-token', token),
 
+      onOpenMJKB: (callback: (filePath: string) => void) => {
+        const listener = (_: any, path: string): void => callback(path)
+
+        ipcRenderer.on('mjkb-open', listener)
+
+        return () => ipcRenderer.removeListener('mjkb-open', listener)
+      },
+
       notify: (title: string, body: string) =>
         ipcRenderer.send('show-notification', { title, body })
     })
