@@ -357,11 +357,7 @@ const FilePanel: React.FC<FilePanelProps> = ({ majik }) => {
   }
 
   // ── Encrypt handler ────────────────────────────────────────────────────────
-  /**
-   * Calls MajikMessage.encryptFile() with bypassSizeLimit = true (local only).
-   * Returns everything FileEditPreviewInput needs to render the result and
-   * let the user download the .mjkb binary — no R2 upload, no Supabase insert.
-   */
+
   const handleEncryptFile = async (
     file: File,
     mimeType: string
@@ -403,13 +399,7 @@ const FilePanel: React.FC<FilePanelProps> = ({ majik }) => {
   }
 
   // ── Decrypt handler ────────────────────────────────────────────────────────
-  /**
-   * Calls MajikMessage.decryptFile().
-   * Automatically tries all own accounts — the orchestrator handles key selection.
-   *
-   * originalName is recovered from the .mjkb metadata if available (MajikFile
-   * stores original_name in the payload JSON). Falls back to the .mjkb filename.
-   */
+
   const handleDecryptFile = async (
     file: File
   ): Promise<{
@@ -418,9 +408,6 @@ const FilePanel: React.FC<FilePanelProps> = ({ majik }) => {
     originalSize: number
     mimeType: string
   }> => {
-    // decryptFile now returns { bytes, originalName, mimeType } directly —
-    // the original filename and MIME type are read from the .mjkb payload
-    // JSON during decryption, so no second parse of the binary is needed.
     const { bytes, originalName, mimeType } = await majik.decryptFile({ source: file })
 
     console.log('Decryption successful. Original name:', originalName, 'MIME type:', mimeType)

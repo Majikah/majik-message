@@ -138,8 +138,6 @@ const UnlockModal: React.FC<UnlockModalProps> = ({
               key={identityId}
               autofocus
             />
-            Majik Message uses Argon2. This may take several seconds, and your screen may
-            temporarily freeze. Please do not close or refresh.
           </ModalContainer>
 
           <DuoButton
