@@ -126,6 +126,47 @@ export interface MajikKeyMetadata {
 
 // ─── MajikFile integration types ─────────────────────────────────────────────
 
+// ─── Compression Level Type ───────────────────────────────────────────────────
+
+/**
+ * Explicit integer compression level for Zstd, 1–22.
+ *
+ * Recommended values:
+ *  - 1   → Fastest possible; still meaningfully compresses text/code.
+ *  - 3   → Good speed/ratio balance for real-time paths.
+ *  - 6   → Inflection point — noticeably better ratio, modest speed cost.
+ *  - 9   → Strong compression; gains plateau significantly after this.
+ *  - 15  → High-effort; use only for smaller, latency-insensitive uploads.
+ *  - 19  → Near-maximum ratio without WASM memory pressure.
+ *  - 22  → Archival-grade; not safe for files > 10 MB in WASM environments.
+ *
+ * For production use, prefer a CompressionPreset over a raw integer unless
+ * you have a specific tuning requirement.
+ */
+export type CompressionLevel =
+  | 1
+  | 2
+  | 3
+  | 4
+  | 5
+  | 6
+  | 7
+  | 8
+  | 9
+  | 10
+  | 11
+  | 12
+  | 13
+  | 14
+  | 15
+  | 16
+  | 17
+  | 18
+  | 19
+  | 20
+  | 21
+  | 22;
+
 /**
  * Options for MajikMessage.encryptFile().
  *
@@ -178,6 +219,25 @@ export interface EncryptFileOptions {
   threadMessageId?: string;
   /** Foreign-key association with a thread. */
   threadId?: string;
+  /**
+   * Zstd compression level or preset for this file.
+   *
+   * Accepts either a raw integer (`CompressionLevel` 1–22) or a named
+   * `CompressionPreset` value. The level is always run through
+   * `MajikCompressor.adaptiveLevel()` before use, so it will be silently
+   * clamped downward for large files to avoid WASM out-of-memory errors.
+   *
+   * Defaults to ZSTD_MAX_LEVEL (22) when omitted — existing behaviour.
+   *
+   * @example
+   * // Raw integer
+   * compressionLevel: 9
+   *
+   * // Named preset
+   * compressionLevel: CompressionPreset.GOOD  // 9
+   * compressionLevel: CompressionPreset.BALANCED // 6
+   */
+  compressionLevel?: CompressionLevel | number;
 }
 
 /**

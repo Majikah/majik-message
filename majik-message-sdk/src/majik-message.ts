@@ -956,6 +956,7 @@ export class MajikMessage {
       threadMessageId,
       threadId,
       userId,
+      compressionLevel,
     } = options;
 
     // ── 1. Resolve sender identity ──────────────────────────────────────────
@@ -989,6 +990,7 @@ export class MajikMessage {
       threadMessageId,
       userId: finalUserID,
       threadId: threadId,
+      compressionLevel,
     });
 
     // ── 4. Package the result ───────────────────────────────────────────────
