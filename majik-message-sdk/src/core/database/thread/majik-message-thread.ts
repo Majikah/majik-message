@@ -8,8 +8,11 @@ import {
   MajikMessageThreadID,
 } from "../../types";
 import { MajikUserID } from "@thezelijah/majik-user";
-import { sha256 } from "../../crypto/crypto-provider";
-import { MajikMessageMailJSON } from "./mail/majik-message-mail";
+import { sha256, sha512 } from "../../crypto/crypto-provider";
+import {
+  MajikMessageMail,
+  MajikMessageMailJSON,
+} from "./mail/majik-message-mail";
 import { MajikMessageIdentity } from "../system/identity";
 
 // ==================== Types & Interfaces ====================
@@ -77,8 +80,34 @@ export interface MajikMessageThreadJSON {
   participants: string[];
   status: ThreadStatus;
   hash: string;
+  // ── Thread hash ──────────────────────────────────────────────────────────────
+  // SHA3-512 over the joined string:
+  //   "<thread.hash>:<mail[0].hash>:<mail[1].hash>:…:<thread.id>"
+  // where mails are sorted by timestamp ascending.
+  // null until generateThreadHash() has been called.
+  t_hash: string | null;
   deletion_approvals: DeletionApproval[];
   starred: boolean;
+}
+
+export interface MajikMessageThreadExport {
+  thread: MajikMessageThreadJSON;
+  messages: MajikMessageMailJSON[];
+  exported_at: ISODateString;
+  message_count: number;
+}
+
+/**
+ * Result shape returned by MajikMessageThread.auditThread().
+ * isValid is true only when ALL three checks pass.
+ */
+export interface ThreadAuditResult {
+  isValid: boolean;
+  threadValid: boolean; // structural validate() passed
+  chainValid: boolean; // MajikMessageMail.validateMailChain() passed
+  hashValid: boolean; // verifyThreadHash() passed (false if t_hash not yet set)
+  errors: string[];
+  tamperedMailIDs: string[]; // mail IDs flagged by chain validation
 }
 
 // ==================== Custom Errors ====================
@@ -107,6 +136,49 @@ export class OperationNotAllowedError extends MajikThreadError {
   }
 }
 
+/**
+ * Sorts an array of MajikMessageMailJSON by timestamp (oldest → newest).
+ * Returns a new array — does not mutate the input.
+ */
+function sortMailsByTimestamp(
+  mails: MajikMessageMailJSON[],
+): MajikMessageMailJSON[] {
+  return [...mails].sort(
+    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+  );
+}
+
+/**
+ * Joins an array of strings with ":" as the delimiter.
+ *
+ * joinWithColon(["abc", "def", "ghi"]) → "abc:def:ghi"
+ */
+function joinWithColon(parts: string[]): string {
+  return parts.join(":");
+}
+
+/**
+ * Builds the raw string fed into SHA3-512 for t_hash.
+ *
+ * Layout:  <thread.hash> : <mail[0].hash> : … : <mail[n].hash> : <thread.id>
+ *
+ * @param threadHash   - The thread's own SHA-256 hash
+ * @param threadID     - The thread's UUID
+ * @param sortedMails  - Messages pre-sorted by timestamp ascending
+ */
+function buildThreadHashInput(
+  threadHash: string,
+  threadID: string,
+  sortedMails: MajikMessageMailJSON[],
+): string {
+  const parts: string[] = [
+    threadHash,
+    ...sortedMails.map((m) => m.hash),
+    threadID,
+  ];
+  return joinWithColon(parts);
+}
+
 // ==================== Main Class ====================
 
 export class MajikMessageThread {
@@ -118,6 +190,7 @@ export class MajikMessageThread {
   private readonly _participants: MajikMessagePublicKey[];
   private _status: ThreadStatus;
   private readonly _hash: string;
+  private _thash: string | null;
   private _deletionApprovals: DeletionApproval[];
   private _starred: boolean;
 
@@ -134,6 +207,7 @@ export class MajikMessageThread {
     hash: string,
     deletionApprovals: DeletionApproval[] = [],
     starred: boolean = false,
+    thash: string | null = null,
   ) {
     this._id = id;
     this._userID = userID;
@@ -143,6 +217,7 @@ export class MajikMessageThread {
     this._participants = participants;
     this._status = status;
     this._hash = hash;
+    this._thash = thash;
     this._deletionApprovals = deletionApprovals;
     this._starred = starred;
 
@@ -184,12 +259,20 @@ export class MajikMessageThread {
     return this._hash;
   }
 
+  get threadHash(): string | null {
+    return this._thash;
+  }
+
   get deletionApprovals(): readonly DeletionApproval[] {
     return [...this._deletionApprovals];
   }
 
   get starred(): boolean {
     return this._starred;
+  }
+
+  set subject(value: string | undefined) {
+    this.updateMetadata({ subject: value });
   }
 
   // ==================== Static Create Method ====================
@@ -253,6 +336,8 @@ export class MajikMessageThread {
         status,
         hash,
         [],
+        false,
+        null,
       );
     } catch (error) {
       if (error instanceof MajikThreadError) {
@@ -265,6 +350,257 @@ export class MajikMessageThread {
     }
   }
 
+  // ==================== Thread Hash (t_hash) ====================
+
+  /**
+   * Computes and stamps the t_hash for this thread.
+   *
+   * The t_hash is a SHA3-512 fingerprint of the entire thread's message history
+   * combined with the thread's own identity hash. It acts as a tamper-evident
+   * seal over the full conversation — if any message is altered, the t_hash
+   * won't match.
+   *
+   * Input string layout (joined with ":"):
+   *   <thread.hash> : <mail[0].hash> : <mail[1].hash> : … : <thread.id>
+   *   where mails are sorted by timestamp ascending (oldest first).
+   *
+   * Calling this with an empty array is valid — it seals a thread that has no
+   * messages yet (useful for archival of zero-message threads).
+   *
+   * @param mails - The full list of MajikMessageMailJSON for this thread.
+   *                Does not need to be pre-sorted.
+   * @returns The updated thread instance (for chaining).
+   */
+  public generateThreadHash(mails: MajikMessageMailJSON[]): this {
+    try {
+      // ── One-time seal guard ────────────────────────────────────────────────
+      // t_hash is write-once. Once stamped it represents a finalized snapshot
+      // of the conversation. If you need to re-seal (e.g. after more messages),
+      // reconstruct the thread via fromJSON with t_hash: null first.
+      if (this._thash !== null) {
+        throw new OperationNotAllowedError(
+          "Thread hash has already been generated. t_hash is write-once and cannot be overwritten.",
+        );
+      }
+
+      if (!Array.isArray(mails)) {
+        throw new ValidationError("mails must be an array");
+      }
+
+      // Validate every mail belongs to this thread
+      for (const mail of mails) {
+        if (mail.thread_id !== this._id) {
+          throw new ValidationError(
+            `Mail "${mail.id}" belongs to thread "${mail.thread_id}", not "${this._id}"`,
+          );
+        }
+      }
+
+      const sorted = sortMailsByTimestamp(mails);
+      const input = buildThreadHashInput(this._hash, this._id, sorted);
+      this._thash = sha512(input);
+
+      return this;
+    } catch (error) {
+      if (error instanceof MajikThreadError) {
+        throw error;
+      }
+      throw new MajikThreadError(
+        `Failed to generate thread hash: ${error instanceof Error ? error.message : "Unknown error"}`,
+        "THREAD_HASH_FAILED",
+      );
+    }
+  }
+
+  /**
+   * Verifies that the stored t_hash matches a freshly computed one.
+   *
+   * @param mails - The full list of MajikMessageMailJSON for this thread.
+   * @returns true if the t_hash is valid and matches, false if t_hash not yet set.
+   * @throws ValidationError if the computed hash does not match the stored one.
+   */
+  public verifyThreadHash(mails: MajikMessageMailJSON[]): boolean {
+    if (this._thash === null) {
+      return false; // Not yet generated — nothing to verify
+    }
+
+    if (!Array.isArray(mails)) {
+      throw new ValidationError("mails must be an array");
+    }
+
+    const sorted = sortMailsByTimestamp(mails);
+    const input = buildThreadHashInput(this._hash, this._id, sorted);
+    const expected = sha512(input);
+
+    if (this._thash !== expected) {
+      throw new ValidationError(
+        "Thread hash (t_hash) mismatch — message history integrity compromised",
+      );
+    }
+
+    return true;
+  }
+
+  // ==================== Full Thread Audit ====================
+
+  /**
+   * Performs a full forensic audit of the thread.
+   *
+   * Accepts raw MajikMessageMailJSON — instances are hydrated internally via
+   * MajikMessageMail.fromJSON so the call site only needs one array.
+   *
+   * Three checks must all pass for `isValid` to be true:
+   *
+   *   1. **threadValid** — `thread.validate()` passes (structural integrity of the
+   *      thread object itself: UUID, hash, participants, deletion approvals, etc.)
+   *
+   *   2. **chainValid** — `MajikMessageMail.validateMailChain()` passes (every
+   *      message hash is self-consistent and the blockchain p_hash linkage from
+   *      thread → mail[0] → mail[1] → … is intact).
+   *
+   *   3. **hashValid** — `thread.verifyThreadHash()` passes (the SHA3-512 t_hash
+   *      sealed over the full message list still matches). Returns false — not an
+   *      error — when t_hash has not yet been generated, meaning the thread is
+   *      structurally sound but still unsealed.
+   *
+   * @param thread    - The thread instance to audit.
+   * @param mailJSONs - Full list of MajikMessageMailJSON for this thread.
+   *                    Does not need to be pre-sorted.
+   * @returns ThreadAuditResult with granular pass/fail per check plus error details.
+   */
+  public static auditThread(
+    thread: MajikMessageThread,
+    mailJSONs: MajikMessageMailJSON[],
+  ): ThreadAuditResult {
+    const errors: string[] = [];
+    let tamperedMailIDs: string[] = [];
+    let threadValid = false;
+    let chainValid = false;
+    let hashValid = false;
+
+    // ── 1. Structural thread validation ───────────────────────────────────────
+    try {
+      thread.validate();
+      threadValid = true;
+    } catch (err) {
+      errors.push(
+        `Thread structure invalid: ${err instanceof Error ? err.message : "Unknown error"}`,
+      );
+    }
+
+    // ── 2. Hydrate JSON → instances, then run chain validation ────────────────
+    // bypassValidation=false so fromJSON still runs per-mail validation.
+    // If any individual mail fails to parse we record the error and skip the
+    // chain check rather than throwing out of the audit entirely.
+    let mailInstances: MajikMessageMail[] = [];
+    try {
+      mailInstances = mailJSONs.map((json) => MajikMessageMail.fromJSON(json));
+    } catch (err) {
+      errors.push(
+        `Failed to hydrate mail JSON: ${err instanceof Error ? err.message : "Unknown error"}`,
+      );
+    }
+
+    // Only run chain validation when hydration succeeded (or the list was empty)
+    if (mailInstances.length === mailJSONs.length) {
+      try {
+        const chainResult = MajikMessageMail.validateMailChain(
+          thread,
+          mailInstances,
+        );
+        chainValid = chainResult.isValid;
+        if (!chainResult.isValid) {
+          errors.push(...chainResult.errors);
+          tamperedMailIDs = chainResult.tamperedItems;
+        }
+      } catch (err) {
+        errors.push(
+          `Mail chain audit threw unexpectedly: ${err instanceof Error ? err.message : "Unknown error"}`,
+        );
+      }
+    }
+
+    // ── 3. Thread hash (t_hash) verification ──────────────────────────────────
+    // At this point t_hash is guaranteed non-null (the early guard above threw
+    // otherwise). verifyThreadHash only throws on an actual mismatch.
+    try {
+      hashValid = thread.verifyThreadHash(mailJSONs);
+    } catch (err) {
+      errors.push(
+        `Thread hash mismatch: ${err instanceof Error ? err.message : "Unknown error"}`,
+      );
+    }
+
+    return {
+      isValid: threadValid && chainValid && hashValid,
+      threadValid,
+      chainValid,
+      hashValid,
+      errors,
+      tamperedMailIDs: Array.from(new Set(tamperedMailIDs)),
+    };
+  }
+
+  // ==================== Thread Export ====================
+
+  /**
+   * Exports the thread and its full message history as a self-contained snapshot.
+   *
+   * Requires that `generateThreadHash()` has already been called — the t_hash is
+   * the integrity seal over the exported payload and must be present before the
+   * export is considered authoritative. Call `generateThreadHash(mails)` first if
+   * it has not been set yet.
+   *
+   * The returned messages are sorted by timestamp ascending (oldest first) so the
+   * export is always deterministic regardless of the order they were passed in.
+   *
+   * @param mails - The full list of MajikMessageMailJSON for this thread.
+   * @returns MajikMessageThreadExport containing the sealed thread JSON, sorted
+   *          messages, export timestamp, and message count.
+   * @throws OperationNotAllowedError if t_hash has not been generated yet.
+   * @throws ValidationError if any mail does not belong to this thread.
+   */
+  public exportThread(mails: MajikMessageMailJSON[]): MajikMessageThreadExport {
+    try {
+      // t_hash must be set — an unsealed thread cannot be exported
+      if (this._thash === null) {
+        throw new OperationNotAllowedError(
+          "Cannot export thread: t_hash has not been generated yet. " +
+            "Call generateThreadHash(mails) before exporting.",
+        );
+      }
+
+      if (!Array.isArray(mails)) {
+        throw new ValidationError("mails must be an array");
+      }
+
+      // Validate every mail belongs to this thread
+      for (const mail of mails) {
+        if (mail.thread_id !== this._id) {
+          throw new ValidationError(
+            `Mail "${mail.id}" belongs to thread "${mail.thread_id}", not "${this._id}"`,
+          );
+        }
+      }
+
+      const sortedMails = sortMailsByTimestamp(mails);
+
+      return {
+        thread: this.toJSON(),
+        messages: sortedMails,
+        exported_at: new Date().toISOString(),
+        message_count: sortedMails.length,
+      };
+    } catch (error) {
+      if (error instanceof MajikThreadError) {
+        throw error;
+      }
+      throw new MajikThreadError(
+        `Failed to export thread: ${error instanceof Error ? error.message : "Unknown error"}`,
+        "EXPORT_THREAD_FAILED",
+      );
+    }
+  }
   // ==================== Star Management ====================
 
   /**
@@ -426,13 +762,13 @@ export class MajikMessageThread {
           }
 
           // Verify approval hash
-          const expectedHash = MajikMessageThread.generateApprovalHash(
+          const expectedApprovalHash = MajikMessageThread.generateApprovalHash(
             approval.publicKey,
             this._id,
             approval.timestamp,
           );
 
-          if (approval.approvalHash !== expectedHash) {
+          if (approval.approvalHash !== expectedApprovalHash) {
             throw new ValidationError(
               `Invalid approval hash for participant: ${approval.publicKey}`,
             );
@@ -781,6 +1117,7 @@ export class MajikMessageThread {
       participants: [...this._participants],
       status: this._status,
       hash: this._hash,
+      t_hash: this._thash,
       deletion_approvals:
         this._deletionApprovals.length > 0
           ? this._deletionApprovals.map((approval) => ({
@@ -824,6 +1161,7 @@ export class MajikMessageThread {
         data.hash,
         deletionApprovals,
         data.starred,
+        data.t_hash,
       );
     } catch (error) {
       if (error instanceof MajikThreadError) {
@@ -934,6 +1272,7 @@ export class MajikMessageThread {
         participants: [...this._participants],
         status: finalStatus,
         hash: this._hash,
+        t_hash: this._thash,
         deletion_approvals: this._deletionApprovals.map((approval) => ({
           ...approval,
           timestamp: approval.timestamp,

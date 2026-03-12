@@ -10,6 +10,8 @@ import { arrayToBase64 } from "../utils/utilities";
 import { argon2id } from "@noble/hashes/argon2.js";
 import { ARGON2_PARAMS } from "./constants";
 import { ml_kem768 } from "@noble/post-quantum/ml-kem.js";
+import { sha3_512 } from "@noble/hashes/sha3.js";
+import { bytesToHex } from "@noble/hashes/utils.js";
 
 export const IV_LENGTH = 12;
 
@@ -155,11 +157,6 @@ export function x25519SharedSecret(
   throw new Error("@stablelib/x25519: compatible API not found");
 }
 
-export function sha256(input: string): string {
-  const hashed = hash(new TextEncoder().encode(input));
-  return arrayToBase64(hashed);
-}
-
 // ─── ML-KEM-768: Post-Quantum Key Encapsulation ───────────────────────────────
 
 /**
@@ -246,4 +243,17 @@ export function mlKemDecapsulate(
   recipientSecretKey: Uint8Array,
 ): Uint8Array {
   return ml_kem768.decapsulate(cipherText, recipientSecretKey);
+}
+
+// ─── Hashing ───────────────────────────────
+
+
+export function sha256(input: string): string {
+  const hashed = hash(new TextEncoder().encode(input));
+  return arrayToBase64(hashed);
+}
+
+export function sha512(input: string): string {
+  const hashed = sha3_512(new TextEncoder().encode(input));
+  return bytesToHex(hashed);
 }
