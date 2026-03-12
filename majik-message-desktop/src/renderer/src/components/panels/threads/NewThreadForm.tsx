@@ -95,7 +95,6 @@ const NewThreadForm: React.FC<NewThreadFormProps> = ({ majik, onUpdate }) => {
       />
       <CustomInputField
         label="Topic or Label"
-        regex="letters"
         maxChar={150}
         capitalize="first"
         sensitive

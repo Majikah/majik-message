@@ -415,6 +415,8 @@ const EmailThreads: React.FC<EmailThreadsProps> = ({
       return
     }
 
+    if (threadID === selectedThread?.id) return
+
     toast.promise(processSelectThread(threadID), {
       loading: 'Loading thread...',
       success: (msg) => {

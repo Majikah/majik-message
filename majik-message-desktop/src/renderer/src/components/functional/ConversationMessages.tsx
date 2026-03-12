@@ -153,6 +153,8 @@ export const ConversationMessages = forwardRef<
   // ── Load messages ──────────────────────────────────────────────────────────
   const loadInitialMessages = useCallback(async () => {
     try {
+      setFetchedMessages([])
+      markedAsReadRef.current.clear()
       setIsLoading(true)
       const fetchResponse = await majik.getConversationMessages(conversationID)
       const messages = fetchResponse.messages
@@ -182,6 +184,13 @@ export const ConversationMessages = forwardRef<
       setIsLoading(false)
     }
   }, [conversationID, majik])
+
+  // ── Reset messages when conversation changes ───────────────────────────────
+  useEffect(() => {
+    setFetchedMessages([])
+    markedAsReadRef.current.clear()
+    loadInitialMessages()
+  }, [conversationID, loadInitialMessages])
 
   // ── Resolve sender key ─────────────────────────────────────────────────────
   useEffect(() => {

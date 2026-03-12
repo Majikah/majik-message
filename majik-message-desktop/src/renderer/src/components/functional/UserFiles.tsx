@@ -20,7 +20,10 @@ import {
   PuzzlePieceIcon,
   CopySimpleIcon,
   GlobeSimpleXIcon,
-  GlobeIcon
+  GlobeIcon,
+  ProhibitIcon,
+  ShieldCheckIcon,
+  ShieldWarningIcon
 } from '@phosphor-icons/react'
 import { MajikFile } from '@majikah/majik-file'
 import type { FileContext, MajikFileJSON, TempFileDuration } from '@majikah/majik-file'
@@ -31,10 +34,143 @@ import { toast } from 'sonner'
 import type { MajikContact } from '@majikah/majik-message'
 import MajikContactListSelector from '../MajikContactListSelector'
 import moment from 'moment'
+import {
+  MajikFileScanner,
+  type FileScanResult
+} from '@renderer/SDK/majik-file-scanner/majik-file-scanner'
+import { useShepherd } from '@renderer/lib/shepherd-js/use-shepherd'
+import GuideHelper from './GuideHelper'
+import { launchTutorialCloudStorage } from '@renderer/lib/shepherd-js/tutorials/tutorial-cloud-storage'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const PAGE_SIZE = 10
+
+/**
+ * Minimum YARA scan score required to allow upload.
+ * Files scoring below this threshold are blocked.
+ */
+const SCAN_PASS_THRESHOLD = 70
+
+// ─── Compression preset ───────────────────────────────────────────────────────
+
+type CompressionLevel =
+  | 1
+  | 2
+  | 3
+  | 4
+  | 5
+  | 6
+  | 7
+  | 8
+  | 9
+  | 10
+  | 11
+  | 12
+  | 13
+  | 14
+  | 15
+  | 16
+  | 17
+  | 18
+  | 19
+  | 20
+  | 21
+  | 22
+
+const CompressionPreset = {
+  FASTEST: 2 as CompressionLevel,
+  FAST: 3 as CompressionLevel,
+  BALANCED: 6 as CompressionLevel,
+  GOOD: 9 as CompressionLevel,
+  BETTER: 15 as CompressionLevel,
+  BEST: 19 as CompressionLevel,
+  ULTRA: 22 as CompressionLevel
+} as const
+
+type CompressionPresetKey = keyof typeof CompressionPreset
+
+const PRESET_META: Record<CompressionPresetKey, { label: string; hint: string }> = {
+  FASTEST: { label: 'Fastest', hint: 'Lv 2 · Speed-first, minimal CPU' },
+  FAST: { label: 'Fast', hint: 'Lv 3 · Zstd default fast mode' },
+  BALANCED: {
+    label: 'Balanced',
+    hint: 'Lv 6 · Best ratio-per-ms inflection point'
+  },
+  GOOD: { label: 'Good', hint: 'Lv 9 · Recommended for most uploads' },
+  BETTER: { label: 'Better', hint: 'Lv 15 · High-effort, documents & code' },
+  BEST: { label: 'Best', hint: 'Lv 19 · Near-maximum, WASM-safe' },
+  ULTRA: {
+    label: 'Ultra',
+    hint: 'Lv 22 · Archival; auto-clamped on large files'
+  }
+}
+
+const PRESET_ORDER: CompressionPresetKey[] = [
+  'FASTEST',
+  'FAST',
+  'BALANCED',
+  'GOOD',
+  'BETTER',
+  'BEST',
+  'ULTRA'
+]
+
+/**
+ * Client-side mirror of MajikCompressor.adaptiveLevel() thresholds.
+ * Used to show a live clamp warning without importing the WASM module.
+ */
+function resolveAdaptiveLevel(
+  fileSizeBytes: number,
+  preset: CompressionPresetKey
+): { effective: number; wasClamped: boolean } {
+  const desired = CompressionPreset[preset] as number
+  const thresholds = [
+    { minBytes: 500 * 1024 * 1024, maxLevel: 6 },
+    { minBytes: 100 * 1024 * 1024, maxLevel: 12 },
+    { minBytes: 50 * 1024 * 1024, maxLevel: 16 },
+    { minBytes: 10 * 1024 * 1024, maxLevel: 19 }
+  ]
+  for (const { minBytes, maxLevel } of thresholds) {
+    if (fileSizeBytes > minBytes) {
+      const effective = Math.min(desired, maxLevel)
+      return { effective, wasClamped: effective < desired }
+    }
+  }
+  return { effective: desired, wasClamped: false }
+}
+
+// ─── Scanner singleton ────────────────────────────────────────────────────────
+
+const scanner = new MajikFileScanner()
+let scannerReady = false
+
+async function ensureScanner(): Promise<void> {
+  if (!scannerReady) {
+    await scanner.initialize()
+    scannerReady = true
+  }
+}
+
+// ─── MJKB magic-byte guard ────────────────────────────────────────────────────
+
+const MJKB_MAGIC = new Uint8Array([0x4d, 0x4a, 0x4b, 0x42])
+
+async function looksLikeMjkb(file: File): Promise<boolean> {
+  try {
+    // Full structural check first; falls back to magic bytes on error.
+    const buf = await file.arrayBuffer()
+    return MajikFile.isValidMJKB(buf)
+  } catch {
+    try {
+      const slice = await file.slice(0, 4).arrayBuffer()
+      const bytes = new Uint8Array(slice)
+      return MJKB_MAGIC.every((b, i) => bytes[i] === b)
+    } catch {
+      return false
+    }
+  }
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -78,6 +214,11 @@ const fadeUp = keyframes`
   to   { opacity: 1; transform: translateY(0); }
 `
 
+const fadeIn = keyframes`
+  from { opacity: 0; transform: translateY(3px); }
+  to   { opacity: 1; transform: translateY(0); }
+`
+
 const spin = keyframes`
   to { transform: rotate(360deg); }
 `
@@ -85,6 +226,11 @@ const spin = keyframes`
 const pulseOpacity = keyframes`
   0%, 100% { opacity: 0.35; }
   50%       { opacity: 0.75; }
+`
+
+const scanPulse = keyframes`
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.45; }
 `
 
 // ─── Root ─────────────────────────────────────────────────────────────────────
@@ -140,13 +286,12 @@ const ErrorDismiss = styled.button`
   opacity: 0.6;
   padding: 0;
   transition: opacity 0.15s;
-
   &:hover {
     opacity: 1;
   }
 `
 
-// ─── Controls row (tabs + toolbar) ───────────────────────────────────────────
+// ─── Controls row ─────────────────────────────────────────────────────────────
 
 const Controls = styled.div`
   display: flex;
@@ -181,7 +326,6 @@ const Tab = styled.button<{ $active: boolean }>`
   cursor: pointer;
   transition: all 0.15s;
   text-transform: capitalize;
-
   &:hover {
     color: ${({ theme }) => theme.colors.textPrimary};
   }
@@ -224,11 +368,9 @@ const SearchInput = styled.input`
   font-size: 12px;
   outline: none;
   transition: border-color 0.15s;
-
   &:focus {
     border-color: ${({ theme }) => theme.colors.primary};
   }
-
   &::placeholder {
     color: ${({ theme }) => theme.colors.textSecondary};
     opacity: 0.4;
@@ -249,7 +391,6 @@ const SearchClear = styled.button`
   padding: 0;
   opacity: 0.5;
   transition: opacity 0.15s;
-
   &:hover {
     opacity: 1;
   }
@@ -274,12 +415,10 @@ const SmBtn = styled.button`
   white-space: nowrap;
   transition: all 0.15s;
   flex-shrink: 0;
-
   &:hover {
     background: ${({ theme }) => theme.colors.primaryBackground};
     color: ${({ theme }) => theme.colors.textPrimary};
   }
-
   &:disabled {
     opacity: 0.35;
     cursor: not-allowed;
@@ -290,7 +429,6 @@ const AccentBtn = styled(SmBtn)`
   background: ${({ theme }) => theme.colors.primarySoft};
   border-color: ${({ theme }) => theme.colors.primary}4d;
   color: ${({ theme }) => theme.colors.primary};
-
   &:hover {
     background: ${({ theme }) => theme.colors.primary}28;
     color: ${({ theme }) => theme.colors.primary};
@@ -301,7 +439,6 @@ const DangerBtn = styled(SmBtn)`
   background: rgba(240, 100, 73, 0.08);
   border-color: rgba(240, 100, 73, 0.22);
   color: #f06449;
-
   &:hover {
     background: rgba(240, 100, 73, 0.15);
     color: #f06449;
@@ -331,7 +468,6 @@ const ViewButton = styled.button<{ $active: boolean }>`
   cursor: pointer;
   color: ${({ $active, theme }) => ($active ? theme.colors.primary : theme.colors.textSecondary)};
   transition: all 0.2s;
-
   &:hover {
     color: ${({ theme }) => theme.colors.primary};
   }
@@ -345,7 +481,6 @@ const ScrollBody = styled.div`
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: ${({ theme }) => `${theme.colors.primaryBackground} transparent`};
-
   &::-webkit-scrollbar {
     width: 4px;
   }
@@ -371,7 +506,6 @@ const DropZone = styled.div<{ $active: boolean }>`
   cursor: pointer;
   transition: all 0.2s;
   margin-bottom: 16px;
-
   &:hover {
     border-color: ${({ theme }) => theme.colors.primary};
     background: ${({ theme }) => theme.colors.primarySoft};
@@ -383,7 +517,6 @@ const DropText = styled.p`
   font-family: 'DM Mono', monospace;
   font-size: 12px;
   color: ${({ theme }) => theme.colors.textSecondary};
-
   strong {
     color: ${({ theme }) => theme.colors.textPrimary};
     font-weight: 500;
@@ -517,9 +650,11 @@ const Tag = styled.span<{ $variant: 'perm' | 'temp' | 'shared' }>`
 
 // ─── Pending row ──────────────────────────────────────────────────────────────
 
-const PendingRow = styled.div`
+const PendingRow = styled.div<{ $scanBlocked?: boolean }>`
   background: ${({ theme }) => theme.colors.secondaryBackground};
-  border: 1px solid ${({ theme }) => theme.colors.primaryBackground};
+  border: 1px solid
+    ${({ $scanBlocked, theme }) =>
+      $scanBlocked ? 'rgba(240,100,73,0.3)' : theme.colors.primaryBackground};
   border-radius: 10px;
   padding: 10px 12px;
   display: flex;
@@ -527,6 +662,7 @@ const PendingRow = styled.div`
   gap: 10px;
   margin-bottom: 6px;
   animation: ${fadeUp} 0.2s ease;
+  transition: border-color 0.2s ease;
 `
 
 const RowInfo = styled.div`
@@ -550,11 +686,9 @@ const PendingName = styled.div`
   color: ${({ theme }) => theme.colors.textPrimary};
   overflow: hidden;
   text-align: left;
-
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
-
   word-break: break-word;
   max-width: 300px;
 `
@@ -574,7 +708,11 @@ const PendingMetaText = styled.span`
   opacity: 0.6;
 `
 
-const StatusBadge = styled.span<{ $error?: boolean }>`
+const StatusBadge = styled.span<{
+  $error?: boolean
+  $warn?: boolean
+  $success?: boolean
+}>`
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -583,9 +721,84 @@ const StatusBadge = styled.span<{ $error?: boolean }>`
   padding: 2px 7px;
   border-radius: 5px;
   border: 1px solid;
-  background: ${({ $error }) => ($error ? 'rgba(240,100,73,0.08)' : 'rgba(124,106,247,0.10)')};
-  color: ${({ $error, theme }) => ($error ? '#f06449' : theme.colors.primary)};
-  border-color: ${({ $error }) => ($error ? 'rgba(240,100,73,0.22)' : 'rgba(124,106,247,0.22)')};
+  background: ${({ $error, $warn, $success }) =>
+    $error
+      ? 'rgba(240,100,73,0.08)'
+      : $warn
+        ? 'rgba(245,166,35,0.08)'
+        : $success
+          ? 'rgba(62,207,142,0.08)'
+          : 'rgba(124,106,247,0.10)'};
+  color: ${({ $error, $warn, $success, theme }) =>
+    $error ? '#f06449' : $warn ? '#f5a623' : $success ? '#3ecf8e' : theme.colors.primary};
+  border-color: ${({ $error, $warn, $success }) =>
+    $error
+      ? 'rgba(240,100,73,0.22)'
+      : $warn
+        ? 'rgba(245,166,35,0.22)'
+        : $success
+          ? 'rgba(62,207,142,0.22)'
+          : 'rgba(124,106,247,0.22)'};
+`
+
+// Scan-specific badge with pulse animation during scanning
+const ScanBadge = styled(StatusBadge)<{ $scanning?: boolean }>`
+  ${({ $scanning }) =>
+    $scanning &&
+    css`
+      animation: ${scanPulse} 1.1s ease infinite;
+    `}
+`
+
+// Score pill — circular badge matching FileVault's style
+const ScanScorePill = styled.div<{ $pass: boolean }>`
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 100px;
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  flex-shrink: 0;
+  border: 1px solid ${({ $pass }) => ($pass ? 'rgba(62,207,142,0.35)' : 'rgba(240,100,73,0.35)')};
+  color: ${({ $pass }) => ($pass ? '#3ecf8e' : '#f06449')};
+  background: ${({ $pass }) => ($pass ? 'rgba(62,207,142,0.08)' : 'rgba(240,100,73,0.08)')};
+`
+
+// Scan blocked notice — rendered below RowInfo when scan fails the threshold
+const ScanBlockedNotice = styled.div`
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 7px 9px;
+  background: rgba(240, 100, 73, 0.07);
+  border: 1px solid rgba(240, 100, 73, 0.18);
+  border-radius: 7px;
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  color: #f06449;
+  line-height: 1.55;
+  animation: ${fadeIn} 150ms ease both;
+`
+
+// Clamp notice — amber warning when adaptive level will reduce the chosen preset
+const ClampNotice = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  background: rgba(245, 158, 11, 0.07);
+  border: 1px solid rgba(245, 158, 11, 0.18);
+  border-radius: 6px;
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  color: #f59e0b;
+  line-height: 1.5;
+  animation: ${fadeIn} 150ms ease both;
 `
 
 const Spinner = styled.div`
@@ -633,10 +846,105 @@ const ConfirmBtn = styled.button<{ $ready: boolean }>`
   opacity: ${({ $ready }) => ($ready ? 1 : 0.5)};
   transition: all 0.15s;
   flex-shrink: 0;
-
   &:hover:not(:disabled) {
     background: rgba(62, 207, 142, 0.18);
   }
+`
+
+// ─── Compression selector ─────────────────────────────────────────────────────
+
+const CompressionWrap = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 0 0;
+  animation: ${fadeIn} 160ms cubic-bezier(0.4, 0, 0.2, 1) both;
+`
+
+const CompressionHeaderRow = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+`
+
+const CompressionLabel = styled.span`
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  opacity: 0.45;
+`
+
+const CompressionHint = styled.span`
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  opacity: 0.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+`
+
+const CompressionPillRow = styled.div`
+  display: flex;
+  align-items: center;
+  background: ${({ theme }) => theme.colors.primaryBackground};
+  border: 1px solid ${({ theme }) => theme.colors.secondaryBackground};
+  border-radius: 9px;
+  padding: 3px;
+  gap: 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+`
+
+const CompressionPill = styled.button<{
+  $active: boolean
+  $presetKey: CompressionPresetKey
+}>`
+  flex-shrink: 0;
+  padding: 3px 9px;
+  border-radius: 7px;
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  transition:
+    background 150ms ease,
+    color 150ms ease;
+
+  ${({ $active, $presetKey, theme }) => {
+    if ($active && $presetKey === 'ULTRA') {
+      return css`
+        background: rgba(245, 158, 11, 0.2);
+        color: #f59e0b;
+        border-color: rgba(245, 158, 11, 0.35);
+      `
+    }
+    if ($active) {
+      return css`
+        background: ${theme.colors.primary};
+        color: ${theme.colors.primaryBackground};
+      `
+    }
+    return css`
+      background: transparent;
+      color: ${theme.colors.textSecondary};
+      opacity: 0.7;
+      &:hover {
+        color: ${theme.colors.textPrimary};
+        opacity: 1;
+      }
+    `
+  }}
 `
 
 // ─── Icon button ──────────────────────────────────────────────────────────────
@@ -684,8 +992,6 @@ const IconBtn = styled.button<{ $variant?: 'green' | 'red' | 'amber' }>`
   }
 `
 
-// ─── Published icon button (active state when file is published) ──────────────
-
 const PublishIconBtn = styled(IconBtn)<{ $published: boolean }>`
   ${({ $published }) =>
     $published &&
@@ -695,6 +1001,7 @@ const PublishIconBtn = styled(IconBtn)<{ $published: boolean }>`
       background: rgba(62, 207, 142, 0.08);
     `}
 `
+
 // ─── File row (list view) ─────────────────────────────────────────────────────
 
 const FileRowWrap = styled.div<{ $selected: boolean }>`
@@ -717,7 +1024,6 @@ const FileRowWrap = styled.div<{ $selected: boolean }>`
       $selected ? `${theme.colors.primary}44` : theme.colors.primaryBackground};
   }
 
-  /* Show actions on hover */
   &:hover > .row-actions,
   &[data-selected='true'] > .row-actions {
     opacity: 1;
@@ -794,12 +1100,10 @@ const GridCard = styled.div<{ $selected: boolean }>`
   display: flex;
   flex-direction: column;
   gap: 8px;
-
   &:hover {
     border-color: ${({ theme }) => `${theme.colors.primary}44`};
     transform: translateY(-1px);
   }
-
   &:hover > .row-actions,
   &[data-selected='true'] > .row-actions {
     opacity: 1;
@@ -855,7 +1159,6 @@ const EmptyIcon = styled.div`
   font-size: 36px;
   width: 100%;
   justify-content: center;
-
   margin-bottom: 12px;
   svg {
     color: ${({ theme }) => theme.colors.secondaryBackground};
@@ -907,12 +1210,10 @@ const PageBtn = styled.button<{ $active?: boolean }>`
   justify-content: center;
   gap: 4px;
   transition: all 0.15s;
-
   &:hover:not(:disabled) {
     background: ${({ theme }) => theme.colors.primaryBackground};
     color: ${({ theme }) => theme.colors.textPrimary};
   }
-
   &:disabled {
     opacity: 0.3;
     cursor: not-allowed;
@@ -950,7 +1251,6 @@ const SelectedCount = styled.span`
   font-size: 11px;
   color: ${({ theme }) => theme.colors.textSecondary};
   flex: 1;
-
   strong {
     color: ${({ theme }) => theme.colors.textPrimary};
   }
@@ -969,7 +1269,6 @@ const DurationRow = styled.div`
     max-width 0.22s cubic-bezier(0.4, 0, 0.2, 1),
     opacity 0.18s ease;
   flex-shrink: 0;
-
   &[data-visible='true'] {
     max-width: 220px;
     opacity: 1;
@@ -989,12 +1288,9 @@ const DurationChip = styled.button<{ $active: boolean }>`
   transition: all 0.12s;
   white-space: nowrap;
   flex-shrink: 0;
-
-  background: ${({ $active }) => ($active ? 'rgba(245, 166, 35, 0.15)' : 'transparent')};
+  background: ${({ $active }) => ($active ? 'rgba(245,166,35,0.15)' : 'transparent')};
   color: ${({ $active, theme }) => ($active ? '#f5a623' : theme.colors.textSecondary)};
-  border-color: ${({ $active }) =>
-    $active ? 'rgba(245, 166, 35, 0.4)' : 'rgba(255,255,255,0.07)'};
-
+  border-color: ${({ $active }) => ($active ? 'rgba(245,166,35,0.4)' : 'rgba(255,255,255,0.07)')};
   &:hover {
     background: rgba(245, 166, 35, 0.1);
     color: #f5a623;
@@ -1050,7 +1346,6 @@ const InlineRecipientPicker: React.FC<InlineRecipientPickerProps> = ({
       </ReEncryptingBadge>
     )
   }
-
   return (
     <div style={{ width: '100%' }}>
       <MajikContactListSelector
@@ -1070,22 +1365,29 @@ type Tab = 'all' | 'permanent' | 'temporary' | 'shared' | 'attachments'
 type SortKey = 'date' | 'name' | 'size'
 type ViewMode = 'grid' | 'list'
 type BadgeCls = 'img' | 'pdf' | 'doc' | 'zip' | 'file'
+type FileScanPhase = 'idle' | 'scanning' | 'clean' | 'flagged' | 'error'
 
 interface PendingFile {
   id: string
   raw: File
   storageType: 'permanent' | 'temporary'
   tempDuration: TempFileDuration
-  recipients: MajikContact[] // ← per-file recipients
+  recipients: MajikContact[]
   majikFile: MajikFile | null | undefined
   encryptError?: string
+  /** YARA scan phase for this pending file */
+  scanPhase: FileScanPhase
+  /** YARA scan result — null until scan completes */
+  scanResult: FileScanResult | null
+  /** Compression preset chosen by the user for this file */
+  compressionPreset: CompressionPresetKey
 }
 
 export interface UserFilesProps {
   majik: MajikMessageDatabase
   uploadContext?: FileContext
-  contacts?: MajikContact[] // ← available contacts for selector
-  defaultRecipients?: MajikContact[] // ← seeded into each new pending file
+  contacts?: MajikContact[]
+  defaultRecipients?: MajikContact[]
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -1096,6 +1398,7 @@ const UserFiles: React.FC<UserFilesProps> = ({
   contacts = [],
   defaultRecipients = []
 }) => {
+  const tour = useShepherd()
   const [files, setFiles] = useState<MajikFileJSON[]>([])
   const [quota, setQuota] = useState<FileQuota | null>(null)
   const [loading, setLoading] = useState(true)
@@ -1112,8 +1415,6 @@ const UserFiles: React.FC<UserFilesProps> = ({
   const [actionError, setActionError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // Derive the fetch context from the active tab.
-  // 'attachments' fetches thread_attachment files; all other tabs fetch user_upload.
   const activeContext: FileContext = tab === 'attachments' ? 'thread_attachment' : uploadContext
 
   // ── Data loading ────────────────────────────────────────────────────────────
@@ -1155,10 +1456,9 @@ const UserFiles: React.FC<UserFilesProps> = ({
     loadQuota()
   }, [loadFiles, loadQuota])
 
-  // Reset to page 1 when filters change
   useEffect(() => {
     setPage(1)
-    setFiles([]) // clear stale results immediately while the new context loads
+    setFiles([])
     loadFiles()
   }, [activeContext]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1166,18 +1466,18 @@ const UserFiles: React.FC<UserFilesProps> = ({
     setPage(1)
   }, [searchQuery, sortKey])
 
-  // ── Fuse.js – build searchable items ────────────────────────────────────────
-  //
-  // Mirrors the pattern in GroupDocumentations: build a flat text field so
-  // Fuse can search across all meaningful properties in one pass.
+  // ── Fuse.js ──────────────────────────────────────────────────────────────────
 
-  const searchableFiles = useMemo(() => {
-    return files.map((f) => ({
-      ...f,
-      // flat text field for Fuse to score against
-      _searchText: [f.original_name, f.mime_type, f.context, f.file_hash].filter(Boolean).join(' ')
-    }))
-  }, [files])
+  const searchableFiles = useMemo(
+    () =>
+      files.map((f) => ({
+        ...f,
+        _searchText: [f.original_name, f.mime_type, f.context, f.file_hash]
+          .filter(Boolean)
+          .join(' ')
+      })),
+    [files]
+  )
 
   const fuse = useMemo(
     () =>
@@ -1201,24 +1501,18 @@ const UserFiles: React.FC<UserFilesProps> = ({
   // ── Filter + sort + paginate ────────────────────────────────────────────────
 
   const filtered = useMemo(() => {
-    // 1. Fuzzy search (when query is present Fuse handles sorting by score)
     let base: MajikFileJSON[]
     if (searchQuery.trim()) {
       base = fuse.search(searchQuery).map((r) => r.item)
     } else {
       base = [...files]
     }
-
-    // 2. Tab filter
     base = base.filter((f) => {
       if (tab === 'permanent') return f.storage_type === 'permanent'
       if (tab === 'temporary') return f.storage_type === 'temporary'
       if (tab === 'shared') return f.is_shared
-      // 'attachments' and 'all' → no additional client-side filter needed
       return true
     })
-
-    // 3. Sort (skipped when fuzzy search is active – Fuse already sorted by score)
     if (!searchQuery.trim()) {
       base.sort((a, b) => {
         if (sortKey === 'name') return (a.original_name ?? '').localeCompare(b.original_name ?? '')
@@ -1226,7 +1520,6 @@ const UserFiles: React.FC<UserFilesProps> = ({
         return new Date(b.timestamp ?? 0).getTime() - new Date(a.timestamp ?? 0).getTime()
       })
     }
-
     return base
   }, [files, fuse, searchQuery, tab, sortKey])
 
@@ -1234,7 +1527,6 @@ const UserFiles: React.FC<UserFilesProps> = ({
   const safePage = Math.min(page, totalPages)
   const paginated = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE)
 
-  // Build the compact page-number window (mirrors GroupDocumentations pattern)
   const pageWindow = useMemo<(number | '…')[]>(() => {
     const pages: (number | '…')[] = []
     if (totalPages <= 7) {
@@ -1250,46 +1542,136 @@ const UserFiles: React.FC<UserFilesProps> = ({
     return pages
   }, [totalPages, safePage])
 
-  // ── Encrypt ──────────────────────────────────────────────────────────────────
-  // Defined BEFORE addRawFiles so the useCallback below captures a stable ref.
+  // ── Scan ─────────────────────────────────────────────────────────────────────
 
-  const encryptPendingFile = useCallback(
+  /**
+   * Runs a YARA scan on a pending file's raw bytes.
+   * On completion, updates scanPhase + scanResult on the pending entry.
+   * If score ≥ SCAN_PASS_THRESHOLD, kicks off encryption automatically.
+   * If flagged or score < threshold, marks the file as blocked.
+   */
+  const scanPendingFile = useCallback(
+    async (pf: PendingFile) => {
+      // Mark as scanning
+      setPendingFiles((prev) =>
+        prev.map((p) => (p.id === pf.id ? { ...p, scanPhase: 'scanning', scanResult: null } : p))
+      )
+
+      try {
+        await ensureScanner()
+        const result = await scanner.scan(pf.raw)
+
+        const phase: FileScanPhase =
+          result.status === 'clean' ? 'clean' : result.status === 'flagged' ? 'flagged' : 'error'
+
+        const scanPasses = result.score >= SCAN_PASS_THRESHOLD
+
+        setPendingFiles((prev) =>
+          prev.map((p) =>
+            p.id === pf.id
+              ? {
+                  ...p,
+                  scanPhase: phase,
+                  scanResult: result,
+                  // Clear any previous encrypt error on a fresh scan
+                  encryptError: scanPasses ? p.encryptError : undefined
+                }
+              : p
+          )
+        )
+
+        if (!scanPasses) {
+          // Blocked — do not encrypt. Toast only on flagged (score < threshold
+          // with no explicit flag is a softer warning already shown inline).
+          if (phase === 'flagged') {
+            toast.error(`"${pf.raw.name}" blocked — YARA threat detected`, {
+              description: `Score: ${result.score}/100 · ${result.remarks.length} rule(s) matched`,
+              id: `toast-scan-blocked-${pf.id}`,
+              duration: 8000
+            })
+          } else if (result.score < SCAN_PASS_THRESHOLD) {
+            toast.warning(`"${pf.raw.name}" blocked — scan score too low`, {
+              description: `Score ${result.score}/100 is below the minimum of ${SCAN_PASS_THRESHOLD}. Remove the file or choose a different one.`,
+              id: `toast-scan-score-${pf.id}`,
+              duration: 6000
+            })
+          }
+          return
+        }
+
+        // Scan passed — proceed to encryption using the file's current preset
+        // We need the latest version of the pending file for the correct preset.
+        setPendingFiles((prev) => {
+          const latest = prev.find((p) => p.id === pf.id)
+          if (latest) {
+            // Side-effect: kick off encryption after state settles
+            Promise.resolve().then(() => encryptPendingFileById(latest))
+          }
+          return prev
+        })
+      } catch (err) {
+        console.error('[UserFiles] scan error:', err)
+        setPendingFiles((prev) =>
+          prev.map((p) => (p.id === pf.id ? { ...p, scanPhase: 'error', scanResult: null } : p))
+        )
+        toast.warning(`Scan failed for "${pf.raw.name}" — upload blocked`, {
+          description: 'A scan error occurred. Remove and re-add the file to retry.',
+          id: `toast-scan-err-${pf.id}`
+        })
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  )
+
+  // ── Encrypt ──────────────────────────────────────────────────────────────────
+
+  /**
+   * Internal: encrypts a PendingFile using its compressionPreset.
+   * Only called after scan passes. Accepts the latest snapshot of the file
+   * so stale closure over compressionPreset is avoided.
+   */
+  const encryptPendingFileById = useCallback(
     async (pf: PendingFile) => {
       const identity = majik.currentIdentity
       if (!identity) {
         setPendingFiles((prev) =>
           prev.map((p) =>
             p.id === pf.id
-              ? { ...p, majikFile: null, encryptError: 'No active identity – please log in' }
+              ? {
+                  ...p,
+                  majikFile: null,
+                  encryptError: 'No active identity – please log in'
+                }
               : p
           )
         )
         return
       }
 
-      // Resolve recipient public keys — filter out own account to avoid duplication
-      // (MajikFile.create() always prepends the owner automatically)
       const ownFingerprint = identity.id
       const recipientPubKeys = (
         await Promise.all(
           pf.recipients
-            .filter((r) => {
-              // Strip own account — owner is always added by MajikFile.create()
-              const contactFingerprint = r?.fingerprint
-              return contactFingerprint !== ownFingerprint
-            })
+            .filter((r) => r?.fingerprint !== ownFingerprint)
             .map((r) => r.getPublicKeyBase64())
         )
       ).filter(Boolean) as string[]
 
       const isTemp = pf.storageType === 'temporary'
+      const compressionLevel = CompressionPreset[pf.compressionPreset]
+
       try {
         console.log(
           '[UserFiles] encrypting:',
           pf.raw.name,
           '→',
           pf.recipients.length,
-          'recipient(s)'
+          'recipient(s), compression:',
+          pf.compressionPreset,
+          '(lv',
+          compressionLevel,
+          ')'
         )
         const bytes = new Uint8Array(await pf.raw.arrayBuffer())
         const encryptedResult = await majik.encryptFile({
@@ -1300,7 +1682,8 @@ const UserFiles: React.FC<UserFilesProps> = ({
           isTemporary: isTemp,
           userId: majik?.user?.id,
           expiresAt: isTemp ? pf.tempDuration : undefined,
-          recipients: recipientPubKeys
+          recipients: recipientPubKeys,
+          compressionLevel
         })
 
         const majikFile = encryptedResult.file
@@ -1320,20 +1703,51 @@ const UserFiles: React.FC<UserFilesProps> = ({
   // ── Drag & Drop ─────────────────────────────────────────────────────────────
 
   const addRawFiles = useCallback(
-    (rawFiles: File[]) => {
-      const batch: PendingFile[] = rawFiles.map((f) => ({
+    async (rawFiles: File[]) => {
+      const validFiles: File[] = []
+
+      for (const f of rawFiles) {
+        // ── Block .mjkb files ──────────────────────────────────────────────
+        // By design, re-encrypting an already-encrypted .mjkb is not permitted.
+        const isMjkb = f.name.toLowerCase().endsWith('.mjkb') || (await looksLikeMjkb(f))
+
+        if (isMjkb) {
+          toast.error(`"${f.name}" is already encrypted`, {
+            description:
+              'Encrypted .mjkb files cannot be uploaded here — use the File Vault to decrypt them.',
+            id: `toast-mjkb-rejected-${f.name}`,
+            duration: 6000
+          })
+          continue
+        }
+
+        validFiles.push(f)
+      }
+
+      if (!validFiles.length) return
+
+      // Build pending entries with scan in "idle" state; encryption
+      // is deferred until scan completes and passes.
+      const batch: PendingFile[] = validFiles.map((f) => ({
         id: crypto.randomUUID(),
         raw: f,
         storageType: 'permanent' as const,
         tempDuration: 15 as TempFileDuration,
-        recipients: defaultRecipients ?? [], // ← seed from prop
-        majikFile: undefined
+        recipients: defaultRecipients ?? [],
+        majikFile: undefined,
+        scanPhase: 'idle' as FileScanPhase,
+        scanResult: null,
+        compressionPreset: 'GOOD' as CompressionPresetKey
       }))
+
       setPendingFiles((prev) => [...prev, ...batch])
-      batch.forEach((pf) => encryptPendingFile(pf))
+
+      // Kick off scan for each file immediately after adding to state
+      batch.forEach((pf) => scanPendingFile(pf))
     },
-    [encryptPendingFile, defaultRecipients]
+    [scanPendingFile, defaultRecipients]
   )
+
   const handleDrop = (e: React.DragEvent): void => {
     e.preventDefault()
     setIsDragging(false)
@@ -1350,11 +1764,8 @@ const UserFiles: React.FC<UserFilesProps> = ({
         if (p.id !== id) return p
         const next = p.storageType === 'permanent' ? 'temporary' : 'permanent'
         if (p.majikFile instanceof MajikFile) {
-          if (next === 'temporary') {
-            p.majikFile.setTemporary(p.tempDuration)
-          } else {
-            p.majikFile.setPermanent()
-          }
+          if (next === 'temporary') p.majikFile.setTemporary(p.tempDuration)
+          else p.majikFile.setPermanent()
         }
         return { ...p, storageType: next }
       })
@@ -1364,7 +1775,6 @@ const UserFiles: React.FC<UserFilesProps> = ({
     setPendingFiles((prev) =>
       prev.map((p) => {
         if (p.id !== id) return p
-        // Mutate the MajikFile in-place — already temporary at this point
         if (p.majikFile instanceof MajikFile && p.storageType === 'temporary') {
           p.majikFile.setTemporary(duration)
         }
@@ -1372,23 +1782,66 @@ const UserFiles: React.FC<UserFilesProps> = ({
       })
     )
 
-  const setPendingRecipients = useCallback(
-    (id: string, updated: MajikContact[]) => {
-      // Build the updated pf synchronously so we can pass it directly to encryptPendingFile
+  /**
+   * Update compression preset for a pending file.
+   * If scan has already passed, triggers a re-encrypt with the new level.
+   */
+  const setPendingCompression = useCallback(
+    (id: string, preset: CompressionPresetKey) => {
       let updatedPf: PendingFile | null = null
 
       setPendingFiles((prev) =>
         prev.map((p) => {
           if (p.id !== id) return p
-          updatedPf = { ...p, recipients: updated, majikFile: undefined, encryptError: undefined }
+          updatedPf = {
+            ...p,
+            compressionPreset: preset,
+            // Reset encrypted output so the Confirm button blocks until
+            // re-encryption with the new level completes.
+            majikFile: undefined,
+            encryptError: undefined
+          }
           return updatedPf
         })
       )
 
-      // encryptPendingFile is stable (useCallback) and writes back via setPendingFiles
-      if (updatedPf) encryptPendingFile(updatedPf)
+      // Only re-encrypt if the file previously passed its scan
+      if (updatedPf) {
+        const pf = updatedPf as PendingFile
+        if (pf.scanPhase === 'clean') {
+          encryptPendingFileById(pf)
+        }
+      }
     },
-    [encryptPendingFile]
+    [encryptPendingFileById]
+  )
+
+  const setPendingRecipients = useCallback(
+    (id: string, updated: MajikContact[]) => {
+      let updatedPf: PendingFile | null = null
+
+      setPendingFiles((prev) =>
+        prev.map((p) => {
+          if (p.id !== id) return p
+          updatedPf = {
+            ...p,
+            recipients: updated,
+            majikFile: undefined,
+            encryptError: undefined
+          }
+          return updatedPf
+        })
+      )
+
+      if (updatedPf) {
+        const pf = updatedPf as PendingFile
+        // Only re-encrypt if scan has passed
+        if (pf.scanPhase === 'clean') {
+          encryptPendingFileById(pf)
+        }
+      }
+    },
+    [encryptPendingFileById]
   )
 
   // ── Confirm upload ──────────────────────────────────────────────────────────
@@ -1413,7 +1866,7 @@ const UserFiles: React.FC<UserFilesProps> = ({
     const confirmed = await majik.uploadFile(intent, pf.majikFile)
     setFiles((prev) => [confirmed, ...prev])
     removePending(pf.id)
-    await Promise.all([loadQuota(true), loadFiles(true)]) // force-refresh both
+    await Promise.all([loadQuota(true), loadFiles(true)])
     return `"${pf.raw.name}" uploaded successfully`
   }
 
@@ -1421,9 +1874,7 @@ const UserFiles: React.FC<UserFilesProps> = ({
     try {
       toast.promise(processConfirmUploadFile(pf), {
         loading: `Uploading "${pf.raw.name}"...`,
-        success: (msg) => {
-          return msg
-        },
+        success: (msg) => msg,
         error: (err) => `${err.message}`
       })
     } catch (err) {
@@ -1446,7 +1897,6 @@ const UserFiles: React.FC<UserFilesProps> = ({
 
   const processDeleteFile = async (fileId: string): Promise<string> => {
     setActionError(null)
-
     await majik.deleteFile(fileId)
     setFiles((prev) => prev.filter((f) => f.id !== fileId))
     setSelectedIds((prev) => {
@@ -1454,7 +1904,7 @@ const UserFiles: React.FC<UserFilesProps> = ({
       n.delete(fileId)
       return n
     })
-    await Promise.all([loadQuota(true), loadFiles(true)]) // force-refresh both
+    await Promise.all([loadQuota(true), loadFiles(true)])
     return 'File deleted successfully'
   }
 
@@ -1462,9 +1912,7 @@ const UserFiles: React.FC<UserFilesProps> = ({
     try {
       toast.promise(processDeleteFile(fileId), {
         loading: `Deleting file...`,
-        success: (msg) => {
-          return msg
-        },
+        success: (msg) => msg,
         error: (err) => `${err.message}`
       })
     } catch (err) {
@@ -1481,37 +1929,24 @@ const UserFiles: React.FC<UserFilesProps> = ({
     for (const id of selectedIds) await handleDeleteFile(id)
   }
 
-  // ── Share ────────────────────────────────────────────────────────────────────
-
-  // ── Publish / Unpublish (toggle web accessibility) ───────────────────────────
-  // Controls whether the file is accessible via a public share URL on the web.
-  // When published, a share_token is generated and the file becomes reachable
-  // at /shared/<token>. When unpublished, only the owner can access it (though
-  // it can still be shared through other mediums like direct message).
+  // ── Publish / Unpublish ───────────────────────────────────────────────────────
 
   const processTogglePublish = async (
     fileId: string
-  ): Promise<{
-    title: string
-    description: string
-  }> => {
+  ): Promise<{ title: string; description: string }> => {
     setActionError(null)
-
     const result = await majik.toggleFileSharing(fileId)
-
     setFiles((prev) =>
       prev.map((f) =>
         f.id === fileId ? { ...f, is_shared: result.isShared, share_token: result.shareToken } : f
       )
     )
-
     if (result.isShared) {
       return {
         title: 'File Published',
         description: 'Anyone with the link can now access this file on the web.'
       }
     }
-
     return {
       title: 'File Unpublished',
       description: 'Web access has been revoked. The file is now private.'
@@ -1520,14 +1955,9 @@ const UserFiles: React.FC<UserFilesProps> = ({
 
   const handleTogglePublish = async (fileId: string): Promise<void> => {
     const toastId = toast.loading('Toggling publish status...')
-
     try {
       const msg = await processTogglePublish(fileId)
-
-      toast.success(msg.title, {
-        description: msg.description,
-        id: toastId
-      })
+      toast.success(msg.title, { description: msg.description, id: toastId })
     } catch (err) {
       toast.error('Publish Toggle Failed', {
         description: err instanceof Error ? err.message : 'An error occurred',
@@ -1535,10 +1965,8 @@ const UserFiles: React.FC<UserFilesProps> = ({
       })
     }
   }
+
   // ── Copy share link ──────────────────────────────────────────────────────────
-  // Copies the public share URL to clipboard. Only meaningful when the file is
-  // already published (has a share_token). If not published, nudges the user
-  // to publish first.
 
   const copyShareLink = async (file: MajikFileJSON): Promise<void> => {
     if (!file.is_shared || !file.share_token) {
@@ -1565,26 +1993,18 @@ const UserFiles: React.FC<UserFilesProps> = ({
 
   const processDownloadFile = async (file: MajikFileJSON): Promise<string> => {
     setActionError(null)
-
     const binary = await majik.downloadFileBinary(file.id)
     const downloadedBlob = new Blob([binary as BlobPart], {
       type: 'application/octet-stream'
     })
-
     const majikFileInstance = await MajikFile.fromJSONWithBlob(file, downloadedBlob)
-
     majikFileInstance.validate()
     const blob = majikFileInstance.toMJKB()
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    // get original name or fallback
     let fileName = majikFileInstance.originalName ?? file.original_name ?? 'download'
-
-    // strip file extension if present
     fileName = fileName.replace(/\.[^/.]+$/, '')
-
-    // assign to download attribute
     a.download = `${fileName}.mjkb`
     a.click()
     URL.revokeObjectURL(url)
@@ -1595,9 +2015,7 @@ const UserFiles: React.FC<UserFilesProps> = ({
     try {
       toast.promise(processDownloadFile(file), {
         loading: `Downloading "${file.original_name}"...`,
-        success: (msg) => {
-          return msg
-        },
+        success: (msg) => msg,
         error: (err) => `${err.message}`
       })
     } catch (err) {
@@ -1614,15 +2032,15 @@ const UserFiles: React.FC<UserFilesProps> = ({
   const toggleSelect = (id: string): void =>
     setSelectedIds((prev) => {
       const n = new Set(prev)
-      n.has(id) ? n.delete(id) : n.add(id)
+      if (n.has(id)) n.delete(id)
+      else n.add(id)
       return n
     })
 
   // ─── Render ──────────────────────────────────────────────────────────────────
 
   return (
-    <Root>
-      {/* Hidden file input */}
+    <Root id="my-files-root">
       <input
         ref={fileInputRef}
         type="file"
@@ -1634,13 +2052,15 @@ const UserFiles: React.FC<UserFilesProps> = ({
           e.target.value = ''
         }}
       />
+      <GuideHelper
+        docsPath="https://majikah.solutions/products/majik-message/docs/cloud-storage"
+        startTour={() => launchTutorialCloudStorage(tour)}
+      />
 
-      {/* Quota */}
       <QuotaWrap>
         <UserFileQuota quota={quota} isLoading={quotaLoading} />
       </QuotaWrap>
 
-      {/* Error */}
       {actionError && (
         <ErrorBanner>
           <ErrorLeft>
@@ -1653,9 +2073,8 @@ const UserFiles: React.FC<UserFilesProps> = ({
         </ErrorBanner>
       )}
 
-      {/* Controls: tabs on left, search + toggles on right */}
       <Controls>
-        <TabBar>
+        <TabBar id="my-files-tab-bar">
           {(['all', 'permanent', 'temporary', 'shared', 'attachments'] as Tab[]).map((t) => (
             <Tab key={t} $active={tab === t} onClick={() => setTab(t)}>
               {t}
@@ -1664,7 +2083,7 @@ const UserFiles: React.FC<UserFilesProps> = ({
         </TabBar>
 
         <RightControls>
-          <SearchContainer>
+          <SearchContainer id="my-files-search">
             <SearchIconWrap size={16} weight="regular" />
             <SearchInput
               type="text"
@@ -1679,8 +2098,8 @@ const UserFiles: React.FC<UserFilesProps> = ({
             )}
           </SearchContainer>
 
-          {/* Sort cycle */}
           <SmBtn
+            id="my-files-sort-btn"
             onClick={() =>
               setSortKey((k) => (k === 'date' ? 'name' : k === 'name' ? 'size' : 'date'))
             }
@@ -1690,8 +2109,7 @@ const UserFiles: React.FC<UserFilesProps> = ({
             {sortKey}
           </SmBtn>
 
-          {/* View toggle – same pattern as GroupDocumentations */}
-          <ViewToggle>
+          <ViewToggle id="my-files-view-toggle">
             <ViewButton
               $active={viewMode === 'list'}
               onClick={() => setViewMode('list')}
@@ -1708,17 +2126,16 @@ const UserFiles: React.FC<UserFilesProps> = ({
             </ViewButton>
           </ViewToggle>
 
-          <AccentBtn onClick={() => fileInputRef.current?.click()}>
+          <AccentBtn id="my-files-upload-btn" onClick={() => fileInputRef.current?.click()}>
             <UploadSimpleIcon size={13} />
             Upload
           </AccentBtn>
         </RightControls>
       </Controls>
 
-      {/* Scrollable body */}
       <ScrollBody>
-        {/* Drop zone */}
         <DropZone
+          id="my-files-drop-zone"
           $active={isDragging}
           onDragOver={(e) => {
             e.preventDefault()
@@ -1732,29 +2149,55 @@ const UserFiles: React.FC<UserFilesProps> = ({
           <DropText>
             <strong>Drop files here</strong> or click to browse
           </DropText>
-          <DropHint>Encrypted with MajikFile before upload · Max 100 MB each</DropHint>
+          <DropHint>
+            YARA-scanned · encrypted with MajikFile · max 100 MB · .mjkb files not accepted
+          </DropHint>
         </DropZone>
 
-        {/* Pending files */}
+        {/* Pending files ──────────────────────────────────────────────────── */}
         {pendingFiles.length > 0 && (
-          <>
+          <div id="my-files-pending-section">
             <SectionLabelRow>
               <SectionLabelText>
-                Ready to upload · {pendingFiles.length} file
+                Upload queue · {pendingFiles.length} file
                 {pendingFiles.length > 1 ? 's' : ''}
               </SectionLabelText>
               <SectionDivider />
             </SectionLabelRow>
 
             {pendingFiles.map((pf) => {
-              const isEncrypting = pf.majikFile === undefined
-              const isError = pf.majikFile === null
+              const isScanning = pf.scanPhase === 'scanning' || pf.scanPhase === 'idle'
+              const scanBlocked =
+                (pf.scanPhase === 'flagged' &&
+                  pf.scanResult !== null &&
+                  pf.scanResult.score < SCAN_PASS_THRESHOLD) ||
+                pf.scanPhase === 'error' ||
+                (pf.scanPhase === 'clean' &&
+                  pf.scanResult !== null &&
+                  pf.scanResult.score < SCAN_PASS_THRESHOLD)
+
+              const scanPassed =
+                pf.scanResult !== null && pf.scanResult.score >= SCAN_PASS_THRESHOLD
+
+              const isEncrypting = scanPassed && pf.majikFile === undefined
+              const isEncryptError = scanPassed && pf.majikFile === null
               const isUploading = uploadingIds.has(pf.id)
-              const ready = !isEncrypting && !isError && !isUploading
+
+              // Confirm is only active when: scan passed, encryption done, not uploading
+              const ready =
+                scanPassed &&
+                !isEncrypting &&
+                !isEncryptError &&
+                !isUploading &&
+                pf.majikFile instanceof MajikFile
+
               const { label, cls } = extInfo(pf.raw.name)
 
+              // Adaptive clamp preview for the currently selected preset
+              const adaptiveInfo = resolveAdaptiveLevel(pf.raw.size, pf.compressionPreset)
+
               return (
-                <PendingRow key={pf.id}>
+                <PendingRow key={pf.id} $scanBlocked={scanBlocked}>
                   <RowColumn>
                     <RowInfo>
                       <FileBadge $cls={cls}>{label}</FileBadge>
@@ -1764,14 +2207,58 @@ const UserFiles: React.FC<UserFilesProps> = ({
                         <PendingMeta>
                           <PendingMetaText>{formatBytes(pf.raw.size)}</PendingMetaText>
 
-                          {isEncrypting && !isError && (
+                          {/* ── Scan status badges ── */}
+                          {isScanning && (
+                            <ScanBadge $scanning>
+                              <Spinner />
+                              Scanning…
+                            </ScanBadge>
+                          )}
+
+                          {pf.scanPhase === 'flagged' && (
+                            <ScanBadge $error>
+                              <ProhibitIcon size={10} />
+                              Threat detected
+                            </ScanBadge>
+                          )}
+
+                          {pf.scanPhase === 'error' && (
+                            <ScanBadge $warn>
+                              <WarningIcon size={10} />
+                              Scan failed
+                            </ScanBadge>
+                          )}
+
+                          {/* Clean but below threshold */}
+                          {pf.scanPhase === 'clean' &&
+                            pf.scanResult !== null &&
+                            pf.scanResult.score < SCAN_PASS_THRESHOLD && (
+                              <ScanBadge $warn>
+                                <ShieldWarningIcon size={10} />
+                                Score too low
+                              </ScanBadge>
+                            )}
+
+                          {/* Scan passed — show score pill */}
+                          {scanPassed && pf.scanResult !== null && (
+                            <>
+                              <ScanBadge $success>
+                                <ShieldCheckIcon size={10} />
+                                Scan clean
+                              </ScanBadge>
+                              <ScanScorePill $pass>{pf.scanResult.score}/100</ScanScorePill>
+                            </>
+                          )}
+
+                          {/* ── Encrypt status (only shown after scan pass) ── */}
+                          {isEncrypting && (
                             <StatusBadge>
                               <Spinner />
                               <LockKeyIcon size={10} />
                               Encrypting…
                             </StatusBadge>
                           )}
-                          {isError && (
+                          {isEncryptError && (
                             <StatusBadge $error>
                               <WarningIcon size={10} />
                               {pf.encryptError ?? 'Encrypt failed'}
@@ -1786,21 +2273,27 @@ const UserFiles: React.FC<UserFilesProps> = ({
                         </PendingMeta>
                       </div>
 
-                      {/* Storage type toggle */}
-                      <StorageToggle>
-                        {(['permanent', 'temporary'] as const).map((st) => (
-                          <StorageOpt
-                            key={st}
-                            $active={pf.storageType === st}
-                            onClick={() => togglePendingStorage(pf.id)}
-                          >
-                            {st === 'permanent' ? 'Perm' : 'Temp'}
-                          </StorageOpt>
-                        ))}
-                      </StorageToggle>
+                      {/* Storage type toggle — only accessible after scan passes */}
+                      {scanPassed && (
+                        <StorageToggle>
+                          {(['permanent', 'temporary'] as const).map((st) => (
+                            <StorageOpt
+                              key={st}
+                              $active={pf.storageType === st}
+                              onClick={() => togglePendingStorage(pf.id)}
+                            >
+                              {st === 'permanent' ? 'Perm' : 'Temp'}
+                            </StorageOpt>
+                          ))}
+                        </StorageToggle>
+                      )}
 
-                      {/* Duration picker — slides in when temporary is selected */}
-                      <DurationRow data-visible={pf.storageType === 'temporary' ? 'true' : 'false'}>
+                      {/* Duration picker */}
+                      <DurationRow
+                        data-visible={
+                          scanPassed && pf.storageType === 'temporary' ? 'true' : 'false'
+                        }
+                      >
                         <DurationLabel>ttl</DurationLabel>
                         {([1, 2, 3, 5, 7, 15] as TempFileDuration[]).map((d) => (
                           <DurationChip
@@ -1818,6 +2311,13 @@ const UserFiles: React.FC<UserFilesProps> = ({
                         $ready={ready}
                         disabled={!ready}
                         onClick={() => handleConfirmUploadFile(pf)}
+                        title={
+                          !scanPassed
+                            ? 'Upload blocked — file must pass the YARA scan'
+                            : isEncrypting
+                              ? 'Encrypting…'
+                              : undefined
+                        }
                       >
                         {isUploading ? '…' : 'Confirm'}
                       </ConfirmBtn>
@@ -1826,275 +2326,349 @@ const UserFiles: React.FC<UserFilesProps> = ({
                         <XIcon size={12} />
                       </IconBtn>
                     </RowInfo>
-                    {/* ── Recipient picker ── */}
-                    <InlineRecipientPicker
-                      pendingId={pf.id}
-                      recipients={pf.recipients}
-                      contacts={contacts}
-                      onUpdate={setPendingRecipients}
-                      isReEncrypting={pf.majikFile === undefined && pf.recipients.length > 0}
-                    />
+
+                    {/* ── Scan blocked notice ── */}
+                    {scanBlocked && pf.scanResult !== null && (
+                      <ScanBlockedNotice>
+                        <span style={{ flexShrink: 0, marginTop: 1 }}>
+                          <ProhibitIcon size={12} />
+                        </span>
+                        <span>
+                          {pf.scanPhase === 'flagged'
+                            ? `Upload blocked — ${pf.scanResult.remarks.length} YARA rule(s) matched. Score: ${pf.scanResult.score}/100.`
+                            : `Upload blocked — scan score ${pf.scanResult.score}/100 is below the minimum of ${SCAN_PASS_THRESHOLD}.`}{' '}
+                          Remove this file to continue.
+                        </span>
+                      </ScanBlockedNotice>
+                    )}
+
+                    {pf.scanPhase === 'error' && (
+                      <ScanBlockedNotice>
+                        <span style={{ flexShrink: 0, marginTop: 1 }}>
+                          <WarningIcon size={12} />
+                        </span>
+                        <span>
+                          YARA scan could not complete. Upload is blocked until the file is removed
+                          and re-added.
+                        </span>
+                      </ScanBlockedNotice>
+                    )}
+
+                    {/*
+                     * ── Compression selector ──────────────────────────────
+                     * Only shown after scan passes. Sits between the scan
+                     * notice (if any) and the recipient picker.
+                     */}
+                    {scanPassed && (
+                      <CompressionWrap>
+                        <CompressionHeaderRow>
+                          <CompressionLabel>Compression</CompressionLabel>
+                          <CompressionHint>
+                            {PRESET_META[pf.compressionPreset].hint}
+                          </CompressionHint>
+                        </CompressionHeaderRow>
+
+                        <CompressionPillRow>
+                          {PRESET_ORDER.map((key) => (
+                            <CompressionPill
+                              key={key}
+                              $active={pf.compressionPreset === key}
+                              $presetKey={key}
+                              onClick={() => setPendingCompression(pf.id, key)}
+                              title={PRESET_META[key].hint}
+                            >
+                              {PRESET_META[key].label}
+                            </CompressionPill>
+                          ))}
+                        </CompressionPillRow>
+
+                        {/* Live clamp notice */}
+                        {adaptiveInfo.wasClamped && (
+                          <ClampNotice>
+                            <span style={{ flexShrink: 0 }}>⚡</span>
+                            <span>
+                              {pf.compressionPreset} (lv {CompressionPreset[pf.compressionPreset]})
+                              will be auto-clamped to lv {adaptiveInfo.effective} for this file
+                              size.
+                            </span>
+                          </ClampNotice>
+                        )}
+                      </CompressionWrap>
+                    )}
+
+                    {/* Recipient picker — only active after scan passes */}
+                    {scanPassed && (
+                      <InlineRecipientPicker
+                        pendingId={pf.id}
+                        recipients={pf.recipients}
+                        contacts={contacts}
+                        onUpdate={setPendingRecipients}
+                        isReEncrypting={pf.majikFile === undefined && pf.recipients.length > 0}
+                      />
+                    )}
                   </RowColumn>
                 </PendingRow>
               )
             })}
-          </>
+          </div>
         )}
 
-        {/* File list / grid */}
-        {loading ? (
-          <>
-            {[...Array(6)].map((_, i) => (
-              <SkeletonRow key={i} style={{ animationDelay: `${i * 0.08}s` }} />
-            ))}
-          </>
-        ) : filtered.length === 0 ? (
-          <EmptyState>
-            <EmptyIcon>
-              <PuzzlePieceIcon size={36} />
-            </EmptyIcon>
-            <EmptyTitle>{searchQuery ? 'No files match your search' : 'No files yet'}</EmptyTitle>
-            <EmptySub>
-              {searchQuery ? 'Try a different query' : 'Drop files above to get started'}
-            </EmptySub>
-          </EmptyState>
-        ) : (
-          <>
-            <SectionLabelRow style={{ marginTop: pendingFiles.length > 0 ? 16 : 4 }}>
-              <SectionLabelText>
-                {tab === 'all' ? 'Your files' : tab} · {filtered.length} item
-                {filtered.length !== 1 ? 's' : ''}
-              </SectionLabelText>
-              <SectionDivider />
-            </SectionLabelRow>
+        {/* File list / grid ───────────────────────────────────────────────── */}
+        <div id="my-files-file-list">
+          {loading ? (
+            <>
+              {[...Array(6)].map((_, i) => (
+                <SkeletonRow key={i} style={{ animationDelay: `${i * 0.08}s` }} />
+              ))}
+            </>
+          ) : filtered.length === 0 ? (
+            <EmptyState>
+              <EmptyIcon>
+                <PuzzlePieceIcon size={36} />
+              </EmptyIcon>
+              <EmptyTitle>{searchQuery ? 'No files match your search' : 'No files yet'}</EmptyTitle>
+              <EmptySub>
+                {searchQuery ? 'Try a different query' : 'Drop files above to get started'}
+              </EmptySub>
+            </EmptyState>
+          ) : (
+            <>
+              <SectionLabelRow style={{ marginTop: pendingFiles.length > 0 ? 16 : 4 }}>
+                <SectionLabelText>
+                  {tab === 'all' ? 'Your files' : tab} · {filtered.length} item
+                  {filtered.length !== 1 ? 's' : ''}
+                </SectionLabelText>
+                <SectionDivider />
+              </SectionLabelRow>
 
-            {viewMode === 'list' ? (
-              paginated.map((file) => {
-                const { label, cls } = extInfo(file.original_name)
-                const isSelected = selectedIds.has(file.id)
-                const expiry = moment(file?.expires_at ?? new Date()).fromNow()
-
-                return (
-                  <FileRowWrap
-                    key={file.id}
-                    $selected={isSelected}
-                    data-selected={isSelected}
-                    onClick={() => toggleSelect(file.id)}
-                  >
-                    <FileBadge $cls={cls}>{label}</FileBadge>
-
-                    <FileInfo>
-                      <FileName>{file.original_name ?? file.file_hash.slice(0, 16) + '…'}</FileName>
-                      <FileMeta>
-                        <FileMetaText>{formatDate(file.timestamp)}</FileMetaText>
-                        <Tag $variant={file.storage_type === 'permanent' ? 'perm' : 'temp'}>
-                          {file.storage_type === 'permanent'
-                            ? 'Permanent'
-                            : `Expires${expiry ? ` · ${expiry}` : ''}`}
-                        </Tag>
-                        {file.context === 'thread_attachment' && (
-                          <Tag $variant="shared">Attachment</Tag>
-                        )}
-                        {file.is_shared && <Tag $variant="shared">Shared</Tag>}
-                      </FileMeta>
-                    </FileInfo>
-
-                    <FileSizeCol>{formatBytes(file.size_original)}</FileSizeCol>
-
-                    <RowActions className="row-actions">
-                      <IconBtn
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleDownloadFile(file)
-                        }}
-                        title="Download"
-                      >
-                        <DownloadSimpleIcon size={13} />
-                      </IconBtn>
-                      {file.context !== 'thread_attachment' && (
-                        <>
-                          {/* Copy share link — only functional when published */}
-                          <IconBtn
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              copyShareLink(file)
-                            }}
-                            title={
-                              file.is_shared
-                                ? 'Copy share link'
-                                : 'Copy share link (publish first to enable web access)'
-                            }
-                          >
-                            <CopySimpleIcon size={13} />
-                          </IconBtn>
-
-                          {/* Publish / Unpublish — toggles web accessibility */}
-
-                          <PublishIconBtn
-                            $published={!!file.is_shared}
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              handleTogglePublish(file.id)
-                            }}
-                            title={
-                              file.is_shared
-                                ? 'Unpublish · revoke web access'
-                                : 'Publish · make accessible on the web'
-                            }
-                          >
-                            {file.is_shared ? (
-                              <GlobeSimpleXIcon size={13} />
-                            ) : (
-                              <GlobeIcon size={13} />
-                            )}
-                          </PublishIconBtn>
-                        </>
-                      )}
-
-                      <IconBtn
-                        $variant="red"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleDeleteFile(file.id)
-                        }}
-                        title="Delete"
-                      >
-                        <TrashIcon size={13} />
-                      </IconBtn>
-                    </RowActions>
-                  </FileRowWrap>
-                )
-              })
-            ) : (
-              <DocsGrid>
-                {paginated.map((file) => {
+              {viewMode === 'list' ? (
+                paginated.map((file) => {
                   const { label, cls } = extInfo(file.original_name)
                   const isSelected = selectedIds.has(file.id)
-                  const expiry = daysLeft(file.expires_at)
+                  const expiry = moment(file?.expires_at ?? new Date()).fromNow()
 
                   return (
-                    <GridCard
+                    <FileRowWrap
                       key={file.id}
                       $selected={isSelected}
                       data-selected={isSelected}
                       onClick={() => toggleSelect(file.id)}
                     >
-                      <GridCardTop>
-                        <FileBadge $cls={cls}>{label}</FileBadge>
-                        <RowActions
-                          className="row-actions"
-                          style={{ opacity: isSelected ? 1 : undefined }}
+                      <FileBadge $cls={cls}>{label}</FileBadge>
+
+                      <FileInfo>
+                        <FileName>
+                          {file.original_name ?? file.file_hash.slice(0, 16) + '…'}
+                        </FileName>
+                        <FileMeta>
+                          <FileMetaText>{formatDate(file.timestamp)}</FileMetaText>
+                          <Tag $variant={file.storage_type === 'permanent' ? 'perm' : 'temp'}>
+                            {file.storage_type === 'permanent'
+                              ? 'Permanent'
+                              : `Expires${expiry ? ` · ${expiry}` : ''}`}
+                          </Tag>
+                          {file.context === 'thread_attachment' && (
+                            <Tag $variant="shared">Attachment</Tag>
+                          )}
+                          {file.is_shared && <Tag $variant="shared">Shared</Tag>}
+                        </FileMeta>
+                      </FileInfo>
+
+                      <FileSizeCol>{formatBytes(file.size_original)}</FileSizeCol>
+
+                      <RowActions className="row-actions">
+                        <IconBtn
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleDownloadFile(file)
+                          }}
+                          title="Download"
                         >
-                          <IconBtn
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              handleDownloadFile(file)
-                            }}
-                          >
-                            <DownloadSimpleIcon size={12} />
-                          </IconBtn>
+                          <DownloadSimpleIcon size={13} />
+                        </IconBtn>
+                        {file.context !== 'thread_attachment' && (
+                          <>
+                            <IconBtn
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                copyShareLink(file)
+                              }}
+                              title={
+                                file.is_shared
+                                  ? 'Copy share link'
+                                  : 'Copy share link (publish first to enable web access)'
+                              }
+                            >
+                              <CopySimpleIcon size={13} />
+                            </IconBtn>
 
-                          {/* Copy share link */}
-                          <IconBtn
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              copyShareLink(file)
-                            }}
-                            title={
-                              file.is_shared
-                                ? 'Copy share link'
-                                : 'Copy share link (publish first to enable web access)'
-                            }
-                          >
-                            <CopySimpleIcon size={12} />
-                          </IconBtn>
+                            <PublishIconBtn
+                              $published={!!file.is_shared}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleTogglePublish(file.id)
+                              }}
+                              title={
+                                file.is_shared
+                                  ? 'Unpublish · revoke web access'
+                                  : 'Publish · make accessible on the web'
+                              }
+                            >
+                              {file.is_shared ? (
+                                <GlobeSimpleXIcon size={13} />
+                              ) : (
+                                <GlobeIcon size={13} />
+                              )}
+                            </PublishIconBtn>
+                          </>
+                        )}
 
-                          {/* Publish / Unpublish */}
-                          <PublishIconBtn
-                            $published={!!file.is_shared}
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              handleTogglePublish(file.id)
-                            }}
-                            title={
-                              file.is_shared
-                                ? 'Unpublish · revoke web access'
-                                : 'Publish · make accessible on the web'
-                            }
-                          >
-                            {file.is_shared ? (
-                              <GlobeSimpleXIcon size={12} />
-                            ) : (
-                              <GlobeIcon size={12} />
-                            )}
-                          </PublishIconBtn>
-
-                          <IconBtn
-                            $variant="red"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              handleDeleteFile(file.id)
-                            }}
-                          >
-                            <TrashIcon size={12} />
-                          </IconBtn>
-                        </RowActions>
-                      </GridCardTop>
-
-                      <GridFileName>
-                        {file.original_name ?? file.file_hash.slice(0, 12) + '…'}
-                      </GridFileName>
-
-                      <FileMeta>
-                        <Tag $variant={file.storage_type === 'permanent' ? 'perm' : 'temp'}>
-                          {file.storage_type === 'permanent'
-                            ? 'Perm'
-                            : `Temp${expiry ? ` · ${expiry}` : ''}`}
-                        </Tag>
-                        {file.is_shared && <Tag $variant="shared">Shared</Tag>}
-                      </FileMeta>
-
-                      <GridFileMeta>
-                        {formatBytes(file.size_original)} · {formatDate(file.timestamp)}
-                      </GridFileMeta>
-                    </GridCard>
+                        <IconBtn
+                          $variant="red"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleDeleteFile(file.id)
+                          }}
+                          title="Delete"
+                        >
+                          <TrashIcon size={13} />
+                        </IconBtn>
+                      </RowActions>
+                    </FileRowWrap>
                   )
-                })}
-              </DocsGrid>
-            )}
+                })
+              ) : (
+                <DocsGrid>
+                  {paginated.map((file) => {
+                    const { label, cls } = extInfo(file.original_name)
+                    const isSelected = selectedIds.has(file.id)
+                    const expiry = daysLeft(file.expires_at)
 
-            {/* Pagination */}
-            {totalPages > 1 && (
-              <PaginationRow>
-                <PageBtn disabled={safePage === 1} onClick={() => setPage((p) => p - 1)}>
-                  <ArrowLeftIcon size={12} />
-                </PageBtn>
+                    return (
+                      <GridCard
+                        key={file.id}
+                        $selected={isSelected}
+                        data-selected={isSelected}
+                        onClick={() => toggleSelect(file.id)}
+                      >
+                        <GridCardTop>
+                          <FileBadge $cls={cls}>{label}</FileBadge>
+                          <RowActions
+                            className="row-actions"
+                            style={{ opacity: isSelected ? 1 : undefined }}
+                          >
+                            <IconBtn
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleDownloadFile(file)
+                              }}
+                            >
+                              <DownloadSimpleIcon size={12} />
+                            </IconBtn>
+                            <IconBtn
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                copyShareLink(file)
+                              }}
+                              title={
+                                file.is_shared
+                                  ? 'Copy share link'
+                                  : 'Copy share link (publish first to enable web access)'
+                              }
+                            >
+                              <CopySimpleIcon size={12} />
+                            </IconBtn>
+                            <PublishIconBtn
+                              $published={!!file.is_shared}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleTogglePublish(file.id)
+                              }}
+                              title={
+                                file.is_shared
+                                  ? 'Unpublish · revoke web access'
+                                  : 'Publish · make accessible on the web'
+                              }
+                            >
+                              {file.is_shared ? (
+                                <GlobeSimpleXIcon size={12} />
+                              ) : (
+                                <GlobeIcon size={12} />
+                              )}
+                            </PublishIconBtn>
+                            <IconBtn
+                              $variant="red"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleDeleteFile(file.id)
+                              }}
+                            >
+                              <TrashIcon size={12} />
+                            </IconBtn>
+                          </RowActions>
+                        </GridCardTop>
 
-                {pageWindow.map((p, i) =>
-                  p === '…' ? (
-                    <PageEllipsis key={`ellipsis-${i}`}>…</PageEllipsis>
-                  ) : (
-                    <PageBtn
-                      key={p}
-                      $active={p === safePage}
-                      onClick={() => typeof p === 'number' && setPage(p)}
-                    >
-                      {p}
-                    </PageBtn>
-                  )
-                )}
+                        <GridFileName>
+                          {file.original_name ?? file.file_hash.slice(0, 12) + '…'}
+                        </GridFileName>
 
-                <PageBtn disabled={safePage === totalPages} onClick={() => setPage((p) => p + 1)}>
-                  <ArrowRightIcon size={12} />
-                </PageBtn>
-              </PaginationRow>
-            )}
-          </>
-        )}
+                        <FileMeta>
+                          <Tag $variant={file.storage_type === 'permanent' ? 'perm' : 'temp'}>
+                            {file.storage_type === 'permanent'
+                              ? 'Perm'
+                              : `Temp${expiry ? ` · ${expiry}` : ''}`}
+                          </Tag>
+                          {file.is_shared && <Tag $variant="shared">Shared</Tag>}
+                        </FileMeta>
 
-        {/* Multi-select action bar */}
+                        <GridFileMeta>
+                          {formatBytes(file.size_original)} · {formatDate(file.timestamp)}
+                        </GridFileMeta>
+                      </GridCard>
+                    )
+                  })}
+                </DocsGrid>
+              )}
+
+              {/* Pagination */}
+              {totalPages > 1 && (
+                <PaginationRow>
+                  <PageBtn disabled={safePage === 1} onClick={() => setPage((p) => p - 1)}>
+                    <ArrowLeftIcon size={12} />
+                  </PageBtn>
+
+                  {pageWindow.map((p, i) =>
+                    p === '…' ? (
+                      <PageEllipsis key={`ellipsis-${i}`}>…</PageEllipsis>
+                    ) : (
+                      <PageBtn
+                        key={p}
+                        $active={p === safePage}
+                        onClick={() => typeof p === 'number' && setPage(p)}
+                      >
+                        {p}
+                      </PageBtn>
+                    )
+                  )}
+
+                  <PageBtn disabled={safePage === totalPages} onClick={() => setPage((p) => p + 1)}>
+                    <ArrowRightIcon size={12} />
+                  </PageBtn>
+                </PaginationRow>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Multi-select action bar
+         * ── [ID] my-files-action-bar ──────────────────────────────────────────
+         * Shepherd: "Bulk Actions" step.
+         * Sticky bottom bar — only rendered when selectedIds.size > 0.
+         * Tour step is the last anchored step; it describes the bar without
+         * requiring the user to have anything selected during the tour itself.
+         */}
         {selectedIds.size > 0 && (
-          <ActionBar>
+          <ActionBar id="my-files-action-bar">
             <SelectedCount>
               <strong>{selectedIds.size}</strong> selected
             </SelectedCount>

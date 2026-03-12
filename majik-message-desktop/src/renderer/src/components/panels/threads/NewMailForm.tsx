@@ -300,7 +300,7 @@ interface NewMailFormProps {
 
 const NewMailForm: React.FC<NewMailFormProps> = ({ majik, thread, onUpdate, onSend }) => {
   const [input, setInput] = useState<string>('')
-  const [subject, setSubject] = useState<string>(thread.metadata?.subject ?? '')
+  const [subject, setSubject] = useState<string | undefined>(undefined)
   const [attachPanelOpen, setAttachPanelOpen] = useState(false)
   const [participants, setParticipants] = useState<MajikContact[]>([])
   const [pendingAttachments, setPendingAttachments] = useState<MajikFile[]>([]) // ← ADD

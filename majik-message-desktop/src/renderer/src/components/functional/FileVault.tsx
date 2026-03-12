@@ -2,20 +2,175 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import styled, { css, keyframes } from 'styled-components'
 import { toast } from 'sonner'
 import { CubeIcon, FolderIcon, KeyIcon } from '@phosphor-icons/react'
+import { MajikFileScanner } from '@/SDK/majik-file-scanner/majik-file-scanner'
+import type {
+  FileScanResult,
+  RuleSeverity,
+  ScanRemark
+} from '@/SDK/majik-file-scanner/majik-file-scanner'
+import { MajikFile } from '@majikah/majik-file'
+
+type CompressionLevel =
+  | 1
+  | 2
+  | 3
+  | 4
+  | 5
+  | 6
+  | 7
+  | 8
+  | 9
+  | 10
+  | 11
+  | 12
+  | 13
+  | 14
+  | 15
+  | 16
+  | 17
+  | 18
+  | 19
+  | 20
+  | 21
+  | 22
+
+// ─── Compression Preset ───────────────────────────────────────────────────────
+
+const CompressionPreset = {
+  FASTEST: 2 as CompressionLevel,
+  FAST: 3 as CompressionLevel,
+  BALANCED: 6 as CompressionLevel,
+  GOOD: 9 as CompressionLevel,
+  BETTER: 15 as CompressionLevel,
+  BEST: 19 as CompressionLevel,
+  ULTRA: 22 as CompressionLevel
+} as const
+
+type CompressionPresetKey = keyof typeof CompressionPreset
 
 // ─── Local tokens ─────────────────────────────────────────────────────────────
 const FONT_MONO = "'Fira Mono', 'JetBrains Mono', monospace"
 
-// ─── MIME validation ──────────────────────────────────────────────────────────
+// ─── Risk band colors ─────────────────────────────────────────────────────────
+const RISK_BAND_COLOR: Record<NonNullable<FileScanResult['riskBand']>, string> = {
+  clean: '#10b981',
+  low_risk: '#84cc16',
+  moderate_risk: '#f59e0b',
+  high_risk: '#ef4444',
+  critical_risk: '#dc2626'
+}
+
+const RISK_BAND_BG: Record<NonNullable<FileScanResult['riskBand']>, string> = {
+  clean: 'rgba(16, 185, 129, 0.08)',
+  low_risk: 'rgba(132, 204, 22, 0.08)',
+  moderate_risk: 'rgba(245, 158, 11, 0.08)',
+  high_risk: 'rgba(239, 68, 68, 0.08)',
+  critical_risk: 'rgba(220, 38, 38, 0.1)'
+}
+
+const RISK_BAND_LABEL: Record<NonNullable<FileScanResult['riskBand']>, string> = {
+  clean: 'Clean',
+  low_risk: 'Low Risk',
+  moderate_risk: 'Moderate Risk',
+  high_risk: 'High Risk',
+  critical_risk: 'Critical Risk'
+}
+
+const SEVERITY_ICON: Record<RuleSeverity, string> = {
+  danger: '❌',
+  critical: '⛔',
+  high: '🔴',
+  medium: '🟡',
+  low: '🔵',
+  info: '⚪'
+}
+
+const SEVERITY_COLOR: Record<RuleSeverity, string> = {
+  danger: '#f70606',
+  critical: '#dc2626',
+  high: '#ef4444',
+  medium: '#f59e0b',
+  low: '#6366f1',
+  info: '#6b7280'
+}
+
+// ─── Compression preset metadata ─────────────────────────────────────────────
+
 /**
- * Full encryption allowlist — mirrors KNOWN_MIME_TYPES in
- * @majikah/majik-file/core/crypto/constants.ts
- *
- * Kept in-component so the UI can validate before even calling encryptFile().
- * Update both this set and constants.ts together when adding new formats.
+ * Display metadata for each CompressionPreset entry.
+ * label    — short pill text
+ * hint     — tooltip / sub-label shown below the pill row
+ * level    — the numeric Zstd level for display purposes
  */
+const PRESET_META: Record<CompressionPresetKey, { label: string; hint: string; level: number }> = {
+  FASTEST: {
+    label: 'Fastest',
+    hint: 'Lv 2 · Speed-first, minimal CPU',
+    level: 2
+  },
+  FAST: { label: 'Fast', hint: 'Lv 3 · Zstd default fast mode', level: 3 },
+  BALANCED: {
+    label: 'Balanced',
+    hint: 'Lv 6 · Best ratio-per-ms inflection point',
+    level: 6
+  },
+  GOOD: {
+    label: 'Good',
+    hint: 'Lv 9 · Recommended for most uploads',
+    level: 9
+  },
+  BETTER: {
+    label: 'Better',
+    hint: 'Lv 15 · High-effort, documents & code',
+    level: 15
+  },
+  BEST: { label: 'Best', hint: 'Lv 19 · Near-maximum, WASM-safe', level: 19 },
+  ULTRA: {
+    label: 'Ultra',
+    hint: 'Lv 22 · Archival; auto-clamped on large files',
+    level: 22
+  }
+}
+
+// Ordered left-to-right for the pill row
+const PRESET_ORDER: CompressionPresetKey[] = [
+  'FASTEST',
+  'FAST',
+  'BALANCED',
+  'GOOD',
+  'BETTER',
+  'BEST',
+  'ULTRA'
+]
+
+/**
+ * Mirrors MajikCompressor.adaptiveLevel() thresholds so we can display the
+ * effective level after adaptive clamping WITHOUT importing the WASM module.
+ *
+ * Kept in sync with the thresholds in majik-compressor.ts.
+ */
+function resolveAdaptiveLevel(
+  fileSizeBytes: number,
+  desiredPreset: CompressionPresetKey
+): { effective: number; wasClamped: boolean } {
+  const desired = CompressionPreset[desiredPreset] as number
+  const thresholds: { minBytes: number; maxLevel: number }[] = [
+    { minBytes: 500 * 1024 * 1024, maxLevel: 6 },
+    { minBytes: 100 * 1024 * 1024, maxLevel: 12 },
+    { minBytes: 50 * 1024 * 1024, maxLevel: 16 },
+    { minBytes: 10 * 1024 * 1024, maxLevel: 19 }
+  ]
+  for (const { minBytes, maxLevel } of thresholds) {
+    if (fileSizeBytes > minBytes) {
+      const effective = Math.min(desired, maxLevel)
+      return { effective, wasClamped: effective < desired }
+    }
+  }
+  return { effective: desired, wasClamped: false }
+}
+
+// ─── MIME validation ──────────────────────────────────────────────────────────
 export const ALLOWED_MIME_TYPES = new Set([
-  // Images
   'image/png',
   'image/jpeg',
   'image/gif',
@@ -34,7 +189,6 @@ export const ALLOWED_MIME_TYPES = new Set([
   'image/x-canon-cr2',
   'image/x-nikon-nef',
   'image/x-sony-arw',
-  // Video
   'video/mp4',
   'video/webm',
   'video/ogg',
@@ -48,7 +202,6 @@ export const ALLOWED_MIME_TYPES = new Set([
   'video/x-ms-wmv',
   'video/mp2t',
   'video/x-m4v',
-  // Audio
   'audio/mpeg',
   'audio/ogg',
   'audio/wav',
@@ -63,7 +216,6 @@ export const ALLOWED_MIME_TYPES = new Set([
   'audio/opus',
   'audio/amr',
   'audio/mp4',
-  // Documents
   'application/pdf',
   'application/msword',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -76,7 +228,6 @@ export const ALLOWED_MIME_TYPES = new Set([
   'application/vnd.oasis.opendocument.presentation',
   'application/rtf',
   'text/rtf',
-  // Text / Code
   'text/plain',
   'text/html',
   'text/css',
@@ -108,8 +259,8 @@ export const ALLOWED_MIME_TYPES = new Set([
   'application/x-httpd-php',
   'application/x-sql',
   'text/x-lua',
-  // Archives
   'application/zip',
+  'application/x-zip-compressed',
   'application/x-rar-compressed',
   'application/x-rar',
   'application/x-7z-compressed',
@@ -121,7 +272,6 @@ export const ALLOWED_MIME_TYPES = new Set([
   'application/x-lzip',
   'application/x-zstd',
   'application/vnd.rar',
-  // Executables & Installers
   'application/x-msdownload',
   'application/vnd.microsoft.portable-executable',
   'application/x-msi',
@@ -131,14 +281,12 @@ export const ALLOWED_MIME_TYPES = new Set([
   'application/x-sh',
   'application/x-executable',
   'application/octet-stream',
-  // Fonts
   'font/ttf',
   'font/otf',
   'font/woff',
   'font/woff2',
   'application/font-woff',
   'application/vnd.ms-fontobject',
-  // 3D & Design
   'model/gltf+json',
   'model/gltf-binary',
   'model/obj',
@@ -146,45 +294,37 @@ export const ALLOWED_MIME_TYPES = new Set([
   'application/x-blender',
   'application/vnd.ms-3mfdocument',
   'application/x-fbx',
-  // Adobe Creative Suite
   'application/postscript',
   'application/x-indesign',
   'video/x-adobe-premiere',
   'application/x-adobe-after-effects',
   'application/x-xd',
-  // Design Tools
   'application/x-figma',
   'application/x-sketch',
   'application/x-affinity-designer',
   'application/x-affinity-photo',
-  // IDE / Config
   'application/x-vsix',
   'application/x-ipynb+json',
   'text/x-dockerfile',
   'application/x-env',
-  // Database
   'application/x-sqlite3',
   'application/vnd.sqlite3',
-  // eBook
   'application/epub+zip',
   'application/x-mobipocket-ebook',
   'application/vnd.amazon.ebook',
-  // Productivity
   'application/x-abiword',
   'application/vnd.visio',
   'application/x-iwork-pages-sffpages',
   'application/x-iwork-numbers-sffnumbers',
   'application/x-iwork-keynote-sffkey',
-  // Crypto / Certificates
   'application/x-pem-file',
   'application/x-pkcs12',
   'application/pkix-cert',
   'application/x-x509-ca-cert'
 ])
 
-const MJKB_MAGIC = new Uint8Array([0x4d, 0x4a, 0x4b, 0x42]) // "MJKB"
+const MJKB_MAGIC = new Uint8Array([0x4d, 0x4a, 0x4b, 0x42])
 
-/** Sniff the first 4 bytes to check if a file is a .mjkb binary */
 async function isMjkbFile(file: File): Promise<boolean> {
   try {
     const slice = await file.slice(0, 4).arrayBuffer()
@@ -195,7 +335,21 @@ async function isMjkbFile(file: File): Promise<boolean> {
   }
 }
 
-/** Format bytes to human-readable string */
+/**
+ * Full structural validation of a File as a .mjkb binary.
+ * Reads the entire file and delegates to MajikFile.isValidMJKB().
+ * Falls back to the cheap magic-byte check on read error.
+ */
+async function isFullyValidMjkbFile(file: File): Promise<boolean> {
+  try {
+    const buffer = await file.arrayBuffer()
+    return MajikFile.isValidMJKB(buffer)
+  } catch {
+    // Fallback to magic-byte check if we can't read the file
+    return isMjkbFile(file)
+  }
+}
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
@@ -203,7 +357,6 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
 }
 
-/** Derive a reasonable MIME from file extension when browser reports empty */
 function inferMimeFromName(name: string): string {
   const ext = name.split('.').pop()?.toLowerCase() ?? ''
   const map: Record<string, string> = {
@@ -282,8 +435,22 @@ function getFileIcon(mime: string): string {
   return '📁'
 }
 
+// ─── Scanner singleton ────────────────────────────────────────────────────────
+const scanner = new MajikFileScanner({
+  allowedMimeTypes: [...ALLOWED_MIME_TYPES]
+})
+let scannerReady = false
+
+async function ensureScanner(): Promise<void> {
+  if (!scannerReady) {
+    await scanner.initialize()
+    scannerReady = true
+  }
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Mode = 'encrypt' | 'decrypt'
+type ScanPhase = 'idle' | 'scanning' | 'clean' | 'flagged' | 'error'
 
 interface FileState {
   file: File
@@ -304,6 +471,8 @@ interface EncryptResult {
   originalSize: number
   encryptedSize: number
   hash: string
+  /** The effective Zstd level actually used (after adaptive clamping). */
+  effectiveCompressionLevel?: number
 }
 
 interface DecryptResult {
@@ -329,13 +498,23 @@ const progressSlide = keyframes`
   to   { transform: translateX(100%); }
 `
 
+const scannerPulse = keyframes`
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.5; }
+`
+
+const slideDown = keyframes`
+  from { opacity: 0; transform: translateY(-6px); max-height: 0; }
+  to   { opacity: 1; transform: translateY(0); max-height: 600px; }
+`
+
 // ─── Styled components ────────────────────────────────────────────────────────
 
 const Root = styled.div`
   width: 100%;
   display: flex;
   flex-direction: column;
-  gap: 0;
+  gap: 6px;
   color: ${({ theme }) => theme.colors.textPrimary};
 `
 
@@ -409,7 +588,7 @@ const EditorGrid = styled.div`
   }
 `
 
-const EditorPane = styled.div<{ $accent?: Mode | 'error' | null }>`
+const EditorPane = styled.div<{ $accent?: Mode | 'error' | 'flagged' | null }>`
   display: flex;
   flex-direction: column;
   border-radius: 12px;
@@ -419,6 +598,7 @@ const EditorPane = styled.div<{ $accent?: Mode | 'error' | null }>`
       if ($accent === 'encrypt') return theme.colors.primary
       if ($accent === 'decrypt') return theme.colors.brand.green
       if ($accent === 'error') return '#ef4444'
+      if ($accent === 'flagged') return '#ef4444'
       return theme.colors.primaryBackground
     }};
   transition: border-color 200ms ease;
@@ -432,6 +612,13 @@ const PaneHeader = styled.div`
   border-bottom: 1px solid ${({ theme }) => theme.colors.primarySoft};
   background: ${({ theme }) => theme.colors.secondaryBackground};
   flex-shrink: 0;
+`
+
+const PaneHeaderLeft = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
 `
 
 const PaneLabel = styled.span<{ $mode?: Mode | null }>`
@@ -451,7 +638,59 @@ const PaneLabel = styled.span<{ $mode?: Mode | null }>`
     opacity 200ms ease;
 `
 
-const PaneStatusBadge = styled.span<{ $variant: 'encrypt' | 'decrypt' | 'ready' | 'error' | null }>`
+const ScanPhaseBadge = styled.span<{ $phase: ScanPhase }>`
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border-radius: 100px;
+  font-family: ${FONT_MONO};
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+  flex-shrink: 0;
+  transition: all 200ms ease;
+
+  ${({ $phase }) => {
+    switch ($phase) {
+      case 'scanning':
+        return css`
+          background: rgba(251, 191, 36, 0.1);
+          color: #fbbf24;
+          border-color: rgba(251, 191, 36, 0.25);
+          animation: ${scannerPulse} 1.1s ease infinite;
+        `
+      case 'clean':
+        return css`
+          background: rgba(16, 185, 129, 0.08);
+          color: #10b981;
+          border-color: rgba(16, 185, 129, 0.2);
+        `
+      case 'flagged':
+        return css`
+          background: rgba(239, 68, 68, 0.1);
+          color: #ef4444;
+          border-color: rgba(239, 68, 68, 0.3);
+        `
+      case 'error':
+        return css`
+          background: rgba(251, 191, 36, 0.07);
+          color: #f59e0b;
+          border-color: rgba(251, 191, 36, 0.2);
+        `
+      default:
+        return css`
+          display: none;
+        `
+    }
+  }}
+`
+
+const PaneStatusBadge = styled.span<{
+  $variant: 'encrypt' | 'decrypt' | 'ready' | 'error' | null
+}>`
   display: inline-flex;
   align-items: center;
   padding: 2px 7px;
@@ -501,7 +740,415 @@ const PaneStatusBadge = styled.span<{ $variant: 'encrypt' | 'decrypt' | 'ready' 
   }}
 `
 
-// ─── Progress bar ──────────────────────────────────────────────────────────────
+// ─── Compression selector ─────────────────────────────────────────────────────
+
+const CompressionWrap = styled.div`
+  flex-shrink: 0;
+  padding: 9px 13px 10px;
+  border-top: 1px solid ${({ theme }) => theme.colors.primarySoft};
+  background: ${({ theme }) => theme.colors.secondaryBackground};
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  animation: ${fadeIn} 160ms cubic-bezier(0.4, 0, 0.2, 1) both;
+`
+
+const CompressionHeaderRow = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+`
+
+const CompressionLabel = styled.span`
+  font-family: ${FONT_MONO};
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  opacity: 0.45;
+`
+
+const CompressionHint = styled.span`
+  font-family: ${FONT_MONO};
+  font-size: 9px;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  opacity: 0.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+`
+
+// The pill row — same visual language as the mode switcher
+const CompressionPillRow = styled.div`
+  display: flex;
+  align-items: center;
+  background: ${({ theme }) => theme.colors.primaryBackground};
+  border: 1px solid ${({ theme }) => theme.colors.secondaryBackground};
+  border-radius: 9px;
+  padding: 3px;
+  gap: 2px;
+  overflow-x: auto;
+
+  /* Hide scrollbar but keep scrollability on small viewports */
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+`
+
+const CompressionPill = styled.button<{
+  $active: boolean
+  $presetKey: CompressionPresetKey
+}>`
+  flex-shrink: 0;
+  padding: 4px 11px;
+  border-radius: 7px;
+  font-family: ${FONT_MONO};
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  transition:
+    background 150ms ease,
+    color 150ms ease,
+    opacity 150ms ease;
+
+  ${({ $active, $presetKey, theme }) => {
+    // Ultra gets a warning tint since it can be auto-clamped
+    if ($active && $presetKey === 'ULTRA') {
+      return css`
+        background: rgba(245, 158, 11, 0.2);
+        color: #f59e0b;
+        border: 1px solid rgba(245, 158, 11, 0.35);
+      `
+    }
+    if ($active) {
+      return css`
+        background: ${theme.colors.primary};
+        color: ${theme.colors.primaryBackground};
+      `
+    }
+    return css`
+      background: transparent;
+      color: ${theme.colors.textSecondary};
+      opacity: 0.7;
+      &:hover {
+        color: ${theme.colors.textPrimary};
+        opacity: 1;
+      }
+    `
+  }}
+`
+
+// Adaptive clamp notice — shown when the selected preset will be downgraded
+const ClampNotice = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  background: rgba(245, 158, 11, 0.07);
+  border: 1px solid rgba(245, 158, 11, 0.18);
+  border-radius: 6px;
+  font-family: ${FONT_MONO};
+  font-size: 9px;
+  color: #f59e0b;
+  line-height: 1.5;
+  animation: ${fadeIn} 150ms ease both;
+`
+
+// ─── Scan bar ─────────────────────────────────────────────────────────────────
+
+const ScanBarWrap = styled.div<{ $phase: ScanPhase }>`
+  flex-shrink: 0;
+  border-top: 1px solid transparent;
+  transition: all 200ms ease;
+
+  ${({ $phase }) => {
+    switch ($phase) {
+      case 'scanning':
+        return css`
+          background: rgba(251, 191, 36, 0.03);
+          border-color: rgba(251, 191, 36, 0.08);
+        `
+      case 'clean':
+        return css`
+          background: rgba(16, 185, 129, 0.03);
+          border-color: rgba(16, 185, 129, 0.08);
+        `
+      case 'flagged':
+        return css`
+          background: rgba(239, 68, 68, 0.04);
+          border-color: rgba(239, 68, 68, 0.12);
+        `
+      case 'error':
+        return css`
+          background: rgba(251, 191, 36, 0.03);
+          border-color: rgba(251, 191, 36, 0.08);
+        `
+      default:
+        return css`
+          display: none;
+        `
+    }
+  }}
+`
+
+const ScanBarRow = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 13px;
+  font-family: ${FONT_MONO};
+  font-size: 10px;
+`
+
+const ScorePill = styled.div<{
+  $band: FileScanResult['riskBand']
+  $pulsing?: boolean
+}>`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-family: ${FONT_MONO};
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  flex-shrink: 0;
+  border: 1.5px solid ${({ $band }) => RISK_BAND_COLOR[$band] ?? '#6b7280'};
+  color: ${({ $band }) => RISK_BAND_COLOR[$band] ?? '#6b7280'};
+  background: ${({ $band }) => RISK_BAND_BG[$band] ?? 'transparent'};
+  transition: all 200ms ease;
+  ${({ $pulsing }) =>
+    $pulsing &&
+    css`
+      opacity: 0.3;
+      animation: ${scannerPulse} 1.1s ease infinite;
+    `}
+`
+
+const ScanBarMeta = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+`
+
+const ScanBarStatusLine = styled.div<{
+  $band?: FileScanResult['riskBand']
+  $pulsing?: boolean
+}>`
+  font-family: ${FONT_MONO};
+  font-size: 10px;
+  font-weight: 600;
+  color: ${({ $band }) => ($band ? (RISK_BAND_COLOR[$band] ?? '#6b7280') : '#fbbf24')};
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  ${({ $pulsing }) =>
+    $pulsing &&
+    css`
+      animation: ${scannerPulse} 1.1s ease infinite;
+    `}
+`
+
+const ScanBarSubline = styled.div`
+  font-family: ${FONT_MONO};
+  font-size: 9px;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  opacity: 0.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+`
+
+const ScanDetailsToggle = styled.button<{
+  $phase: ScanPhase
+  $open: boolean
+}>`
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 5px;
+  font-family: ${FONT_MONO};
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 120ms ease;
+
+  ${({ $phase, $open }) => {
+    const phaseColor: Record<ScanPhase, string> = {
+      clean: '#10b981',
+      flagged: '#ef4444',
+      error: '#f59e0b',
+      scanning: '#fbbf24',
+      idle: '#6b7280'
+    }
+    const c = phaseColor[$phase] ?? '#6b7280'
+    return css`
+      color: ${c};
+      border-color: ${$open ? c : 'transparent'};
+      background: ${$open ? `rgba(0,0,0,0.12)` : 'transparent'};
+      opacity: 0.75;
+      &:hover {
+        opacity: 1;
+        border-color: ${c};
+        background: rgba(0, 0, 0, 0.1);
+      }
+    `
+  }}
+`
+
+const ScanDetailPanel = styled.div`
+  overflow: hidden;
+  animation: ${slideDown} 200ms cubic-bezier(0.4, 0, 0.2, 1) both;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+`
+
+const ScanDetailInner = styled.div`
+  padding: 10px 13px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 260px;
+  overflow-y: auto;
+
+  &::-webkit-scrollbar {
+    width: 3px;
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+  }
+`
+
+const ScanStatsRow = styled.div`
+  display: flex;
+  gap: 6px;
+`
+
+const ScanStatCell = styled.div<{ $color?: string }>`
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 6px;
+`
+
+const ScanStatLabel = styled.div`
+  font-family: ${FONT_MONO};
+  font-size: 8px;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  opacity: 0.45;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+`
+
+const ScanStatValue = styled.div<{ $color?: string }>`
+  font-family: ${FONT_MONO};
+  font-size: 11px;
+  font-weight: 700;
+  color: ${({ $color }) => $color ?? 'inherit'};
+`
+
+const RemarkList = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+`
+
+const RemarkSectionLabel = styled.div`
+  font-family: ${FONT_MONO};
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  opacity: 0.4;
+  padding: 2px 0 0;
+`
+
+const RemarkRow = styled.div<{ $severity: RuleSeverity }>`
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-left: 2px solid ${({ $severity }) => SEVERITY_COLOR[$severity]};
+  animation: ${fadeIn} 150ms ease both;
+`
+
+const RemarkIcon = styled.div<{ $severity: RuleSeverity }>`
+  font-size: 10px;
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: ${({ $severity }) => SEVERITY_COLOR[$severity]};
+`
+
+const RemarkBody = styled.div`
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+`
+
+const RemarkRule = styled.div`
+  font-family: ${FONT_MONO};
+  font-size: 9px;
+  font-weight: 700;
+  color: ${({ theme }) => theme.colors.textPrimary};
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+`
+
+const RemarkDesc = styled.div`
+  font-family: ${FONT_MONO};
+  font-size: 9px;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  opacity: 0.6;
+  line-height: 1.45;
+`
+
+const RemarkDeduction = styled.div<{ $severity: RuleSeverity }>`
+  flex-shrink: 0;
+  font-family: ${FONT_MONO};
+  font-size: 9px;
+  font-weight: 700;
+  color: ${({ $severity }) => SEVERITY_COLOR[$severity]};
+  opacity: 0.8;
+  margin-top: 1px;
+`
+
+const InfoNote = styled.div`
+  font-family: ${FONT_MONO};
+  font-size: 9px;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  opacity: 0.35;
+  padding: 3px 0 0 2px;
+`
+
+// ─── Progress bar ─────────────────────────────────────────────────────────────
 
 const ProgressBarWrap = styled.div`
   height: 2px;
@@ -522,7 +1169,6 @@ const ProgressBarFill = styled.div<{ $progress: number; $mode: Mode }>`
       : `linear-gradient(90deg, ${theme.colors.brand.green}, #bef264)`};
   transition: width 400ms cubic-bezier(0.4, 0, 0.2, 1);
 
-  /* Shimmer while indeterminate */
   ${({ $progress }) =>
     $progress < 100 &&
     css`
@@ -679,7 +1325,6 @@ const FileClearBtn = styled.button`
   cursor: pointer;
   flex-shrink: 0;
   transition: all 100ms ease;
-
   &:hover {
     background: rgba(239, 68, 68, 0.08);
     color: #ef4444;
@@ -694,7 +1339,9 @@ const MimeRow = styled.div`
   flex-wrap: wrap;
 `
 
-const MimeChip = styled.span<{ $variant: 'source' | 'valid' | 'invalid' | 'neutral' | 'mjkb' }>`
+const MimeChip = styled.span<{
+  $variant: 'source' | 'valid' | 'invalid' | 'neutral' | 'mjkb'
+}>`
   font-family: ${FONT_MONO};
   font-size: 9px;
   padding: 2px 7px;
@@ -749,6 +1396,24 @@ const ErrorBar = styled.div`
   font-size: 10px;
   color: #ef4444;
   line-height: 1.55;
+`
+
+// ─── Nested .mjkb warning banner ──────────────────────────────────────────────
+
+const NestedMjkbBanner = styled.div`
+  margin: 0 14px 10px;
+  padding: 9px 11px;
+  background: rgba(245, 158, 11, 0.07);
+  border: 1px solid rgba(245, 158, 11, 0.22);
+  border-radius: 8px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-family: ${FONT_MONO};
+  font-size: 9px;
+  color: #f59e0b;
+  line-height: 1.55;
+  animation: ${fadeIn} 180ms ease both;
 `
 
 // ─── Output area ──────────────────────────────────────────────────────────────
@@ -835,7 +1500,9 @@ const ResultLabel = styled.span`
   flex-shrink: 0;
 `
 
-const ResultValue = styled.span<{ $accent?: Mode | 'neutral' }>`
+const ResultValue = styled.span<{
+  $accent?: Mode | 'neutral' | 'clean' | 'flagged' | 'warn'
+}>`
   font-family: ${FONT_MONO};
   font-size: 10px;
   font-weight: 600;
@@ -847,11 +1514,19 @@ const ResultValue = styled.span<{ $accent?: Mode | 'neutral' }>`
   color: ${({ $accent, theme }) => {
     if ($accent === 'encrypt') return theme.colors.primary
     if ($accent === 'decrypt') return theme.colors.brand.green
+    if ($accent === 'clean') return '#10b981'
+    if ($accent === 'flagged') return '#ef4444'
+    if ($accent === 'warn') return '#f59e0b'
     return theme.colors.textPrimary
   }};
 `
 
-// ─── Pane footer / buttons ────────────────────────────────────────────────────
+const ScanResultRow = styled(ResultRow)<{ $band?: FileScanResult['riskBand'] }>`
+  border-color: ${({ $band }) => ($band ? `${RISK_BAND_COLOR[$band]}33` : undefined)};
+  background: ${({ $band }) => ($band ? RISK_BAND_BG[$band] : undefined)};
+`
+
+// ─── Pane footer ─────────────────────────────────────────────────────────────
 
 const PaneFooter = styled.div`
   display: flex;
@@ -862,7 +1537,7 @@ const PaneFooter = styled.div`
   flex-shrink: 0;
 `
 
-const PaneBtn = styled.button<{ $variant?: 'encrypt' | 'decrypt' }>`
+const PaneBtn = styled.button<{ $variant?: 'encrypt' | 'decrypt' | 'warn' }>`
   flex: 1;
   padding: 6px 0;
   border-radius: 7px;
@@ -894,16 +1569,26 @@ const PaneBtn = styled.button<{ $variant?: 'encrypt' | 'decrypt' }>`
               color: ${theme.colors.primaryBackground};
             }
           `
-        : css`
-            background: transparent;
-            color: ${theme.colors.textSecondary};
-            border-color: ${theme.colors.primaryBackground};
-            &:hover {
-              background: ${theme.colors.primaryBackground};
-              color: ${theme.colors.textPrimary};
-              border-color: ${theme.colors.secondaryBackground};
-            }
-          `}
+        : $variant === 'warn'
+          ? css`
+              background: rgba(239, 68, 68, 0.08);
+              color: #ef4444;
+              border-color: rgba(239, 68, 68, 0.25);
+              &:hover {
+                background: #ef4444;
+                color: #fff;
+              }
+            `
+          : css`
+              background: transparent;
+              color: ${theme.colors.textSecondary};
+              border-color: ${theme.colors.primaryBackground};
+              &:hover {
+                background: ${theme.colors.primaryBackground};
+                color: ${theme.colors.textPrimary};
+                border-color: ${theme.colors.secondaryBackground};
+              }
+            `}
 
   &:active {
     opacity: 0.75;
@@ -954,9 +1639,213 @@ const StatValue = styled.div<{ $accent?: Mode | 'neutral' }>`
   }};
 `
 
+// ─── Scan phase helpers ───────────────────────────────────────────────────────
+
+function scanPhaseIcon(phase: ScanPhase): string {
+  switch (phase) {
+    case 'scanning':
+      return '◈'
+    case 'clean':
+      return '✓'
+    case 'flagged':
+      return '⚠'
+    case 'error':
+      return '~'
+    default:
+      return ''
+  }
+}
+
+function scanPhaseLabel(phase: ScanPhase): string {
+  switch (phase) {
+    case 'scanning':
+      return 'Scanning…'
+    case 'clean':
+      return 'Scan clean'
+    case 'flagged':
+      return 'Threat detected'
+    case 'error':
+      return 'Scan inconclusive'
+    default:
+      return ''
+  }
+}
+
+function scanResultAccent(phase: ScanPhase): 'clean' | 'flagged' | 'warn' | 'neutral' {
+  if (phase === 'clean') return 'clean'
+  if (phase === 'flagged') return 'flagged'
+  if (phase === 'error') return 'warn'
+  return 'neutral'
+}
+
+function scanBarShortLine(phase: ScanPhase, result: FileScanResult | null): string {
+  if (phase === 'scanning') return 'Running YARA scan locally — no data leaves your device…'
+  if (!result) return ''
+  if (phase === 'clean')
+    return `${result.remarks.length === 0 ? 'No threats detected' : 'All findings informational only'} · ${result.durationMs.toFixed(0)}ms`
+  if (phase === 'flagged') {
+    const top = result.remarks[0]
+    return top
+      ? `${result.remarks.length} rule(s) matched · worst: ${top.severity.toUpperCase()} [${top.rule}]`
+      : `${result.remarks.length} rule(s) matched`
+  }
+  if (phase === 'error') return 'Scan could not complete — result inconclusive'
+  return ''
+}
+
+// ─── ScanResultBar ────────────────────────────────────────────────────────────
+
+interface ScanResultBarProps {
+  phase: ScanPhase
+  result: FileScanResult | null
+  context: 'pre-encrypt' | 'post-decrypt'
+}
+
+const SEVERITY_ORDER_DISPLAY: RuleSeverity[] = [
+  'danger',
+  'critical',
+  'high',
+  'medium',
+  'low',
+  'info'
+]
+
+const ScanResultBar: React.FC<ScanResultBarProps> = ({ phase, result, context }) => {
+  const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (phase === 'scanning') setOpen(false)
+  }, [phase])
+
+  if (phase === 'idle') return null
+
+  const canExpand = phase !== 'scanning' && result !== null
+  const actionableCount = result?.remarks.filter((r) => r.severity !== 'info').length ?? 0
+  const infoCount = result?.remarks.filter((r) => r.severity === 'info').length ?? 0
+
+  return (
+    <ScanBarWrap $phase={phase}>
+      <ScanBarRow>
+        {phase !== 'scanning' && result ? (
+          <ScorePill $band={result.riskBand}>{result.score}</ScorePill>
+        ) : (
+          <ScorePill $band="clean" $pulsing>
+            —
+          </ScorePill>
+        )}
+
+        <ScanBarMeta>
+          {phase === 'scanning' ? (
+            <ScanBarStatusLine $pulsing>
+              {scanPhaseIcon(phase)} {scanPhaseLabel(phase)}
+            </ScanBarStatusLine>
+          ) : result ? (
+            <ScanBarStatusLine $band={result.riskBand}>
+              {scanPhaseIcon(phase)}&nbsp;
+              {RISK_BAND_LABEL[result.riskBand]}
+              &nbsp;·&nbsp;
+              <span style={{ fontWeight: 400, opacity: 0.65 }}>
+                {context === 'pre-encrypt' ? 'Pre-encrypt' : 'Post-decrypt'} scan
+              </span>
+            </ScanBarStatusLine>
+          ) : null}
+          <ScanBarSubline>{scanBarShortLine(phase, result)}</ScanBarSubline>
+        </ScanBarMeta>
+
+        {canExpand && (
+          <ScanDetailsToggle $phase={phase} $open={open} onClick={() => setOpen((v) => !v)}>
+            {open ? '▲ Hide' : '▼ Details'}
+          </ScanDetailsToggle>
+        )}
+      </ScanBarRow>
+
+      {open && result && (
+        <ScanDetailPanel>
+          <ScanDetailInner>
+            <ScanStatsRow>
+              <ScanStatCell>
+                <ScanStatLabel>Score</ScanStatLabel>
+                <ScanStatValue $color={RISK_BAND_COLOR[result.riskBand]}>
+                  {result.score}/100
+                </ScanStatValue>
+              </ScanStatCell>
+              <ScanStatCell>
+                <ScanStatLabel>Risk</ScanStatLabel>
+                <ScanStatValue $color={RISK_BAND_COLOR[result.riskBand]}>
+                  {RISK_BAND_LABEL[result.riskBand]}
+                </ScanStatValue>
+              </ScanStatCell>
+              <ScanStatCell>
+                <ScanStatLabel>Findings</ScanStatLabel>
+                <ScanStatValue $color={actionableCount > 0 ? '#ef4444' : '#10b981'}>
+                  {actionableCount > 0 ? `${actionableCount} flagged` : 'None'}
+                </ScanStatValue>
+              </ScanStatCell>
+              <ScanStatCell>
+                <ScanStatLabel>Duration</ScanStatLabel>
+                <ScanStatValue>{result.durationMs.toFixed(0)}ms</ScanStatValue>
+              </ScanStatCell>
+            </ScanStatsRow>
+
+            {result.remarks.length === 0 ? (
+              <InfoNote>✓ File passed all YARA rules — no signatures matched.</InfoNote>
+            ) : (
+              <RemarkList>
+                {SEVERITY_ORDER_DISPLAY.filter((sev) => sev !== 'info').map((sev) => {
+                  const group = result.remarks.filter((r) => r.severity === sev)
+                  if (group.length === 0) return null
+                  return (
+                    <React.Fragment key={sev}>
+                      <RemarkSectionLabel>
+                        {SEVERITY_ICON[sev]} {sev.toUpperCase()} · −{group[0].deduction} pts each
+                      </RemarkSectionLabel>
+                      {group.map((remark: ScanRemark) => (
+                        <RemarkRow key={remark.rule} $severity={remark.severity}>
+                          <RemarkIcon $severity={remark.severity}>
+                            {SEVERITY_ICON[remark.severity]}
+                          </RemarkIcon>
+                          <RemarkBody>
+                            <RemarkRule>{remark.rule}</RemarkRule>
+                            <RemarkDesc>{remark.description}</RemarkDesc>
+                          </RemarkBody>
+                          <RemarkDeduction $severity={remark.severity}>
+                            −{remark.deduction}
+                          </RemarkDeduction>
+                        </RemarkRow>
+                      ))}
+                    </React.Fragment>
+                  )
+                })}
+
+                {infoCount > 0 && (
+                  <InfoNote>
+                    ⚪ {infoCount} informational finding
+                    {infoCount > 1 ? 's' : ''} (no score impact) ·{' '}
+                    {result.remarks
+                      .filter((r) => r.severity === 'info')
+                      .map((r) => r.rule)
+                      .join(', ')}
+                  </InfoNote>
+                )}
+              </RemarkList>
+            )}
+          </ScanDetailInner>
+        </ScanDetailPanel>
+      )}
+    </ScanBarWrap>
+  )
+}
+
 // ─── Props ────────────────────────────────────────────────────────────────────
 export interface FileVaultProps {
-  onEncrypt: (file: File, mimeType: string) => Promise<EncryptResult>
+  // compressionLevel is forwarded through onEncrypt so the orchestrator
+  // can pass it directly into encryptFile() without the UI owning the crypto.
+  onEncrypt: (
+    file: File,
+    mimeType: string,
+    compressionLevel: CompressionLevel
+  ) => Promise<EncryptResult>
   onDecrypt: (file: File) => Promise<DecryptResult>
   onModeChange?: (mode: Mode) => void
   externalRefreshKey?: number
@@ -972,38 +1861,40 @@ const FileVault: React.FC<FileVaultProps> = ({
   decryptFile
 }) => {
   const [mode, setMode] = useState<Mode>('encrypt')
-
-  // File input state
   const [inputFile, setInputFile] = useState<FileState | null>(null)
   const [isDragging, setIsDragging] = useState(false)
-
-  // Processing state
   const [isProcessing, setIsProcessing] = useState(false)
   const [progress, setProgress] = useState(0)
   const [steps, setSteps] = useState<ProcessStep[]>([])
-
-  // Result state
   const [encryptResult, setEncryptResult] = useState<EncryptResult | null>(null)
   const [decryptResult, setDecryptResult] = useState<DecryptResult | null>(null)
   const [resultBlob, setResultBlob] = useState<Blob | null>(null)
+
+  // ── Compression preset selection (encrypt mode only) ─────────────────────
+  // Default to GOOD (lv 9) — strong compression without WASM risk on typical uploads.
+  const [selectedPreset, setSelectedPreset] = useState<CompressionPresetKey>('GOOD')
+
+  // ── Scan state ────────────────────────────────────────────────────────────
+  const [scanPhase, setScanPhase] = useState<ScanPhase>('idle')
+  const [scanResult, setScanResult] = useState<FileScanResult | null>(null)
+
+  // ── Double-encrypt detection ──────────────────────────────────────────────
+  // Set to true when a decrypted payload is itself a valid .mjkb binary.
+  const [decryptedIsNestedMjkb, setDecryptedIsNestedMjkb] = useState(false)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (!decryptFile) return
-
     setMode('decrypt')
-
     acceptDecryptFile(decryptFile)
-
-    // optional
     setTimeout(() => {
       handleDecrypt()
     }, 50)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [decryptFile])
 
-  // ── Helpers ─────────────────────────────────────────────────────────────────
+  // ── Helpers ──────────────────────────────────────────────────────────────
 
   const resetOutput = (): void => {
     setEncryptResult(null)
@@ -1011,6 +1902,9 @@ const FileVault: React.FC<FileVaultProps> = ({
     setResultBlob(null)
     setProgress(0)
     setSteps([])
+    setScanPhase('idle')
+    setScanResult(null)
+    setDecryptedIsNestedMjkb(false)
   }
 
   const handleSetMode = (next: Mode): void => {
@@ -1021,37 +1915,92 @@ const FileVault: React.FC<FileVaultProps> = ({
     onModeChange?.(next)
   }
 
-  // ── File validation ──────────────────────────────────────────────────────────
+  const runScan = async (file: File | Blob): Promise<FileScanResult> => {
+    setScanPhase('scanning')
+    setScanResult(null)
+    await ensureScanner()
+    const result = await scanner.scan(file)
+    const phase: ScanPhase =
+      result.status === 'clean' ? 'clean' : result.status === 'flagged' ? 'flagged' : 'error'
+    setScanPhase(phase)
+    setScanResult(result)
+    return result
+  }
 
   const validateEncryptFile = (file: File): { valid: boolean; mime: string; msg?: string } => {
+    if (file.name.toLowerCase().endsWith('.mjkb')) {
+      return {
+        valid: false,
+        mime: 'application/octet-stream',
+        msg: 'This file is already an encrypted .mjkb — use Decrypt mode instead.'
+      }
+    }
     const mime = file.type || inferMimeFromName(file.name)
     const allowed = ALLOWED_MIME_TYPES.has(mime)
     if (!allowed) {
       return {
         valid: false,
         mime,
-        msg: `File type "${mime}" is not in the allowed format list. Please select a supported file type.`
+        msg: `File type "${mime}" is not in the allowed format list.`
       }
     }
     return { valid: true, mime }
   }
 
   const acceptEncryptFile = async (file: File): Promise<void> => {
+    // Use full structural validation (MajikFile.isValidMJKB) rather than just
+    // checking magic bytes — catches truncated or malformed files early and
+    // avoids silently accepting a non-.mjkb binary with coincidental MJKB magic.
+    const looksLikeMjkb =
+      file.name.toLowerCase().endsWith('.mjkb') || (await isFullyValidMjkbFile(file))
+
+    if (looksLikeMjkb) {
+      // Auto-redirect to decrypt mode: the user almost certainly wants to open
+      // this file, not re-encrypt it. By design, double-encrypting is blocked.
+      setMode('decrypt')
+      onModeChange?.('decrypt')
+      resetOutput()
+      await acceptDecryptFile(file)
+      toast.info('Switched to Decrypt mode', {
+        description: 'This file is an encrypted .mjkb — loading it for decryption.',
+        id: 'toast-auto-switch-decrypt',
+        duration: 4000
+      })
+      return
+    }
+
     const { valid, mime, msg } = validateEncryptFile(file)
     setInputFile({ file, mime, valid, validationMsg: msg })
     resetOutput()
   }
 
   const acceptDecryptFile = async (file: File): Promise<void> => {
-    const valid = file.name.endsWith('.mjkb') || (await isMjkbFile(file))
-    const mime = 'application/octet-stream'
+    // Use full structural validation for decrypt input as well.
+
+    const looksLikeMjkb =
+      file.name.toLowerCase().endsWith('.mjkb') || (await isFullyValidMjkbFile(file))
+
+    if (!looksLikeMjkb) {
+      // Auto-redirect to decrypt mode: the user almost certainly wants to open
+      // this file, not re-encrypt it. By design, double-encrypting is blocked.
+      setMode('encrypt')
+      onModeChange?.('encrypt')
+      resetOutput()
+      await acceptEncryptFile(file)
+      toast.info('Switched to Encrypt mode', {
+        description: 'This file is not an encrypted .mjkb — loading it for encryption.',
+        id: 'toast-auto-switch-encrypt',
+        duration: 4000
+      })
+      return
+    }
     setInputFile({
       file,
-      mime,
-      valid,
-      validationMsg: valid
+      mime: 'application/octet-stream',
+      valid: looksLikeMjkb,
+      validationMsg: looksLikeMjkb
         ? undefined
-        : "This file is not a valid .mjkb binary. The magic bytes don't match — it may be corrupted or not encrypted with Majik File."
+        : "This file is not a valid .mjkb binary. Magic bytes or header don't match."
     })
     resetOutput()
   }
@@ -1061,7 +2010,8 @@ const FileVault: React.FC<FileVaultProps> = ({
     setIsDragging(false)
     const file = e.dataTransfer.files?.[0]
     if (!file) return
-    mode === 'encrypt' ? await acceptEncryptFile(file) : await acceptDecryptFile(file)
+    if (mode === 'encrypt') await acceptEncryptFile(file)
+    else await acceptDecryptFile(file)
   }
 
   const handleBrowse = (): void => {
@@ -1071,8 +2021,8 @@ const FileVault: React.FC<FileVaultProps> = ({
   const handleFileInputChange = async (e: React.ChangeEvent<HTMLInputElement>): Promise<void> => {
     const file = e.target.files?.[0]
     if (!file) return
-    mode === 'encrypt' ? await acceptEncryptFile(file) : await acceptDecryptFile(file)
-    // Reset so the same file can be re-selected
+    if (mode === 'encrypt') await acceptEncryptFile(file)
+    else await acceptDecryptFile(file)
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
@@ -1081,22 +2031,38 @@ const FileVault: React.FC<FileVaultProps> = ({
     resetOutput()
   }
 
-  // ── Encrypt ──────────────────────────────────────────────────────────────────
+  // ── Encrypt ───────────────────────────────────────────────────────────────
 
   const handleEncrypt = async (): Promise<void> => {
     if (!inputFile?.valid || !inputFile.file) return
-
     setIsProcessing(true)
-    setProgress(10)
+    setProgress(5)
     setSteps([
-      { label: '① Hash', done: false, active: true },
-      { label: '② Compress', done: false, active: false },
-      { label: '③ ML-KEM encapsulate', done: false, active: false },
-      { label: '④ AES-GCM encrypt', done: false, active: false }
+      { label: '① Scan', done: false, active: true },
+      { label: '② Hash', done: false, active: false },
+      { label: '③ Compress', done: false, active: false },
+      { label: '④ ML-KEM encapsulate', done: false, active: false },
+      { label: '⑤ AES-GCM encrypt', done: false, active: false }
     ])
 
     try {
-      // Simulate step progression while the real work happens
+      const scan = await runScan(inputFile.file)
+
+      if (scan.status === 'flagged' && scan.score <= 70) {
+        toast.error('File blocked — threat detected', {
+          description: `Score: ${scan.score}/100 · ${scan.remarks.length} rule(s) matched`,
+          id: 'toast-scan-blocked',
+          duration: 8000
+        })
+        return
+      }
+
+      if (scan.status === 'error') {
+        toast.warning('Scan inconclusive — proceeding with caution', {
+          id: 'toast-scan-error'
+        })
+      }
+
       const tick = (p: number, stepIdx: number): void => {
         setProgress(p)
         setSteps((prev) =>
@@ -1109,10 +2075,14 @@ const FileVault: React.FC<FileVaultProps> = ({
       }
 
       tick(25, 1)
-      const result = await onEncrypt(inputFile.file, inputFile.mime)
-      tick(80, 2)
-      await new Promise((r) => setTimeout(r, 120)) // let the UI update
-      tick(95, 3)
+
+      // Pass the selected preset's numeric level to the orchestrator
+      const compressionLevel = CompressionPreset[selectedPreset]
+      const result = await onEncrypt(inputFile.file, inputFile.mime, compressionLevel)
+
+      tick(80, 3)
+      await new Promise((r) => setTimeout(r, 120))
+      tick(95, 4)
       await new Promise((r) => setTimeout(r, 80))
 
       setProgress(100)
@@ -1120,8 +2090,17 @@ const FileVault: React.FC<FileVaultProps> = ({
       setEncryptResult(result)
       setResultBlob(result.binary)
 
+      // Compute the effective level for the toast description
+      const { effective, wasClamped } = resolveAdaptiveLevel(inputFile.file.size, selectedPreset)
+
+      const desired = CompressionPreset[selectedPreset] as number
+
+      const clampNote = wasClamped
+        ? ` · auto-clamped lv ${desired} → ${effective}`
+        : ` · lv ${effective}`
+
       toast.success('File encrypted', {
-        description: `${inputFile.file.name} → .mjkb (${formatBytes(result.encryptedSize)})`,
+        description: `${inputFile.file.name} → .mjkb (${formatBytes(result.encryptedSize)}) · Zstd${clampNote}`,
         id: 'toast-encrypt-success'
       })
     } catch (err) {
@@ -1134,18 +2113,21 @@ const FileVault: React.FC<FileVaultProps> = ({
     }
   }
 
-  // ── Decrypt ──────────────────────────────────────────────────────────────────
+  // ── Decrypt ───────────────────────────────────────────────────────────────
 
   const handleDecrypt = async (): Promise<void> => {
     if (!inputFile?.valid || !inputFile.file) return
-
     setIsProcessing(true)
     setProgress(15)
+    setScanPhase('idle')
+    setScanResult(null)
+    setDecryptedIsNestedMjkb(false)
     setSteps([
       { label: '① Parse .mjkb', done: false, active: true },
       { label: '② ML-KEM decapsulate', done: false, active: false },
       { label: '③ AES-GCM decrypt', done: false, active: false },
-      { label: '④ Decompress', done: false, active: false }
+      { label: '④ Decompress', done: false, active: false },
+      { label: '⑤ Scan plaintext', done: false, active: false }
     ])
 
     try {
@@ -1162,20 +2144,54 @@ const FileVault: React.FC<FileVaultProps> = ({
 
       tick(30, 1)
       const result = await onDecrypt(inputFile.file)
-      tick(75, 2)
+      tick(70, 3)
       await new Promise((r) => setTimeout(r, 100))
-      tick(92, 3)
+      tick(85, 4)
       await new Promise((r) => setTimeout(r, 80))
+
+      // ── Double-encrypt guard ─────────────────────────────────────────────
+      // Check whether the decrypted plaintext is itself a valid .mjkb binary.
+      // This indicates the user encrypted an already-encrypted file — which
+      // is blocked at the upload stage but could have been produced externally.
+      const decryptedBytes = await result.binary.arrayBuffer()
+      const isNestedMjkb = MajikFile.isValidMJKB(decryptedBytes)
+      setDecryptedIsNestedMjkb(isNestedMjkb)
+
+      if (isNestedMjkb) {
+        toast.warning('Nested .mjkb detected', {
+          description:
+            'The decrypted file is itself an encrypted .mjkb. This file was double-encrypted — decrypt it again to recover the original.',
+          id: 'toast-nested-mjkb',
+          duration: 8000
+        })
+      }
+
+      const plainFile = new File([result.binary], result.originalName, {
+        type: result.mimeType
+      })
+      const scan = await runScan(plainFile)
+
+      if (scan.status === 'flagged') {
+        toast.error('Threat detected in decrypted file', {
+          description: `Score: ${scan.score}/100 · ${scan.remarks.length} rule(s) matched · ${RISK_BAND_LABEL[scan.riskBand]}`,
+          id: 'toast-scan-decrypt-flagged',
+          duration: 8000
+        })
+      } else if (scan.status === 'error') {
+        toast.warning('Post-decrypt scan inconclusive', {
+          id: 'toast-scan-decrypt-error'
+        })
+      } else if (!isNestedMjkb) {
+        toast.success('File decrypted — scan clean', {
+          description: `Recovered: ${result.originalName} (${formatBytes(result.originalSize)}) · Score: ${scan.score}/100`,
+          id: 'toast-decrypt-success'
+        })
+      }
 
       setProgress(100)
       setSteps((prev) => prev.map((s) => ({ ...s, done: true, active: false })))
       setDecryptResult(result)
       setResultBlob(result.binary)
-
-      toast.success('File decrypted', {
-        description: `Recovered: ${result.originalName} (${formatBytes(result.originalSize)})`,
-        id: 'toast-decrypt-success'
-      })
     } catch (err) {
       toast.error('Decryption failed', {
         description: err instanceof Error ? err.message : String(err),
@@ -1186,9 +2202,9 @@ const FileVault: React.FC<FileVaultProps> = ({
     }
   }
 
-  // ── Download ─────────────────────────────────────────────────────────────────
+  // ── Download ──────────────────────────────────────────────────────────────
 
-  const handleDownload = useCallback((): void => {
+  const handleDownload = useCallback(async (): Promise<void> => {
     if (!resultBlob) return
 
     let filename: string
@@ -1198,6 +2214,13 @@ const FileVault: React.FC<FileVaultProps> = ({
       filename = `${encryptResult.originalName.replace(/\.[^.]+$/, '')}_${encryptResult.hash.slice(0, 8)}.mjkb`
       type = 'application/octet-stream'
     } else if (mode === 'decrypt' && decryptResult) {
+      if (scanPhase === 'flagged') {
+        toast.warning('Downloading flagged file — proceed with caution', {
+          description: 'A YARA rule matched this file. Save to an isolated location.',
+          id: 'toast-download-flagged',
+          duration: 6000
+        })
+      }
       filename = decryptResult.originalName
       type = decryptResult.mimeType
     } else {
@@ -1211,18 +2234,20 @@ const FileVault: React.FC<FileVaultProps> = ({
     a.click()
     URL.revokeObjectURL(url)
 
-    toast.success('Download started', {
-      description: filename,
-      id: 'toast-download'
-    })
-  }, [mode, resultBlob, encryptResult, decryptResult])
+    if (scanPhase !== 'flagged') {
+      toast.success('Download started', {
+        description: filename,
+        id: 'toast-download'
+      })
+    }
+  }, [mode, resultBlob, encryptResult, decryptResult, scanPhase])
 
-  // ── Derived state ─────────────────────────────────────────────────────────────
+  // ── Derived state ─────────────────────────────────────────────────────────
 
   const hasValidInput = !!inputFile?.valid
   const hasResult = mode === 'encrypt' ? !!encryptResult : !!decryptResult
+  const outputAccent = !hasResult ? null : scanPhase === 'flagged' ? 'flagged' : mode
   const inputAccent = !inputFile ? mode : inputFile.valid ? mode : 'error'
-
   const outputBadgeVariant = isProcessing ? mode : hasResult ? 'ready' : null
 
   const compressionRatio =
@@ -1230,14 +2255,32 @@ const FileVault: React.FC<FileVaultProps> = ({
       ? Math.round((1 - encryptResult.encryptedSize / encryptResult.originalSize) * 100)
       : null
 
-  // ── Render ────────────────────────────────────────────────────────────────────
+  const downloadLabel = !hasResult
+    ? mode === 'encrypt'
+      ? 'Download .mjkb'
+      : 'Download File'
+    : scanPhase === 'flagged'
+      ? '⚠ Download Anyway'
+      : mode === 'encrypt'
+        ? 'Download .mjkb'
+        : 'Download File'
+
+  const downloadVariant = scanPhase === 'flagged' ? 'warn' : hasResult ? mode : undefined
+
+  // Pre-compute the adaptive clamp info for the current file + preset selection
+  // so we can show it live in the UI without waiting for encryption to run.
+  const adaptiveInfo =
+    inputFile?.valid && mode === 'encrypt'
+      ? resolveAdaptiveLevel(inputFile.file.size, selectedPreset)
+      : null
+
+  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <Root>
-      {/* ── Content header ── */}
+    <Root id="section-file-vault">
       <ContentHeader>
         <ContentLabel>File Content</ContentLabel>
-        <ModeSwitcher>
+        <ModeSwitcher id="file-vault-mode-toggle">
           <ModePill
             $active={mode === 'encrypt'}
             $mode="encrypt"
@@ -1255,7 +2298,6 @@ const FileVault: React.FC<FileVaultProps> = ({
         </ModeSwitcher>
       </ContentHeader>
 
-      {/* Hidden file input */}
       <input
         ref={fileInputRef}
         type="file"
@@ -1264,8 +2306,9 @@ const FileVault: React.FC<FileVaultProps> = ({
         onChange={handleFileInputChange}
       />
 
-      <EditorGrid>
-        <EditorPane $accent={inputAccent}>
+      <EditorGrid id="file-vault-editor-grid">
+        {/* ── INPUT PANE ── */}
+        <EditorPane $accent={inputAccent} id="file-vault-input-pane">
           <PaneHeader>
             <PaneLabel $mode={inputFile?.valid ? mode : null}>
               {mode === 'encrypt' ? 'Source File' : 'Source .mjkb'}
@@ -1276,6 +2319,7 @@ const FileVault: React.FC<FileVaultProps> = ({
           </PaneHeader>
 
           <DropZone
+            id="file-vault-drop-zone"
             $hasFile={!!inputFile}
             $isDragging={isDragging}
             $mode={mode}
@@ -1289,13 +2333,17 @@ const FileVault: React.FC<FileVaultProps> = ({
             onClick={handleBrowse}
           >
             {!inputFile ? (
-              // ── Empty state ──
               <>
                 <DropIconWrap $mode={mode}>
                   {mode === 'encrypt' ? <FolderIcon size={28} /> : <KeyIcon size={28} />}
                 </DropIconWrap>
                 <div
-                  style={{ display: 'flex', flexDirection: 'column', gap: 5, alignItems: 'center' }}
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 5,
+                    alignItems: 'center'
+                  }}
                 >
                   <DropTitle>
                     {mode === 'encrypt'
@@ -1310,7 +2358,6 @@ const FileVault: React.FC<FileVaultProps> = ({
                 </div>
               </>
             ) : (
-              // ── File selected ──
               <FileCard onClick={(e) => e.stopPropagation()}>
                 <FileRow $invalid={!inputFile.valid}>
                   <FileLeft>
@@ -1324,7 +2371,6 @@ const FileVault: React.FC<FileVaultProps> = ({
                   </FileLeft>
                   <FileClearBtn onClick={handleClearInput}>✕ Remove</FileClearBtn>
                 </FileRow>
-
                 {inputFile.valid ? (
                   <MimeRow>
                     <MimeChip $variant="neutral">Format</MimeChip>
@@ -1345,7 +2391,50 @@ const FileVault: React.FC<FileVaultProps> = ({
             )}
           </DropZone>
 
-          <PaneFooter>
+          {/*
+           * ── Compression preset selector ─────────────────────────────────
+           * Only rendered in encrypt mode when a valid file is loaded.
+           * Hidden in decrypt mode — Zstd level is embedded in the .mjkb
+           * context field and resolved automatically on decompress.
+           */}
+          {mode === 'encrypt' && inputFile?.valid && (
+            <CompressionWrap id="file-vault-compression-selector">
+              <CompressionHeaderRow>
+                <CompressionLabel>Compression</CompressionLabel>
+                {/* Live hint: shows selected preset's description, or clamp notice */}
+                <CompressionHint>{PRESET_META[selectedPreset].hint}</CompressionHint>
+              </CompressionHeaderRow>
+
+              <CompressionPillRow>
+                {PRESET_ORDER.map((key) => (
+                  <CompressionPill
+                    key={key}
+                    $active={selectedPreset === key}
+                    $presetKey={key}
+                    onClick={() => setSelectedPreset(key)}
+                    title={PRESET_META[key].hint}
+                  >
+                    {PRESET_META[key].label}
+                  </CompressionPill>
+                ))}
+              </CompressionPillRow>
+
+              {/* Adaptive clamp warning — only shown when the selected level
+                  would be automatically reduced for this file's size. */}
+              {adaptiveInfo?.wasClamped && (
+                <ClampNotice>
+                  <span style={{ flexShrink: 0 }}>⚡</span>
+                  <span>
+                    {selectedPreset} (lv {CompressionPreset[selectedPreset]}) will be auto-clamped
+                    to lv {adaptiveInfo.effective} for this file size to prevent out-of-memory
+                    errors.
+                  </span>
+                </ClampNotice>
+              )}
+            </CompressionWrap>
+          )}
+
+          <PaneFooter id="file-vault-input-footer">
             <PaneBtn onClick={handleBrowse}>
               {mode === 'encrypt' ? 'Browse File' : 'Browse .mjkb'}
             </PaneBtn>
@@ -1354,22 +2443,47 @@ const FileVault: React.FC<FileVaultProps> = ({
             </PaneBtn>
           </PaneFooter>
         </EditorPane>
+
         {/* ── OUTPUT PANE ── */}
-        <EditorPane $accent={hasResult ? mode : null}>
+        <EditorPane $accent={outputAccent} id="file-vault-output-pane">
           <PaneHeader>
-            <PaneLabel $mode={hasResult ? mode : null}>
-              {mode === 'encrypt' ? 'Encrypted Output' : 'Decrypted File'}
-            </PaneLabel>
+            <PaneHeaderLeft>
+              <PaneLabel $mode={hasResult ? mode : null}>
+                {mode === 'encrypt' ? 'Encrypted Output' : 'Decrypted File'}
+              </PaneLabel>
+              {scanPhase !== 'idle' && (
+                <ScanPhaseBadge $phase={scanPhase}>
+                  {scanPhaseIcon(scanPhase)} {scanPhaseLabel(scanPhase)}
+                </ScanPhaseBadge>
+              )}
+            </PaneHeaderLeft>
             <PaneStatusBadge $variant={outputBadgeVariant}>
               {isProcessing ? 'Processing…' : hasResult ? 'Ready' : 'Waiting'}
             </PaneStatusBadge>
           </PaneHeader>
 
-          {/* Progress bar */}
           {isProcessing && (
             <ProgressBarWrap>
               <ProgressBarFill $progress={progress} $mode={mode} />
             </ProgressBarWrap>
+          )}
+
+          {/*
+           * ── Nested .mjkb warning ────────────────────────────────────────
+           * Shown after a decrypt completes when the recovered payload is
+           * itself a structurally valid .mjkb binary — indicating double-encryption.
+           * Positioned above the output area so it's impossible to miss.
+           */}
+          {!isProcessing && decryptedIsNestedMjkb && (
+            <NestedMjkbBanner>
+              <span style={{ flexShrink: 0, fontSize: 13 }}>⚠</span>
+              <span>
+                <strong>Nested .mjkb detected.</strong> The decrypted file is itself an encrypted
+                .mjkb — this file was double-encrypted. Download it and decrypt again to recover the
+                original plaintext. By design, Majik Message does not permit encrypting an already
+                encrypted .mjkb.
+              </span>
+            </NestedMjkbBanner>
           )}
 
           <OutputArea $hasResult={isProcessing || hasResult}>
@@ -1400,44 +2514,85 @@ const FileVault: React.FC<FileVaultProps> = ({
               </ProcessStepsWrap>
             )}
 
-            {!isProcessing && mode === 'encrypt' && encryptResult && (
-              <ResultCard>
-                <ResultRow>
-                  <ResultLabel>Output file</ResultLabel>
-                  <ResultValue $accent="encrypt" data-private>
-                    {encryptResult.originalName.replace(/\.[^.]+$/, '')}_
-                    {encryptResult.hash.slice(0, 8)}.mjkb
-                  </ResultValue>
-                </ResultRow>
-                <ResultRow>
-                  <ResultLabel>Cipher</ResultLabel>
-                  <ResultValue $accent="neutral">ML-KEM-768 + AES-256-GCM</ResultValue>
-                </ResultRow>
-                <ResultRow>
-                  <ResultLabel>Original size</ResultLabel>
-                  <ResultValue $accent="neutral" data-private>
-                    {formatBytes(encryptResult.originalSize)}
-                  </ResultValue>
-                </ResultRow>
-                <ResultRow>
-                  <ResultLabel>Encrypted size</ResultLabel>
-                  <ResultValue $accent="encrypt" data-private>
-                    {formatBytes(encryptResult.encryptedSize)}
-                  </ResultValue>
-                </ResultRow>
-                <ResultRow>
-                  <ResultLabel>SHA-256</ResultLabel>
-                  <ResultValue
-                    $accent="neutral"
-                    style={{ fontSize: 9, letterSpacing: '0.03em' }}
-                    data-private
-                  >
-                    {encryptResult.hash.slice(0, 24)}…
-                  </ResultValue>
-                </ResultRow>
-              </ResultCard>
-            )}
+            {/* ── Encrypt result ── */}
+            {!isProcessing &&
+              mode === 'encrypt' &&
+              encryptResult &&
+              (() => {
+                // Compute the effective level once for display in the result card
+                const { effective, wasClamped } = resolveAdaptiveLevel(
+                  encryptResult.originalSize,
+                  selectedPreset
+                )
+                const desiredLevel = CompressionPreset[selectedPreset] as number
+                const levelDisplay = wasClamped
+                  ? `Zstd lv ${effective} (auto-clamped from ${desiredLevel})`
+                  : `Zstd lv ${effective} · ${PRESET_META[selectedPreset].label}`
 
+                return (
+                  <ResultCard>
+                    <ResultRow>
+                      <ResultLabel>Output file</ResultLabel>
+                      <ResultValue $accent="encrypt" data-private>
+                        {encryptResult.originalName.replace(/\.[^.]+$/, '')}_
+                        {encryptResult.hash.slice(0, 8)}.mjkb
+                      </ResultValue>
+                    </ResultRow>
+                    <ResultRow>
+                      <ResultLabel>Cipher</ResultLabel>
+                      <ResultValue $accent="neutral">ML-KEM-768 + AES-256-GCM</ResultValue>
+                    </ResultRow>
+                    <ResultRow>
+                      <ResultLabel>Original size</ResultLabel>
+                      <ResultValue $accent="neutral" data-private>
+                        {formatBytes(encryptResult.originalSize)}
+                      </ResultValue>
+                    </ResultRow>
+                    <ResultRow>
+                      <ResultLabel>Encrypted size</ResultLabel>
+                      <ResultValue $accent="encrypt" data-private>
+                        {formatBytes(encryptResult.encryptedSize)}
+                      </ResultValue>
+                    </ResultRow>
+                    {/* ── Compression level row ── */}
+                    <ResultRow>
+                      <ResultLabel>Compression</ResultLabel>
+                      <ResultValue
+                        $accent={wasClamped ? 'warn' : 'neutral'}
+                        title={
+                          wasClamped
+                            ? `Requested lv ${desiredLevel} (${PRESET_META[selectedPreset].label}) — auto-clamped to lv ${effective} for file size safety`
+                            : undefined
+                        }
+                      >
+                        {levelDisplay}
+                      </ResultValue>
+                    </ResultRow>
+                    <ResultRow>
+                      <ResultLabel>SHA-256</ResultLabel>
+                      <ResultValue
+                        $accent="neutral"
+                        style={{ fontSize: 9, letterSpacing: '0.03em' }}
+                        data-private
+                      >
+                        {encryptResult.hash.slice(0, 24)}…
+                      </ResultValue>
+                    </ResultRow>
+                    {scanPhase !== 'idle' && scanResult && (
+                      <ScanResultRow $band={scanResult.riskBand}>
+                        <ResultLabel>Pre-encrypt scan</ResultLabel>
+                        <ResultValue $accent={scanResultAccent(scanPhase)}>
+                          {scanPhaseIcon(scanPhase)}&nbsp;
+                          {RISK_BAND_LABEL[scanResult.riskBand]}&nbsp;·&nbsp;
+                          <span style={{ opacity: 0.7 }}>{scanResult.score}/100</span>
+                        </ResultValue>
+                      </ScanResultRow>
+                    )}
+                  </ResultCard>
+                )
+              })()}
+
+            {/* ── Decrypt result ── */}
             {!isProcessing && mode === 'decrypt' && decryptResult && (
               <ResultCard>
                 <ResultRow>
@@ -1460,21 +2615,40 @@ const FileVault: React.FC<FileVaultProps> = ({
                 </ResultRow>
                 <ResultRow>
                   <ResultLabel>Verified</ResultLabel>
-                  <ResultValue $accent="decrypt" data-private>
-                    ✓ ML-KEM-768 match
-                  </ResultValue>
+                  <ResultValue $accent="decrypt">✓ ML-KEM-768 match</ResultValue>
                 </ResultRow>
                 <ResultRow>
                   <ResultLabel>Decompressed</ResultLabel>
-                  <ResultValue $accent="neutral" data-private>
-                    Zstd lv.22
-                  </ResultValue>
+                  <ResultValue $accent="neutral">Zstd · self-describing</ResultValue>
                 </ResultRow>
+                {/* ── Nested .mjkb inline indicator ── */}
+                {decryptedIsNestedMjkb && (
+                  <ResultRow>
+                    <ResultLabel>Payload</ResultLabel>
+                    <ResultValue $accent="warn">⚠ Nested .mjkb — decrypt again</ResultValue>
+                  </ResultRow>
+                )}
+                {scanPhase !== 'idle' && scanResult && (
+                  <ScanResultRow $band={scanResult.riskBand}>
+                    <ResultLabel>Post-decrypt scan</ResultLabel>
+                    <ResultValue $accent={scanResultAccent(scanPhase)}>
+                      {scanPhaseIcon(scanPhase)}&nbsp;
+                      {RISK_BAND_LABEL[scanResult.riskBand]}&nbsp;·&nbsp;
+                      <span style={{ opacity: 0.7 }}>{scanResult.score}/100</span>
+                    </ResultValue>
+                  </ScanResultRow>
+                )}
               </ResultCard>
             )}
           </OutputArea>
 
-          <PaneFooter>
+          <ScanResultBar
+            phase={scanPhase}
+            result={scanResult}
+            context={mode === 'encrypt' ? 'pre-encrypt' : 'post-decrypt'}
+          />
+
+          <PaneFooter id="file-vault-output-footer">
             <PaneBtn
               $variant={hasValidInput && !isProcessing ? mode : undefined}
               disabled={!hasValidInput || isProcessing}
@@ -1489,19 +2663,18 @@ const FileVault: React.FC<FileVaultProps> = ({
                   : 'Decrypt'}
             </PaneBtn>
             <PaneBtn
-              $variant={hasResult ? mode : undefined}
+              $variant={downloadVariant}
               disabled={!hasResult || isProcessing}
               onClick={handleDownload}
             >
-              {mode === 'encrypt' ? 'Download .mjkb' : 'Download File'}
+              {downloadLabel}
             </PaneBtn>
           </PaneFooter>
         </EditorPane>
       </EditorGrid>
 
-      {/* ── Stats row (shown after success) ── */}
       {hasResult && !isProcessing && (
-        <StatsRow>
+        <StatsRow id="file-vault-stats-row">
           <StatChip>
             <StatLabel>Original</StatLabel>
             <StatValue $accent="neutral" data-private>

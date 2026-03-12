@@ -1,38 +1,40 @@
-'use client'
 import React, { useCallback, useEffect, useState } from 'react'
 import styled, { css } from 'styled-components'
 import {
+  ArrowSquareOutIcon,
   BracketsCurlyIcon,
   CaretDownIcon,
   CopyIcon,
-  TextAaIcon,
-  PaperclipIcon,
+  FileAudioIcon,
+  FileCodeIcon,
   FileIcon,
   FileImageIcon,
   FilePdfIcon,
-  FileZipIcon,
   FileVideoIcon,
-  FileAudioIcon,
-  FileCodeIcon,
-  ArrowSquareOutIcon
+  FileZipIcon,
+  PaperclipIcon,
+  TextAaIcon
 } from '@phosphor-icons/react'
 import moment from 'moment'
 import { MessageEnvelope, type MajikMessageMail } from '@majikah/majik-message'
-import type { MajikMessagePublicKey } from '@majikah/majik-message'
-import type { MajikMessageDatabase } from '@renderer/components/majik-context-wrapper/majik-message-database'
-import type { MailAttachmentRef } from '@majikah/majik-message' // adjust import path as needed
-import { downloadBlob } from '@renderer/utils/utils'
+import type {
+  MailAttachmentRef,
+  MajikMessagePublicKey,
+  MajikMessageThread
+} from '@majikah/majik-message'
+import type { MajikMessageDatabase } from '@/components/majik-context-wrapper/majik-message-database'
+
 import { toast } from 'sonner'
-import StyledIconButton from '@renderer/components/foundations/StyledIconButton'
+import StyledIconButton from '@/components/foundations/StyledIconButton'
 import { MajikFile } from '@majikah/majik-file'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkIns from 'remark-ins'
 import remarkFlexibleMarkers from 'remark-flexible-markers'
+import { downloadBlob } from '@renderer/utils/utils'
 
 // ─── Local tokens ─────────────────────────────────────────────────────────────
 const FONT_MONO = "'Fira Mono', 'JetBrains Mono', monospace"
-
 // ─── Pill shared base ─────────────────────────────────────────────────────────
 const pillBase = css`
   display: inline-flex;
@@ -439,6 +441,7 @@ const AttachmentDownloadIcon = styled.div`
 // ─── Props ────────────────────────────────────────────────────────────────────
 interface ThreadMailProps {
   majik: MajikMessageDatabase
+  thread: MajikMessageThread
   mail: MajikMessageMail
   currentUserPublicKey: MajikMessagePublicKey
   isLatest: boolean
@@ -450,6 +453,7 @@ interface ThreadMailProps {
 // ─── Component ────────────────────────────────────────────────────────────────
 export const ThreadMail: React.FC<ThreadMailProps> = ({
   majik,
+  thread,
   mail,
   currentUserPublicKey,
   isLatest,
@@ -458,6 +462,9 @@ export const ThreadMail: React.FC<ThreadMailProps> = ({
 }) => {
   const [isExpanded, setIsExpanded] = useState(isLatest)
   const [text, setText] = useState<string>('')
+  const [subject, setSubject] = useState<string>(
+    mail.metadata?.subject || thread?.metadata?.subject || '(No Subject)'
+  )
 
   const canCollapse = !isLatest && !isSingle
 
@@ -465,6 +472,7 @@ export const ThreadMail: React.FC<ThreadMailProps> = ({
   useEffect(() => {
     let mounted = true
     let envelope: MessageEnvelope
+    let encryptedSubject: MessageEnvelope
 
     try {
       envelope = MessageEnvelope.fromMatchedString(mail.message)
@@ -482,11 +490,45 @@ export const ThreadMail: React.FC<ThreadMailProps> = ({
         if (mounted) setText('[Unable to decrypt message]')
       })
 
+    if (mail?.metadata?.subject?.trim()) {
+      try {
+        encryptedSubject = MessageEnvelope.fromMatchedString(mail.metadata.subject)
+      } catch {
+        return
+      }
+      if (!encryptedSubject) return
+
+      majik
+        .decryptEnvelope(encryptedSubject)
+        .then((msg) => {
+          if (mounted) setSubject(msg)
+        })
+        .catch(() => {
+          if (mounted) setSubject('[Unable to decrypt subject]')
+        })
+    } else {
+      try {
+        encryptedSubject = MessageEnvelope.fromMatchedString(thread.metadata.subject)
+      } catch {
+        return
+      }
+      if (!encryptedSubject) return
+
+      majik
+        .decryptEnvelope(encryptedSubject)
+        .then((msg) => {
+          if (mounted) setSubject(msg)
+        })
+        .catch(() => {
+          if (mounted) setSubject('[Unable to decrypt subject]')
+        })
+    }
+
     return () => {
       mounted = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mail.message])
+  }, [mail.message, mail.metadata.subject])
 
   // ── Handlers ─────────────────────────────────────────────────────────────
   const handleToggleExpand = (): void => {
@@ -544,7 +586,9 @@ export const ThreadMail: React.FC<ThreadMailProps> = ({
     toast.promise(
       (async () => {
         const binary = await majik.downloadFileBinary(_attachment.fileId)
-        const blob = new Blob([binary as BlobPart], { type: 'application/octet-stream' })
+        const blob = new Blob([binary as BlobPart], {
+          type: 'application/octet-stream'
+        })
         const fileJSON = await majik.getFile(_attachment.fileId)
         const instance = await MajikFile.fromJSONWithBlob(fileJSON, blob)
         instance.validate()
@@ -589,7 +633,6 @@ export const ThreadMail: React.FC<ThreadMailProps> = ({
   const relativeTime = timestamp.fromNow()
   const fullTime = timestamp.format('MMM D, YYYY [at] h:mm A')
 
-  const subject = mail.metadata?.subject || '(No Subject)'
   const priority = mail.metadata?.priority
   const attachments = mail.attachments // typed MailAttachmentRef[]
 
@@ -609,7 +652,9 @@ export const ThreadMail: React.FC<ThreadMailProps> = ({
           <CaretDownIcon size={14} />
         </Caret>
 
-        <Avatar $hue={avatarHue}>{initials}</Avatar>
+        <Avatar $hue={avatarHue} data-private>
+          {initials}
+        </Avatar>
 
         <HeaderBody>
           <SenderRow>

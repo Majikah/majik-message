@@ -896,6 +896,7 @@ export const ThreadViewer: React.FC<ThreadViewerProps> = ({
                 >
                   <ThreadMail
                     majik={majik}
+                    thread={thread}
                     mail={mail}
                     currentUserPublicKey={majik.currentIdentity!.publicKey}
                     isLatest={isLatest}
