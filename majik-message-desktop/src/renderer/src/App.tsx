@@ -45,6 +45,9 @@ import { useDispatch } from 'react-redux'
 import { toggleTheme } from './redux/slices/system'
 import { useFirebaseElectronPush } from './lib/firebase/use-firebase-notifications'
 import FilePanel from './components/panels/FilePanel'
+import MajikMessageOnboardingGate from './components/MajikMessageOnboardingGate'
+import { launchTutorialOnboarding } from './lib/shepherd-js/tutorials/tutorial-onboarding'
+import { useShepherd } from './lib/shepherd-js/use-shepherd'
 
 const RootContainer = styled.div`
   display: flex;
@@ -71,6 +74,7 @@ const firebaseConfig = {
 function App(): JSX.Element {
   const navigate = useNavigate()
   const dispatch = useDispatch()
+  const tour = useShepherd()
 
   const { majik, loading, updateInstance } = useMajik()
   const { majikah } = useMajikah()
@@ -486,91 +490,97 @@ function App(): JSX.Element {
 
   return (
     <RootContainer>
-      <TabRouter tabs={tabs} />
-      <UnlockModal
-        identityId={unlockId}
-        onCancel={handleCancel}
-        onSubmit={handleSubmit}
+      <MajikMessageOnboardingGate
         majik={majik}
-        strict={!unlocked}
-        onSignout={() => setUnlockId(null)}
-        onSwitchAccount={handleSwitchAccount}
-        onReset={handleCancel}
-        isUnlocking={isUnlocking}
-      />
-      <DynamicPopUp
-        scrollable
-        isOpen={isCreatingAccount}
-        onOpenChange={setIsCreatingAccount}
-        modal={{
-          title: 'Create Account',
-          description:
-            userAccounts.length >= MAX_ACCOUNT_LIMIT
-              ? 'Max accounts reached.'
-              : 'Create a new account with a mnemonic seed phrase.'
-        }}
-        buttons={{
-          cancel: {
-            text: 'Cancel'
-          },
-          confirm: {
-            text: 'Save Changes',
-            isDisabled: !label?.trim() || !mnemonic?.trim() || !passphrase?.trim(),
-            onClick: handleCreate
-          }
-        }}
+        onUpdate={handleRefreshInstance}
+        onLaunchTour={() => launchTutorialOnboarding(tour)}
       >
-        <CustomInputField
-          onChange={(e) => setLabel(e)}
-          maxChar={100}
-          regex="letters"
-          label="Display Name"
-          required
-          importProp={{
-            type: 'txt'
-          }}
-          currentValue={label}
+        <TabRouter tabs={tabs} />
+        <UnlockModal
+          identityId={unlockId}
+          onCancel={handleCancel}
+          onSubmit={handleSubmit}
+          majik={majik}
+          strict={!unlocked}
+          onSignout={() => setUnlockId(null)}
+          onSwitchAccount={handleSwitchAccount}
+          onReset={handleCancel}
+          isUnlocking={isUnlocking}
         />
-        <SeedKeyInput
-          importProp={{
-            type: 'json'
+        <DynamicPopUp
+          scrollable
+          isOpen={isCreatingAccount}
+          onOpenChange={setIsCreatingAccount}
+          modal={{
+            title: 'Create Account',
+            description:
+              userAccounts.length >= MAX_ACCOUNT_LIMIT
+                ? 'Max accounts reached.'
+                : 'Create a new account with a mnemonic seed phrase.'
           }}
-          allowGenerate={true}
-          onUpdatePassphrase={handleUpdatePassphrase}
-          onChange={handleSeedKeyChange}
-        />
-      </DynamicPopUp>
+          buttons={{
+            cancel: {
+              text: 'Cancel'
+            },
+            confirm: {
+              text: 'Save Changes',
+              isDisabled: !label?.trim() || !mnemonic?.trim() || !passphrase?.trim(),
+              onClick: handleCreate
+            }
+          }}
+        >
+          <CustomInputField
+            onChange={(e) => setLabel(e)}
+            maxChar={100}
+            regex="letters"
+            label="Display Name"
+            required
+            importProp={{
+              type: 'txt'
+            }}
+            currentValue={label}
+          />
+          <SeedKeyInput
+            importProp={{
+              type: 'json'
+            }}
+            allowGenerate={true}
+            onUpdatePassphrase={handleUpdatePassphrase}
+            onChange={handleSeedKeyChange}
+          />
+        </DynamicPopUp>
 
-      <DynamicPopUp
-        scrollable
-        isOpen={isAddingContact}
-        onOpenChange={setIsAddingContact}
-        modal={{
-          title: 'Add Contact',
-          description: 'Add a new contact to your list.'
-        }}
-        buttons={{
-          cancel: {
-            text: 'Cancel'
-          },
-          confirm: {
-            text: 'Save Changes',
-            onClick: handleAddContact
-          }
-        }}
-      >
-        <CustomInputField
-          currentValue={inviteKey}
-          onChange={(e) => setInviteKey(e)}
-          maxChar={500}
-          label="Invite Key"
-          required
-          importProp={{
-            type: 'txt'
+        <DynamicPopUp
+          scrollable
+          isOpen={isAddingContact}
+          onOpenChange={setIsAddingContact}
+          modal={{
+            title: 'Add Contact',
+            description: 'Add a new contact to your list.'
           }}
-          sensitive={true}
-        />
-      </DynamicPopUp>
+          buttons={{
+            cancel: {
+              text: 'Cancel'
+            },
+            confirm: {
+              text: 'Save Changes',
+              onClick: handleAddContact
+            }
+          }}
+        >
+          <CustomInputField
+            currentValue={inviteKey}
+            onChange={(e) => setInviteKey(e)}
+            maxChar={500}
+            label="Invite Key"
+            required
+            importProp={{
+              type: 'txt'
+            }}
+            sensitive={true}
+          />
+        </DynamicPopUp>
+      </MajikMessageOnboardingGate>
     </RootContainer>
   )
 }

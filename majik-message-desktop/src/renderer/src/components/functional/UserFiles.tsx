@@ -31,7 +31,7 @@ import type { FileQuota, UploadIntentBody } from '../majikah-session-wrapper/typ
 import UserFileQuota from './UserFileQuota'
 import type { MajikMessageDatabase } from '../majik-context-wrapper/majik-message-database'
 import { toast } from 'sonner'
-import type { MajikContact } from '@majikah/majik-message'
+import { MajikKeyStore, type MajikContact } from '@majikah/majik-message'
 import MajikContactListSelector from '../MajikContactListSelector'
 import moment from 'moment'
 import {
@@ -43,7 +43,7 @@ import GuideHelper from './GuideHelper'
 import { launchTutorialCloudStorage } from '@renderer/lib/shepherd-js/tutorials/tutorial-cloud-storage'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-
+const FONT_MONO = "'Fira Mono', 'JetBrains Mono', monospace"
 const PAGE_SIZE = 10
 
 /**
@@ -1309,6 +1309,80 @@ const DurationLabel = styled.span`
   padding-right: 2px;
 `
 
+// ── Signature display ──────────────────────────────────────────────────────
+
+const SignerBadgeWrap = styled.div<{
+  $variant: 'signed' | 'unsigned' | 'valid' | 'invalid' | 'warn'
+}>`
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 11px;
+  border-radius: 8px;
+  border: 1px solid;
+  font-family: ${FONT_MONO};
+  font-size: 10px;
+  line-height: 1.55;
+  animation: ${fadeIn} 160ms ease both;
+
+  ${({ $variant }) => {
+    switch ($variant) {
+      case 'signed':
+      case 'valid':
+        return css`
+          background: rgba(16, 185, 129, 0.06);
+          border-color: rgba(16, 185, 129, 0.2);
+          color: #10b981;
+        `
+      case 'unsigned':
+        return css`
+          background: rgba(255, 255, 255, 0.02);
+          border-color: rgba(255, 255, 255, 0.07);
+          color: #6b7280;
+        `
+      case 'invalid':
+        return css`
+          background: rgba(239, 68, 68, 0.07);
+          border-color: rgba(239, 68, 68, 0.25);
+          color: #ef4444;
+        `
+      case 'warn':
+        return css`
+          background: rgba(245, 158, 11, 0.06);
+          border-color: rgba(245, 158, 11, 0.2);
+          color: #f59e0b;
+        `
+    }
+  }}
+`
+
+const SignerBadgeIcon = styled.span`
+  font-size: 12px;
+  flex-shrink: 0;
+  margin-top: 0px;
+  line-height: 1.4;
+`
+
+const SignerBadgeBody = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+`
+
+const SignerBadgeTitle = styled.div`
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+`
+
+const SignerBadgeDetail = styled.div`
+  font-size: 9px;
+  opacity: 0.7;
+  word-break: break-all;
+`
+
 // ─── InlineRecipientPicker ────────────────────────────────────────────────────
 
 const ReEncryptingBadge = styled.span`
@@ -1522,6 +1596,23 @@ const UserFiles: React.FC<UserFilesProps> = ({
     }
     return base
   }, [files, fuse, searchQuery, tab, sortKey])
+
+  // Add after the fuse memo, before filtered
+  const signerInfoMap = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof majik.getMajikFileSignerInfo>>()
+    for (const file of files) {
+      if (!file.signature) {
+        map.set(file.id, null)
+        continue
+      }
+      try {
+        map.set(file.id, majik.getMajikFileSignerInfo(MajikFile.fromJSON(file)))
+      } catch {
+        map.set(file.id, null)
+      }
+    }
+    return map
+  }, [files, majik])
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
   const safePage = Math.min(page, totalPages)
@@ -1999,7 +2090,7 @@ const UserFiles: React.FC<UserFilesProps> = ({
     })
     const majikFileInstance = await MajikFile.fromJSONWithBlob(file, downloadedBlob)
     majikFileInstance.validate()
-    const blob = majikFileInstance.toMJKB()
+    const blob = majikFileInstance.toSignedMJKB()
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
@@ -2396,6 +2487,32 @@ const UserFiles: React.FC<UserFilesProps> = ({
                       </CompressionWrap>
                     )}
 
+                    {/* Add after ClampNotice, before InlineRecipientPicker */}
+                    {scanPassed &&
+                      (() => {
+                        const activeId = majik.getActiveAccount()?.id ?? ''
+                        const activeKey = MajikKeyStore.get(activeId)
+                        const hasSigning = activeKey?.hasSigningKeys ?? false
+                        const accountLabel =
+                          majik.getActiveAccount()?.meta?.label ?? majik.getActiveAccount()?.id
+
+                        return (
+                          <SignerBadgeWrap
+                            $variant={hasSigning ? 'signed' : 'unsigned'}
+                            style={{ marginTop: 2 }}
+                          >
+                            <SignerBadgeIcon>{hasSigning ? '✦' : '◌'}</SignerBadgeIcon>
+                            <SignerBadgeBody>
+                              <SignerBadgeTitle>
+                                {hasSigning
+                                  ? 'Will be signed · Ed25519 + ML-DSA-87'
+                                  : 'No signing keys — will be uploaded unsigned'}
+                              </SignerBadgeTitle>
+                              {hasSigning && <SignerBadgeDetail>{accountLabel}</SignerBadgeDetail>}
+                            </SignerBadgeBody>
+                          </SignerBadgeWrap>
+                        )
+                      })()}
                     {/* Recipient picker — only active after scan passes */}
                     {scanPassed && (
                       <InlineRecipientPicker
@@ -2471,6 +2588,45 @@ const UserFiles: React.FC<UserFilesProps> = ({
                             <Tag $variant="shared">Attachment</Tag>
                           )}
                           {file.is_shared && <Tag $variant="shared">Shared</Tag>}
+                          {/* Add inside FileRowWrap's FileMeta, after the existing Tags */}
+                          {file.signature ? (
+                            <Tag
+                              $variant="shared"
+                              title={(() => {
+                                const info = signerInfoMap.get(file.id)
+                                if (!info) return 'Unknown signer'
+                                return `${info.signerLabel ?? info.signerId.slice(0, 16) + '…'} · ${
+                                  info.isOwnAccount
+                                    ? 'Your account'
+                                    : info.isKnownContact
+                                      ? 'Known contact'
+                                      : 'Unknown'
+                                }`
+                              })()}
+                              style={{
+                                background: 'rgba(16,185,129,0.08)',
+                                color: '#10b981',
+                                borderColor: 'rgba(16,185,129,0.22)',
+                                cursor: 'default'
+                              }}
+                            >
+                              ✦ Signed
+                            </Tag>
+                          ) : (
+                            <Tag
+                              $variant="perm"
+                              title="No signature — file was encrypted without signing"
+                              style={{
+                                background: 'rgba(107,114,128,0.06)',
+                                color: '#6b7280',
+                                borderColor: 'rgba(107,114,128,0.15)',
+                                cursor: 'default',
+                                opacity: 0.6
+                              }}
+                            >
+                              ◌ Unsigned
+                            </Tag>
+                          )}
                         </FileMeta>
                       </FileInfo>
 
@@ -2619,6 +2775,44 @@ const UserFiles: React.FC<UserFilesProps> = ({
                               : `Temp${expiry ? ` · ${expiry}` : ''}`}
                           </Tag>
                           {file.is_shared && <Tag $variant="shared">Shared</Tag>}
+                          {file.signature ? (
+                            <Tag
+                              $variant="shared"
+                              title={(() => {
+                                const info = signerInfoMap.get(file.id)
+                                if (!info) return 'Unknown signer'
+                                return `${info.signerLabel ?? info.signerId.slice(0, 16) + '…'} · ${
+                                  info.isOwnAccount
+                                    ? 'Your account'
+                                    : info.isKnownContact
+                                      ? 'Known contact'
+                                      : 'Unknown'
+                                }`
+                              })()}
+                              style={{
+                                background: 'rgba(16,185,129,0.08)',
+                                color: '#10b981',
+                                borderColor: 'rgba(16,185,129,0.22)',
+                                cursor: 'default'
+                              }}
+                            >
+                              ✦ Signed
+                            </Tag>
+                          ) : (
+                            <Tag
+                              $variant="perm"
+                              title="No signature — file was encrypted without signing"
+                              style={{
+                                background: 'rgba(107,114,128,0.06)',
+                                color: '#6b7280',
+                                borderColor: 'rgba(107,114,128,0.15)',
+                                cursor: 'default',
+                                opacity: 0.6
+                              }}
+                            >
+                              ◌ Unsigned
+                            </Tag>
+                          )}
                         </FileMeta>
 
                         <GridFileMeta>

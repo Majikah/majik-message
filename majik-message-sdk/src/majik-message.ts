@@ -53,9 +53,17 @@ import {
 import {
   MajikFile,
   MajikFileError,
+  MajikFileJSON,
   type MajikFileIdentity,
   type MajikFileRecipient,
 } from "@majikah/majik-file";
+
+import {
+  MajikSignature,
+  type MajikSignatureJSON,
+  type MajikSignerPublicKeys,
+  type VerificationResult,
+} from "@majikah/majik-signature";
 
 import { gzipSync, gunzipSync } from "fflate";
 
@@ -344,6 +352,8 @@ export class MajikMessage {
     const keyContact = key.toContact();
     const contactJSON = await keyContact.toJSON();
     const reParsedContact = MajikContact.fromJSON(contactJSON);
+
+    console.log("Account: ", key);
 
     this.addOwnAccount(reParsedContact);
     return { id: key.id, fingerprint: key.fingerprint };
@@ -911,13 +921,14 @@ export class MajikMessage {
 
   /**
    * Encrypt a binary file and return everything the caller needs to persist it.
-
-   * @throws Error if no active account, account has no ML-KEM keys, or a
-   *         recipient cannot be resolved from the contact directory.
-   * @throws MajikFileError on validation failures or crypto errors (re-thrown
-   *         from MajikFile.create() so the caller gets typed errors).
+   * Automatically signs the encrypted .mjkb binary using the active account's
+   * signing keys if available. Falls back to unsigned encryption for legacy
+   * accounts that pre-date signing key support.
    *
-   * @example — self-encrypted user upload
+   * @throws Error if no active account or a recipient cannot be resolved.
+   * @throws MajikFileError on validation or crypto failures (typed, re-thrown).
+   *
+   * @example — self-encrypted user upload, auto-signed
    * ```ts
    * const result = await majik.encryptFile({
    *   data: fileBytes,
@@ -926,19 +937,7 @@ export class MajikMessage {
    * });
    * await r2.put(result.metadata.r2_key, result.binary);
    * await supabase.from("majik_files").insert(result.metadata);
-   * ```
-   *
-   * @example — group chat image
-   * ```ts
-   * const result = await majik.encryptFile({
-   *   data: imageBytes,
-   *   context: "chat_image",
-   *   originalName: "photo.png",
-   *   conversationId: "conv_abc123",
-   *   recipientIds: ["contact_id_1", "contact_id_2"],
-   *   isTemporary: true,
-   *   expiresAt: MajikFile.buildExpiryDate(15),
-   * });
+   * // result.metadata.signature is populated if the account has signing keys
    * ```
    */
   async encryptFile(options: EncryptFileOptions): Promise<EncryptFileResult> {
@@ -960,22 +959,26 @@ export class MajikMessage {
     } = options;
 
     // ── 1. Resolve sender identity ──────────────────────────────────────────
-    // Builds MajikFileIdentity with both public + secret keys from keystore.
     const identity = await this._resolveFileIdentity();
-
     const finalUserID = userId ?? identity.publicKey;
 
     // ── 2. Resolve additional recipients ───────────────────────────────────
-    // MajikFile.create() will silently drop the sender's own fingerprint if
-    // it appears in this list, and will deduplicate any repeated entries.
-    // An empty list → single-recipient (self-encrypted) file.
     const recipientPubKeys =
       recipients.length > 0
         ? await this._resolveFileRecipientsByPublicKey(recipients)
         : [];
 
-    // ── 3. Delegate to MajikFile.create() ──────────────────────────────────
-    const file = await MajikFile.create({
+    // ── 3. Get the MajikKey for signing ────────────────────────────────────
+    // After _resolveFileIdentity() calls ensureUnlocked(), the key is
+    // guaranteed to be in the memory cache — get() is safe here (sync).
+    const activeId = this.getActiveAccount()?.id;
+    if (!activeId)
+      throw new Error("No active account — call setActiveAccount() first");
+
+    const signingKey = MajikKeyStore.get(activeId);
+
+    // ── 4. Build CreateOptions ─────────────────────────────────────────────
+    const createOptions = {
       data,
       identity,
       context,
@@ -989,67 +992,80 @@ export class MajikMessage {
       chatMessageId,
       threadMessageId,
       userId: finalUserID,
-      threadId: threadId,
+      threadId,
       compressionLevel,
-    });
+    };
 
-    // ── 4. Package the result ───────────────────────────────────────────────
+    // ── 5. Encrypt (+ sign if signing keys are present) ────────────────────
+    // Accounts imported before ML-DSA signing key support won't have
+    // hasSigningKeys. We fall back to unsigned create() so the upload never
+    // fails for legacy accounts — the file is encrypted but not signed.
+    let file: MajikFile;
+
+    if (signingKey?.hasSigningKeys) {
+      file = await MajikFile.createAndSign(createOptions, signingKey, {
+        // Carry the MIME type into the signature envelope's contentType field
+        // so verifiers see a human-readable format label (e.g. "application/pdf").
+        contentType:
+          mimeType ??
+          (originalName
+            ? (MajikFile.inferMimeType(originalName) ?? undefined)
+            : undefined),
+      });
+    } else {
+      file = await MajikFile.create(createOptions);
+    }
+
     return {
       file,
       metadata: file.toJSON(),
       binary: file.toMJKB(),
+      signedBinary: !!signingKey?.hasSigningKeys
+        ? file.toSignedMJKB()
+        : file.toMJKB(),
     };
   }
 
   /**
    * Decrypt a .mjkb binary and return the original raw bytes.
    *
+   * When `metadata` is provided, the signature field is automatically
+   * threaded through so callers receive the deserialized MajikSignature
+   * in the result without any extra work. Verify it with verifyMajikFile()
+   * or MajikSignature.verify() after decryption.
+   *
    * Flow:
    *  1. If `accountId` is provided, that account is tried first.
-   *     Otherwise the active account is tried first.
-   *  2. For group files (multiple recipients), if the first account fails,
-   *     every own account is tried in sequence until one succeeds.
-   *     This mirrors the behaviour of decryptEnvelope() for group messages.
-   *  3. Delegates to MajikFile.decrypt() — which handles:
-   *       • .mjkb binary parsing and magic-byte validation
-   *       • Single vs group payload discrimination
-   *       • ML-KEM decapsulation
-   *       • AES-256-GCM decryption
-   *       • Zstd decompression (if the file was compressed)
+   *  2. For group files, every own account is tried in sequence.
+   *  3. Delegates to MajikFile.decryptWithMetadata() for binary parsing,
+   *     ML-KEM decapsulation, AES-256-GCM decryption, and decompression.
    *
-   * @returns Raw plaintext bytes — the original file content before encryption.
+   * @returns Raw plaintext bytes, original filename, MIME type, and
+   *          deserialized MajikSignature (null if unsigned or no metadata).
    *
    * @throws Error if no own account can decrypt the file.
-   * @throws MajikFileError (re-thrown) on corrupt binary, wrong key, or format
-   *         errors — callers can import MajikFileError for typed catch blocks.
+   * @throws MajikFileError on corrupt binary, wrong key, or format errors.
    *
-   * @example — basic usage
+   * @example — basic usage with metadata row from Supabase
    * ```ts
-   * const mjkbBlob = await r2.get(metadata.r2_key);
-   * const rawBytes = await majik.decryptFile({ source: mjkbBlob });
-   * const url = URL.createObjectURL(new Blob([rawBytes], { type: metadata.mime_type }));
-   * ```
-   *
-   * @example — explicit account (e.g. non-active account in a multi-account UI)
-   * ```ts
-   * const rawBytes = await majik.decryptFile({
-   *   source: mjkbBytes,
-   *   accountId: "acc_xyz",
+   * const mjkbBlob = await r2.get(row.r2_key);
+   * const { bytes, mimeType, signature } = await majik.decryptFile({
+   *   source: mjkbBlob,
+   *   metadata: row,
    * });
+   * if (signature) {
+   *   const result = await majik.verifyMajikFile(file, { contactId: row.user_id });
+   * }
    * ```
    */
   async decryptFile(options: DecryptFileOptions): Promise<{
     bytes: Uint8Array;
     originalName: string | null;
     mimeType: string | null;
+    signature: MajikSignature | null;
   }> {
-    const { source, accountId } = options;
+    const { source, accountId, metadata } = options;
 
-    // Build a prioritised list of own accounts to try.
-    // If an explicit accountId was requested, put that account first so it is
-    // tried before falling back to the full list — saves unnecessary work for
-    // single-recipient files and the common case where the caller knows which
-    // account holds the key.
     const allAccounts = this.listOwnAccounts();
     const orderedAccounts: typeof allAccounts = [];
 
@@ -1059,7 +1075,6 @@ export class MajikMessage {
       orderedAccounts.push(preferred);
     }
 
-    // Append any remaining accounts not already in the list
     for (const account of allAccounts) {
       if (!orderedAccounts.some((a) => a.id === account.id)) {
         orderedAccounts.push(account);
@@ -1074,25 +1089,17 @@ export class MajikMessage {
 
     for (const account of orderedAccounts) {
       try {
-        // Resolve the secret key for this account.
-        // _resolveFileIdentity() calls ensureUnlocked() internally, so the
-        // keystore will prompt for a passphrase if the account is locked.
         const identity = await this._resolveFileIdentity(account.id);
 
-        const {
-          bytes: rawBytes,
-          originalName,
-          mimeType,
-        } = await MajikFile.decryptWithMetadata(source, {
-          fingerprint: identity.fingerprint,
-          mlKemSecretKey: identity.mlKemSecretKey,
-        });
-
-        return { bytes: rawBytes, originalName, mimeType };
+        return await MajikFile.decryptWithMetadata(
+          source,
+          {
+            fingerprint: identity.fingerprint,
+            mlKemSecretKey: identity.mlKemSecretKey,
+          },
+          metadata?.signature ?? null,
+        );
       } catch (err) {
-        // MajikFileError.decryptionFailed means the key didn't match — keep
-        // trying. Any other error (corrupt binary, format error) is terminal
-        // and re-thrown immediately so the caller gets an accurate diagnosis.
         if (err instanceof MajikFileError && err.code === "DECRYPTION_FAILED") {
           lastError = err;
           continue;
@@ -1101,12 +1108,576 @@ export class MajikMessage {
       }
     }
 
-    // None of the own accounts could decrypt the file
     throw new Error(
       `None of your accounts can decrypt this file. ` +
         `It may have been encrypted for different recipients. ` +
-        `Last error: ${lastError instanceof Error ? lastError.message : String(lastError)}`,
+        `Last error: ${
+          lastError instanceof Error ? lastError.message : String(lastError)
+        }`,
     );
+  }
+
+  // ── MajikFile Signature Methods ───────────────────────────────────────────
+
+  /**
+   * Sign an already-created MajikFile using the active (or specified) account
+   * and attach the signature to the instance.
+   *
+   * Use this for deferred signing — when a file was created via create() and
+   * signing happens on a second pass (e.g. after user confirmation in the UI).
+   * For create + sign in one call, use encryptFile() which calls createAndSign().
+   *
+   * The file's binary must be loaded (_binary !== null).
+   * Call file.toJSON() and persist to Supabase after signing to save the signature.
+   *
+   * @example
+   *   await majik.signMajikFile(file);
+   *   await supabase
+   *     .from("majik_files")
+   *     .update({ signature: file.signatureRaw, last_update: file.lastUpdate })
+   *     .eq("id", file.id);
+   */
+  async signMajikFile(
+    file: MajikFile,
+    options?: {
+      accountId?: string;
+      contentType?: string;
+      timestamp?: string;
+    },
+  ): Promise<MajikSignature> {
+    const id = options?.accountId ?? this.getActiveAccount()?.id;
+    if (!id)
+      throw new Error("No active account — call setActiveAccount() first");
+
+    try {
+      await MajikKeyStore.ensureUnlocked(id);
+      // get() is safe after ensureUnlocked() — key is in the memory cache.
+      const key = MajikKeyStore.get(id);
+      if (!key) throw new Error(`Account not found in keystore: "${id}"`);
+      if (!key.hasSigningKeys) {
+        throw new Error(
+          `Account "${id}" has no signing keys. ` +
+            `Re-import via importAccountFromMnemonicBackup() to enable signing.`,
+        );
+      }
+
+      return file.sign(key, {
+        contentType: options?.contentType,
+        timestamp: options?.timestamp,
+      });
+    } catch (err) {
+      this.emit("error", err, { context: "signMajikFile" });
+      throw err;
+    }
+  }
+
+  /**
+   * Verify the signature attached to a MajikFile.
+   *
+   * The file's binary must be loaded — call file.attachBinary(r2Bytes) first
+   * if the instance was restored from a metadata-only Supabase row.
+   *
+   * Signer resolution:
+   *   - contactId: looked up in the contact directory (own accounts included)
+   *   - publicKeyBase64: looked up via contact directory
+   *   - key: used directly (skips directory lookup)
+   *   - none provided: falls back to public keys embedded in the signature
+   *     envelope (self-reported — always cross-check result.signerId)
+   *
+   * Returns null if the file has no signature.
+   *
+   * @example — verify against the file's owner contact
+   *   file.attachBinary(await r2.get(row.r2_key).arrayBuffer());
+   *   const result = await majik.verifyMajikFile(file, {
+   *     contactId: ownerContactId,
+   *   });
+   *   if (result?.valid) console.log("Verified, signed by", result.signerId);
+   */
+  async verifyMajikFile(
+    file: MajikFile,
+    options?: {
+      contactId?: string;
+      publicKeyBase64?: string;
+      key?: MajikKey;
+    },
+  ): Promise<VerificationResult | null> {
+    if (!file.isSigned) return null;
+
+    try {
+      const publicKeys = await this._resolveSignerPublicKeys(options);
+
+      if (publicKeys) {
+        return file.verify(publicKeys);
+      }
+
+      // No signer hint — use self-reported keys from the envelope.
+      // Caller is responsible for checking result.signerId against a trusted source.
+      const sig = file.signature;
+      if (!sig) return null;
+
+      return file.verify(sig.extractPublicKeys());
+    } catch (err) {
+      this.emit("error", err, { context: "verifyMajikFile" });
+      throw err;
+    }
+  }
+
+  /**
+   * Full binary verification of a MajikFile — decrypts first, then verifies
+   * the signature against the recovered plaintext bytes.
+   *
+   * Stronger than verifyMajikFile() because it proves both:
+   *   1. The ciphertext decrypts correctly (AES-GCM auth tag passes)
+   *   2. The plaintext matches what the signer originally signed
+   *
+   * Requires both a decryption identity (own account) and the signer's
+   * public keys. The binary must be loaded.
+   *
+   * @param decryptAccountId  Which own account to use for decryption.
+   *                          Defaults to the active account.
+   *
+   * @example
+   *   const result = await majik.verifyMajikFileBinary(file, {
+   *     contactId: "contact_abc",
+   *   });
+   *   if (result.valid) console.log("Plaintext verified");
+   */
+  async verifyMajikFileBinary(
+    file: MajikFile,
+    options?: {
+      contactId?: string;
+      publicKeyBase64?: string;
+      key?: MajikKey;
+      decryptAccountId?: string;
+    },
+  ): Promise<VerificationResult> {
+    if (!file.isSigned) {
+      throw new Error(
+        "verifyMajikFileBinary: this file has no attached signature",
+      );
+    }
+
+    const decryptId = options?.decryptAccountId ?? this.getActiveAccount()?.id;
+    if (!decryptId)
+      throw new Error("No active account — call setActiveAccount() first");
+
+    try {
+      const identity = await this._resolveFileIdentity(decryptId);
+      const decryptIdentity = {
+        fingerprint: identity.fingerprint,
+        mlKemSecretKey: identity.mlKemSecretKey,
+      };
+
+      const publicKeys = await this._resolveSignerPublicKeys(options);
+
+      if (publicKeys) {
+        return file.verifyBinary(decryptIdentity, publicKeys);
+      }
+
+      // Fall back to self-reported keys from the envelope
+      const sig = file.signature;
+      if (!sig) {
+        throw new Error(
+          "verifyMajikFileBinary: signature could not be deserialized",
+        );
+      }
+
+      return file.verifyBinary(decryptIdentity, sig.extractPublicKeys());
+    } catch (err) {
+      this.emit("error", err, { context: "verifyMajikFileBinary" });
+      throw err;
+    }
+  }
+
+  /**
+   * Check whether the active (or specified) account is the signer of a
+   * MajikFile by comparing fingerprints.
+   *
+   * This is a fast, synchronous fingerprint comparison — it does NOT
+   * cryptographically verify the signature. Use verifyMajikFile() for proof.
+   *
+   * Useful for gating UI actions:
+   *   - Show "Re-sign" button only if the active user is the signer
+   *   - Show "Signed by you" vs "Signed by [contact]" labels
+   *
+   * @returns true if the account's fingerprint matches the envelope's signerId.
+   *          false if the file is unsigned, the account has no signing keys,
+   *          the account is not in the keystore memory cache, or fingerprints
+   *          don't match.
+   *
+   * @example
+   *   if (majik.isActiveAccountSigner(file)) {
+   *     showResignButton();
+   *   }
+   */
+  isActiveAccountSigner(file: MajikFile, accountId?: string): boolean {
+    const id = accountId ?? this.getActiveAccount()?.id;
+    if (!id) return false;
+
+    const sigInfo = file.getSignatureInfo();
+    if (!sigInfo) return false;
+
+    // get() checks the memory cache — no async needed since the account
+    // must already be loaded to be the active account.
+    const key = MajikKeyStore.get(id);
+    if (!key) return false;
+
+    return key.fingerprint === sigInfo.signerId;
+  }
+
+  /**
+   * Return a rich metadata object describing who signed a MajikFile,
+   * without performing cryptographic verification.
+   *
+   * Combines getSignatureInfo() with a contact directory and keystore lookup
+   * so the UI can show a human-readable label (e.g. "Signed by Alice") instead
+   * of a raw fingerprint, and can distinguish own-account signatures from
+   * external ones.
+   *
+   * Synchronous — reads only local state. Call verifyMajikFile() separately
+   * if cryptographic proof is required.
+   *
+   * @returns null if the file is unsigned or the signature is malformed.
+   *
+   * @example
+   *   const info = majik.getMajikFileSignerInfo(file);
+   *   if (info) {
+   *     console.log(info.isOwnAccount ? "Signed by you" : `Signed by ${info.signerLabel}`);
+   *     console.log("at", info.timestamp);
+   *   }
+   */
+  getMajikFileSignerInfo(file: MajikFile): {
+    signerId: string;
+    timestamp: string;
+    contentType?: string;
+    contentHash: string;
+    /** Human-readable contact label if the signer is in the contact directory. */
+    signerLabel: string | null;
+    /** True if the signer is one of your own accounts. */
+    isOwnAccount: boolean;
+    /** True if the signer is in the contact directory (own or external). */
+    isKnownContact: boolean;
+  } | null {
+    const info = file.getSignatureInfo();
+    if (!info) return null;
+
+    // Scan all contacts (including own accounts) for a fingerprint match.
+    // listContacts(true) returns own accounts + external contacts.
+    const allContacts = this.listContacts(true);
+    const contact = allContacts.find((c) => c.fingerprint === info.signerId);
+
+    const isOwnAccount = this.listOwnAccounts().some(
+      (a) => a.fingerprint === info.signerId,
+    );
+
+    return {
+      ...info,
+      signerLabel: contact?.meta?.label ?? null,
+      isOwnAccount,
+      isKnownContact: contact !== undefined,
+    };
+  }
+
+  /**
+   * Remove the signature from a MajikFile and persist the change.
+   *
+   * A convenience wrapper around file.removeSignature() that handles the
+   * Supabase update in one call. Useful for admin flows or when re-signing
+   * after a file mutation.
+   *
+   * Unlike file.removeSignature() which only mutates the in-memory instance,
+   * this method also returns the updated metadata row ready for upsert.
+   *
+   * Note: removing a signature does not re-encrypt or modify the R2 binary —
+   * only the Supabase metadata row changes.
+   *
+   * @returns The updated MajikFileJSON with signature: null.
+   *
+   * @example
+   *   const updatedRow = majik.unsignMajikFile(file);
+   *   await supabase
+   *     .from("majik_files")
+   *     .update({ signature: null, last_update: updatedRow.last_update })
+   *     .eq("id", file.id);
+   */
+  unsignMajikFile(file: MajikFile): MajikFileJSON {
+    file.removeSignature();
+    return file.toJSON();
+  }
+
+  /**
+   * Re-sign a MajikFile — removes any existing signature, then signs
+   * with the active (or specified) account.
+   *
+   * Idempotent: calling this multiple times always produces a fresh signature
+   * from the specified account. Useful after a contact label change or when
+   * rotating signing keys.
+   *
+   * The file's binary must be loaded. Call file.attachBinary() first if needed.
+   * Persist with file.toJSON() after calling this method.
+   *
+   * @returns The new MajikSignature.
+   *
+   * @example
+   *   file.attachBinary(await r2.get(row.r2_key).arrayBuffer());
+   *   const sig = await majik.resignMajikFile(file);
+   *   await supabase
+   *     .from("majik_files")
+   *     .update({ signature: file.signatureRaw, last_update: file.lastUpdate })
+   *     .eq("id", file.id);
+   */
+  async resignMajikFile(
+    file: MajikFile,
+    options?: {
+      accountId?: string;
+      contentType?: string;
+      timestamp?: string;
+    },
+  ): Promise<MajikSignature> {
+    file.removeSignature();
+    return this.signMajikFile(file, options);
+  }
+
+  // ── Text / Detached Signing ───────────────────────────────────────────────────
+
+  /**
+   * Convenience alias for signing a plain string.
+   *
+   * Identical to signContent() but accepts only strings — makes call-sites
+   * that deal exclusively with text cleaner (no Uint8Array overload noise).
+   *
+   * @example
+   *   const sig = await majik.signText("Hello world", { contentType: "text/plain" });
+   *   const b64 = sig.serialize(); // store alongside the text
+   */
+  async signText(
+    text: string,
+    options?: {
+      contentType?: string;
+      timestamp?: string;
+      accountId?: string;
+    },
+  ): Promise<MajikSignature> {
+    if (!text?.trim())
+      throw new Error("signText: text must be a non-empty string");
+    return this.signContent(text, options);
+  }
+
+  /**
+   * Sign content and return both the MajikSignature instance and a portable
+   * base64-serialized string in one call.
+   *
+   * The serialized string is safe to store in a database column, embed in a
+   * JSON field, pass in an HTTP header, or encode in a QR code alongside the
+   * original content. Pass it back to verifyDetached() to verify.
+   *
+   * @example — sign a document and store the detached signature
+   *   const { serialized } = await majik.signAndDetach(docBytes, {
+   *     contentType: "application/pdf",
+   *   });
+   *   await db.insert({ doc_id, signature: serialized });
+   *
+   * @example — sign a text message
+   *   const { signature, serialized } = await majik.signAndDetach("Hello!", {
+   *     contentType: "text/plain",
+   *   });
+   */
+  async signAndDetach(
+    content: Uint8Array | string,
+    options?: {
+      contentType?: string;
+      timestamp?: string;
+      accountId?: string;
+    },
+  ): Promise<{ signature: MajikSignature; serialized: string }> {
+    const signature = await this.signContent(content, options);
+    return { signature, serialized: signature.serialize() };
+  }
+
+  // ── Text / Detached Verification ──────────────────────────────────────────────
+
+  /**
+   * Verify a plain string against a MajikSignature.
+   *
+   * Accepts the signature as a MajikSignature instance, a MajikSignatureJSON
+   * object, or a base64-serialized string — whichever form is easiest at the
+   * call-site.
+   *
+   * The signer can be identified by contact ID, raw public key base64, or a
+   * MajikKey instance. If none is provided the public keys embedded in the
+   * signature envelope are used (self-reported — cross-check result.signerId
+   * against a known contact fingerprint before trusting).
+   *
+   * @example
+   *   const result = await majik.verifyText("Hello world", sig, {
+   *     contactId: "contact_abc",
+   *   });
+   *   if (result.valid) console.log("Authentic");
+   */
+  async verifyText(
+    text: string,
+    signature: MajikSignature | MajikSignatureJSON | string,
+    options?: {
+      contactId?: string;
+      publicKeyBase64?: string;
+      key?: MajikKey;
+      expectedSignerId?: string;
+    },
+  ): Promise<VerificationResult> {
+    if (!text?.trim())
+      throw new Error("verifyText: text must be a non-empty string");
+
+    const sig =
+      typeof signature === "string"
+        ? MajikSignature.deserialize(signature)
+        : signature;
+
+    return this.verifyContent(text, sig, options);
+  }
+
+  /**
+   * Verify content against a base64-serialized detached signature string.
+   *
+   * This is the pair to signAndDetach() — designed for call-sites that retrieve
+   * a stored base64 signature from a database or API and want to verify without
+   * importing MajikSignature themselves.
+   *
+   * The signer can be identified by contact ID, raw public key base64, or a
+   * MajikKey. If none is provided, self-reported keys from the envelope are used
+   * (see security note on verifyContent).
+   *
+   * @example
+   *   const row = await db.findOne({ doc_id });
+   *   const result = await majik.verifyDetached(docBytes, row.signature, {
+   *     contactId: row.signer_contact_id,
+   *   });
+   *   if (result.valid) console.log("Signed by", result.signerId);
+   */
+  async verifyDetached(
+    content: Uint8Array | string,
+    serializedSignature: string,
+    options?: {
+      contactId?: string;
+      publicKeyBase64?: string;
+      key?: MajikKey;
+      expectedSignerId?: string;
+    },
+  ): Promise<VerificationResult> {
+    if (!serializedSignature?.trim()) {
+      throw new Error(
+        "verifyDetached: serializedSignature must be a non-empty string",
+      );
+    }
+
+    let sig: MajikSignature;
+    try {
+      sig = MajikSignature.deserialize(serializedSignature);
+    } catch {
+      // Fallback: maybe caller passed raw JSON rather than base64
+      try {
+        sig = MajikSignature.fromJSON(serializedSignature);
+      } catch {
+        throw new Error(
+          "verifyDetached: could not parse signature — expected a base64 " +
+            "string from sig.serialize() or a JSON string from sig.toJSON()",
+        );
+      }
+    }
+
+    return this.verifyContent(content, sig, options);
+  }
+
+  // ── Signature Serialization Helpers ──────────────────────────────────────────
+
+  /**
+   * Deserialize a base64 signature string into a MajikSignature instance.
+   *
+   * Round-trip partner for MajikSignature.serialize() / sig.toString().
+   * Use when you have a stored base64 string and need to inspect or pass
+   * the instance to another method.
+   *
+   * Throws MajikSignatureSerializationError on malformed input.
+   *
+   * @example
+   *   const sig = majik.deserializeSignature(storedBase64);
+   *   console.log(sig.signerId, sig.timestamp);
+   */
+  deserializeSignature(serialized: string): MajikSignature {
+    if (!serialized?.trim()) {
+      throw new Error("deserializeSignature: input must be a non-empty string");
+    }
+    return MajikSignature.deserialize(serialized);
+  }
+
+  /**
+   * Extract lightweight metadata from a base64 or JSON signature string
+   * without performing cryptographic verification.
+   *
+   * Useful for displaying "Signed by X at Y" in a UI before the user
+   * explicitly triggers a verification step.
+   *
+   * Returns null if the string cannot be parsed as a MajikSignature.
+   *
+   * @example
+   *   const meta = majik.getSignatureMetadata(storedSig);
+   *   if (meta) {
+   *     const contact = majik.getContactByID(meta.signerId);
+   *     console.log(`Signed by ${contact?.meta?.label ?? meta.signerId} at ${meta.timestamp}`);
+   *   }
+   */
+  getSignatureMetadata(serialized: string): {
+    signerId: string;
+    timestamp: string;
+    contentType: string | undefined;
+    contentHash: string;
+    version: number;
+  } | null {
+    if (!serialized?.trim()) return null;
+
+    try {
+      let sig: MajikSignature;
+      try {
+        sig = MajikSignature.deserialize(serialized);
+      } catch {
+        sig = MajikSignature.fromJSON(serialized);
+      }
+
+      return {
+        signerId: sig.signerId,
+        timestamp: sig.timestamp,
+        contentType: sig.contentType,
+        contentHash: sig.contentHash,
+        version: sig.version,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  // ── Signing Capability Guard ──────────────────────────────────────────────────
+
+  /**
+   * Check whether an account has signing keys without throwing.
+   *
+   * Use this as a fast boolean guard before showing signing UI or before
+   * calling any sign* method — those methods throw if signing keys are absent,
+   * so checking first lets you degrade gracefully (e.g. hide a "Sign" button).
+   *
+   * Checks the in-memory keystore cache only — the account must be loaded.
+   * Returns false for unknown accounts rather than throwing.
+   *
+   * @example
+   *   if (!majik.hasSigningCapability()) {
+   *     showUpgradePrompt("Re-import your account to enable signing");
+   *     return;
+   *   }
+   *   const sig = await majik.signText(message);
+   */
+  hasSigningCapability(accountId?: string): boolean {
+    const id = accountId ?? this.getActiveAccount()?.id;
+    if (!id) return false;
+    const key = MajikKeyStore.get(id);
+    return key?.hasSigningKeys === true;
   }
 
   // ── Envelope Cache ────────────────────────────────────────────────────────
@@ -1226,6 +1797,654 @@ export class MajikMessage {
         this.emit("error", err, { envelope });
       }
     }
+  }
+
+  // ── Content & File Signing ────────────────────────────────────────────────
+
+  /**
+   * Sign raw bytes or a string using the active account.
+   *
+   * The active account is unlocked automatically if needed.
+   * This is the MajikMessage equivalent of MajikSignature.sign() — it resolves
+   * the signing key from the keystore so you don't have to manage it yourself.
+   *
+   * @example
+   *   const sig = await majik.signContent(documentBytes, { contentType: "application/pdf" });
+   *   const b64 = sig.serialize(); // store alongside the document
+   */
+  async signContent(
+    content: Uint8Array | string,
+    options?: {
+      contentType?: string;
+      timestamp?: string;
+      accountId?: string;
+    },
+  ): Promise<MajikSignature> {
+    const id = options?.accountId ?? this.getActiveAccount()?.id;
+    if (!id)
+      throw new Error("No active account — call setActiveAccount() first");
+
+    try {
+      await MajikKeyStore.ensureUnlocked(id);
+      const key = MajikKeyStore.get(id);
+      if (!key) throw new Error(`Account not found in keystore: "${id}"`);
+      if (!key.hasSigningKeys) {
+        throw new Error(
+          `Account "${id}" has no signing keys. ` +
+            `Re-import via importAccountFromMnemonicBackup() to enable signing.`,
+        );
+      }
+
+      return MajikSignature.sign(content, key, {
+        contentType: options?.contentType,
+        timestamp: options?.timestamp,
+      });
+    } catch (err) {
+      this.emit("error", err, { context: "signContent" });
+      throw err;
+    }
+  }
+
+  /**
+   * Sign a file and embed the signature directly into it using the active account.
+   *
+   * Format is auto-detected from magic bytes — PDF stays PDF, WAV stays WAV, etc.
+   * Strips any existing signature before signing (idempotent re-signing).
+   * The active account is unlocked automatically if needed.
+   *
+   * @example
+   *   const { blob: signedPdf } = await majik.signFile(pdfBlob);
+   *   // signedPdf is a valid PDF with the signature embedded in its metadata
+   *
+   * @example — non-active account
+   *   const { blob } = await majik.signFile(wavBlob, { accountId: "acc_xyz" });
+   */
+  async signFile(
+    file: Blob,
+    options?: {
+      contentType?: string;
+      timestamp?: string;
+      mimeType?: string;
+      accountId?: string;
+    },
+  ): Promise<{
+    blob: Blob;
+    signature: MajikSignature;
+    handler: string;
+    mimeType: string;
+  }> {
+    const id = options?.accountId ?? this.getActiveAccount()?.id;
+    if (!id)
+      throw new Error("No active account — call setActiveAccount() first");
+
+    try {
+      await MajikKeyStore.ensureUnlocked(id);
+      const key = MajikKeyStore.get(id);
+      if (!key) throw new Error(`Account not found in keystore: "${id}"`);
+      if (!key.hasSigningKeys) {
+        throw new Error(
+          `Account "${id}" has no signing keys. ` +
+            `Re-import via importAccountFromMnemonicBackup() to enable signing.`,
+        );
+      }
+
+      return MajikSignature.signFile(file, key, {
+        contentType: options?.contentType,
+        timestamp: options?.timestamp,
+        mimeType: options?.mimeType,
+      });
+    } catch (err) {
+      this.emit("error", err, { context: "signFile" });
+      throw err;
+    }
+  }
+
+  /**
+   * Sign multiple file blobs with the active (or specified) account in one call.
+   *
+   * Each file is signed independently — a failure on one does not abort the
+   * others. Check result.error on each item to handle partial failures.
+   *
+   * The hasSigningKeys check is done once upfront before any signing begins,
+   * so the whole batch fails fast if the account can't sign rather than
+   * discovering it mid-batch.
+   *
+   * @example
+   *   const results = await majik.batchSignFiles([
+   *     { file: pdfBlob, contentType: "application/pdf" },
+   *     { file: wavBlob, contentType: "audio/wav" },
+   *     { file: mp4Blob, contentType: "video/mp4" },
+   *   ]);
+   *   for (const r of results) {
+   *     if (r.error) console.error("Failed:", r.error.message);
+   *     else await r2.put(key, await r.blob!.arrayBuffer());
+   *   }
+   */
+  async batchSignFiles(
+    files: Array<{
+      file: Blob;
+      contentType?: string;
+      timestamp?: string;
+      mimeType?: string;
+    }>,
+    options?: { accountId?: string },
+  ): Promise<
+    Array<{
+      blob: Blob | null;
+      signature: MajikSignature | null;
+      serialized: string | null;
+      handler: string | null;
+      mimeType: string | null;
+      error: Error | null;
+    }>
+  > {
+    const id = options?.accountId ?? this.getActiveAccount()?.id;
+    if (!id)
+      throw new Error("No active account — call setActiveAccount() first");
+
+    await MajikKeyStore.ensureUnlocked(id);
+    const key = MajikKeyStore.get(id);
+    if (!key) throw new Error(`Account not found in keystore: "${id}"`);
+    if (!key.hasSigningKeys) {
+      throw new Error(
+        `Account "${id}" has no signing keys. ` +
+          `Re-import via importAccountFromMnemonicBackup() to enable signing.`,
+      );
+    }
+
+    return Promise.all(
+      files.map(async ({ file, contentType, timestamp, mimeType }) => {
+        try {
+          const result = await MajikSignature.signFile(file, key, {
+            contentType,
+            timestamp,
+            mimeType,
+          });
+          return {
+            blob: result.blob,
+            signature: result.signature,
+            serialized: result.signature.serialize(),
+            handler: result.handler,
+            mimeType: result.mimeType,
+            error: null,
+          };
+        } catch (err) {
+          this.emit("error", err, { context: "batchSignFiles" });
+          return {
+            blob: null,
+            signature: null,
+            serialized: null,
+            handler: null,
+            mimeType: null,
+            error: err instanceof Error ? err : new Error(String(err)),
+          };
+        }
+      }),
+    );
+  }
+
+  // ── Verification ──────────────────────────────────────────────────────────
+
+  /**
+   * Verify raw bytes or a string against a MajikSignature.
+   *
+   * The signer can be identified by:
+   *   - A contact ID from the contact directory
+   *   - A raw base64 public key string (same format used in contacts)
+   *   - A MajikKey instance directly
+   *
+   * If no signer is provided, the public keys embedded in the signature
+   * envelope are used (self-reported — see security note below).
+   *
+   * > ⚠️ When no signer is provided, the extracted public keys are self-reported
+   * > by whoever created the signature. Always cross-check `result.signerId`
+   * > against a known contact fingerprint before trusting the result.
+   *
+   * @example — verify against a known contact
+   *   const result = await majik.verifyContent(docBytes, sig, { contactId: "contact_abc" });
+   *   if (result.valid) console.log("Authentic, signed by:", result.signerId);
+   *
+   * @example — verify using embedded keys (self-reported)
+   *   const result = await majik.verifyContent(docBytes, sig);
+   *   // always check result.signerId matches a known fingerprint
+   */
+  async verifyContent(
+    content: Uint8Array | string,
+    signature: MajikSignature | MajikSignatureJSON,
+    options?: {
+      contactId?: string;
+      publicKeyBase64?: string;
+      key?: MajikKey;
+      expectedSignerId?: string;
+    },
+  ): Promise<VerificationResult> {
+    try {
+      const publicKeys = await this._resolveSignerPublicKeys(options);
+
+      if (publicKeys) {
+        return MajikSignature.verify(content, signature, publicKeys);
+      }
+
+      // No signer provided — extract keys from envelope (self-reported)
+      const sig =
+        signature instanceof MajikSignature
+          ? signature
+          : MajikSignature.fromJSON(signature);
+
+      return MajikSignature.verify(content, sig, sig.extractPublicKeys());
+    } catch (err) {
+      this.emit("error", err, { context: "verifyContent" });
+      throw err;
+    }
+  }
+
+  /**
+   * Verify a file's embedded signature.
+   *
+   * The signer can be identified by:
+   *   - A contact ID from the contact directory
+   *   - A raw base64 public key string
+   *   - A MajikKey instance directly
+   *
+   * If no signer is provided, the public keys embedded in the signature
+   * envelope are used (self-reported — see security note on verifyContent).
+   *
+   * @example — verify a signed PDF against a known contact
+   *   const result = await majik.verifyFile(signedPdf, { contactId: "contact_abc" });
+   *   if (result.valid) console.log("Verified:", result.signerId, result.timestamp);
+   *
+   * @example — check own signed file using active account
+   *   const result = await majik.verifyFile(signedWav, {
+   *     contactId: majik.getActiveAccount()?.id,
+   *   });
+   */
+  async verifyFile(
+    file: Blob,
+    options?: {
+      contactId?: string;
+      publicKeyBase64?: string;
+      key?: MajikKey;
+      expectedSignerId?: string;
+      mimeType?: string;
+    },
+  ): Promise<VerificationResult & { handler?: string; reason?: string }> {
+    try {
+      const publicKeys = await this._resolveSignerPublicKeys(options);
+
+      if (publicKeys) {
+        return MajikSignature.verifyFile(file, publicKeys, {
+          expectedSignerId: options?.expectedSignerId,
+          mimeType: options?.mimeType,
+        });
+      }
+
+      // No signer provided — extract and use self-reported keys
+      const extracted = await MajikSignature.extractFrom(file, {
+        mimeType: options?.mimeType,
+      });
+      if (!extracted) {
+        return {
+          valid: false,
+          signerId: "",
+          contentHash: "",
+          timestamp: new Date().toISOString(),
+          reason: "No embedded signature found",
+        };
+      }
+
+      return MajikSignature.verifyFile(file, extracted.extractPublicKeys(), {
+        expectedSignerId: options?.expectedSignerId,
+        mimeType: options?.mimeType,
+      });
+    } catch (err) {
+      this.emit("error", err, { context: "verifyFile" });
+      throw err;
+    }
+  }
+
+  /**
+   * Verify multiple files' embedded signatures against the same signer in
+   * one call.
+   *
+   * Each file is verified independently — a failed verification sets
+   * result.valid = false and populates result.error, it does not throw.
+   *
+   * @example
+   *   const results = await majik.batchVerifyFiles(
+   *     [pdfBlob, wavBlob, mp4Blob],
+   *     { contactId: "contact_abc" },
+   *   );
+   *   const allValid = results.every(r => r.valid);
+   */
+  async batchVerifyFiles(
+    files: Array<
+      Blob | { file: Blob; mimeType?: string; expectedSignerId?: string }
+    >,
+    options?: {
+      contactId?: string;
+      publicKeyBase64?: string;
+      key?: MajikKey;
+      expectedSignerId?: string;
+    },
+  ): Promise<
+    Array<
+      VerificationResult & {
+        handler: string | null;
+        mimeType: string | null;
+        error: Error | null;
+      }
+    >
+  > {
+    // Resolve public keys once — reused across all files in the batch
+    const publicKeys = await this._resolveSignerPublicKeys(options).catch(
+      () => null,
+    );
+
+    return Promise.all(
+      files.map(async (entry) => {
+        const { file, mimeType, expectedSignerId } =
+          entry instanceof Blob
+            ? {
+                file: entry,
+                mimeType: undefined,
+                expectedSignerId: options?.expectedSignerId,
+              }
+            : {
+                ...entry,
+                expectedSignerId:
+                  entry.expectedSignerId ?? options?.expectedSignerId,
+              };
+
+        try {
+          let result: VerificationResult & { handler?: string };
+
+          if (publicKeys) {
+            result = await MajikSignature.verifyFile(file, publicKeys, {
+              mimeType,
+              expectedSignerId,
+            });
+          } else {
+            // No signer hint — use self-reported keys from each file's envelope
+            const extracted = await MajikSignature.extractFrom(file, {
+              mimeType,
+            });
+            if (!extracted) {
+              return {
+                valid: false,
+                signerId: "",
+                contentHash: "",
+                timestamp: new Date().toISOString(),
+                reason: "No embedded signature found",
+                handler: null,
+                mimeType: mimeType ?? null,
+                error: null,
+              };
+            }
+            result = await MajikSignature.verifyFile(
+              file,
+              extracted.extractPublicKeys(),
+              { mimeType, expectedSignerId },
+            );
+          }
+
+          return {
+            ...result,
+            handler: result.handler ?? null,
+            mimeType: mimeType ?? null,
+            error: null,
+          };
+        } catch (err) {
+          this.emit("error", err, { context: "batchVerifyFiles" });
+          return {
+            valid: false,
+            signerId: "",
+            contentHash: "",
+            timestamp: new Date().toISOString(),
+            handler: null,
+            mimeType: mimeType ?? null,
+            error: err instanceof Error ? err : new Error(String(err)),
+          };
+        }
+      }),
+    );
+  }
+
+  // ── Signature Utilities ───────────────────────────────────────────────────
+
+  /**
+   * Extract the embedded MajikSignature from a file.
+   * Returns a fully typed MajikSignature instance, or null if not found.
+   *
+   * Does not verify — use verifyFile() to verify.
+   *
+   * @example
+   *   const sig = await majik.extractSignature(file);
+   *   if (sig) console.log("Signed by:", sig.signerId, "at", sig.timestamp);
+   */
+  async extractSignature(
+    file: Blob,
+    options?: { mimeType?: string },
+  ): Promise<MajikSignature | null> {
+    try {
+      return MajikSignature.extractFrom(file, options);
+    } catch (err) {
+      this.emit("error", err, { context: "extractSignature" });
+      throw err;
+    }
+  }
+
+  /**
+   * Return a clean copy of the file with any embedded signature removed.
+   * The returned bytes are exactly what was originally signed.
+   *
+   * Useful before re-processing or re-encrypting a signed file.
+   *
+   * @example
+   *   const originalBlob = await majik.stripSignature(signedMp4);
+   */
+  async stripSignature(
+    file: Blob,
+    options?: { mimeType?: string },
+  ): Promise<Blob> {
+    try {
+      return MajikSignature.stripFrom(file, options);
+    } catch (err) {
+      this.emit("error", err, { context: "stripSignature" });
+      throw err;
+    }
+  }
+
+  /**
+   * Check whether a file contains an embedded MajikSignature.
+   * Does not verify — purely a structural presence check.
+   *
+   * @example
+   *   if (await majik.isFileSigned(file)) {
+   *     const result = await majik.verifyFile(file, { contactId });
+   *   }
+   */
+  async isFileSigned(
+    file: Blob,
+    options?: { mimeType?: string },
+  ): Promise<boolean> {
+    try {
+      return MajikSignature.isSigned(file, options);
+    } catch (err) {
+      this.emit("error", err, { context: "isFileSigned" });
+      throw err;
+    }
+  }
+
+  /**
+   * Get the public keys for the active account, ready for use with
+   * MajikSignature.verify() or for sharing with another party.
+   *
+   * Works on locked keys — only reads public fields.
+   *
+   * @example
+   *   const myKeys = await majik.getSigningPublicKeys();
+   *   // share myKeys with someone so they can verify your signatures
+   */
+  async getSigningPublicKeys(
+    accountId?: string,
+  ): Promise<MajikSignerPublicKeys> {
+    const id = accountId ?? this.getActiveAccount()?.id;
+    if (!id)
+      throw new Error("No active account — call setActiveAccount() first");
+
+    const key = MajikKeyStore.get(id);
+    if (!key) throw new Error(`Account not found in keystore: "${id}"`);
+    if (!key.hasSigningKeys) {
+      throw new Error(
+        `Account "${id}" has no signing keys. ` +
+          `Re-import via importAccountFromMnemonicBackup() to enable signing.`,
+      );
+    }
+
+    return MajikSignature.publicKeysFromMajikKey(key);
+  }
+
+  /**
+   * Re-sign a file blob — strips any existing embedded signature, signs
+   * with the active (or specified) account, and returns the newly signed blob.
+   *
+   * Use after key rotation or when the signing account changes. The returned
+   * blob is the same format as the input — PDF stays PDF, WAV stays WAV.
+   *
+   * Distinct from resignMajikFile() which operates on a MajikFile instance
+   * (the encrypted .mjkb container). This operates on a plain file Blob.
+   *
+   * @example
+   *   const { blob } = await majik.resignFile(oldSignedPdf);
+   *   await r2.put(key, await blob.arrayBuffer());
+   */
+  async resignFile(
+    file: Blob,
+    options?: {
+      contentType?: string;
+      timestamp?: string;
+      mimeType?: string;
+      accountId?: string;
+    },
+  ): Promise<{
+    blob: Blob;
+    signature: MajikSignature;
+    handler: string;
+    mimeType: string;
+  }> {
+    // signFile already strips before signing — resignFile is a named alias
+    // that makes the caller's intent explicit at the call-site.
+    return this.signFile(file, options);
+  }
+
+  /**
+   * Extract metadata from a file's embedded signature without verifying it.
+   *
+   * Useful for rendering "Signed by X at Y" in a UI before the user
+   * explicitly triggers a verify step, or for routing to the correct
+   * contact record before calling verifyFile().
+   *
+   * Returns null if the file has no embedded signature or the JSON is
+   * structurally malformed.
+   *
+   * @example
+   *   const info = await majik.getFileSignatureInfo(pdfBlob);
+   *   if (info) {
+   *     const contact = majik.getContactByID(info.signerId);
+   *     console.log(`Signed by ${contact?.meta?.label ?? info.signerId}`);
+   *     console.log(`Format handled by: ${info.handler}`);
+   *   }
+   */
+  async getFileSignatureInfo(
+    file: Blob,
+    options?: { mimeType?: string },
+  ): Promise<MajikSignature | null> {
+    try {
+      return MajikSignature.extractFrom(file, options);
+    } catch (err) {
+      this.emit("error", err, { context: "getFileSignatureInfo" });
+      throw err;
+    }
+  }
+
+  // ── Private: Signer resolution ────────────────────────────────────────────
+
+  /**
+   * Resolve MajikSignerPublicKeys from whichever signer hint was provided.
+   * Returns null if no hint was given (caller should fall back to self-reported keys).
+   *
+   * Mirrors the _resolveRecipients / _resolveFileIdentity pattern used
+   * throughout MajikMessage — consistent account/contact resolution in one place.
+   */
+  private async _resolveSignerPublicKeys(options?: {
+    contactId?: string;
+    publicKeyBase64?: string;
+    key?: MajikKey;
+    expectedSignerId?: string;
+  }): Promise<MajikSignerPublicKeys | null> {
+    if (!options) return null;
+
+    // Option A: caller passed a MajikKey instance directly
+    if (options.key) {
+      return MajikSignature.publicKeysFromMajikKey(options.key);
+    }
+
+    // Option B: contact ID looked up from the contact directory
+    if (options.contactId) {
+      const contact = this.contactDirectory.getContact(options.contactId);
+      if (!contact) {
+        throw new Error(`No contact found for id "${options.contactId}"`);
+      }
+
+      // Own accounts are in the keystore — get their signing keys directly
+      const ownAccount = this.getOwnAccountById(options.contactId);
+      if (ownAccount) {
+        const key = MajikKeyStore.get(options.contactId);
+        if (key?.hasSigningKeys) {
+          return MajikSignature.publicKeysFromMajikKey(key);
+        }
+      }
+
+      // External contact — resolve from their contact card fields
+      if (!contact.edPublicKeyBase64 || !contact.mlDsaPublicKeyBase64) {
+        throw new Error(
+          `Contact "${options.contactId}" has no signing public keys. ` +
+            `They may need to share an updated contact card.`,
+        );
+      }
+
+      return {
+        signerId: contact.fingerprint,
+        edPublicKey: base64ToUint8Array(contact.edPublicKeyBase64),
+        mlDsaPublicKey: base64ToUint8Array(contact.mlDsaPublicKeyBase64),
+      };
+    }
+
+    // Option C: raw base64 public key — look up via contact directory
+    if (options.publicKeyBase64) {
+      const contact = await this.contactDirectory.getContactByPublicKeyBase64(
+        options.publicKeyBase64,
+      );
+      if (!contact) {
+        throw new Error(
+          `No contact found for public key "${options.publicKeyBase64}"`,
+        );
+      }
+
+      if (!contact.edPublicKeyBase64 || !contact.mlDsaPublicKeyBase64) {
+        throw new Error(
+          `Contact for key "${options.publicKeyBase64}" has no signing public keys.`,
+        );
+      }
+
+      return {
+        signerId: contact.fingerprint,
+        edPublicKey: base64ToUint8Array(contact.edPublicKeyBase64),
+        mlDsaPublicKey: base64ToUint8Array(contact.mlDsaPublicKeyBase64),
+      };
+    }
+
+    return null;
   }
 
   // ── PIN ───────────────────────────────────────────────────────────────────

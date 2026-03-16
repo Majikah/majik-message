@@ -263,6 +263,11 @@ export interface EncryptFileResult {
    * .mjkb Blob for R2 upload. Equivalent to file.toMJKB().
    */
   binary: Blob;
+
+  /**
+   * Signed .mjkb Blob for offline or direct sharing. Equivalent to file.toSignedMJKB().
+   */
+  signedBinary: Blob;
 }
 
 /**
@@ -281,4 +286,11 @@ export interface DecryptFileOptions {
    * automatically — you rarely need to set this explicitly.
    */
   accountId?: string;
+  /**
+   * The MajikFileJSON metadata row from Supabase.
+   * When provided, the signature field is automatically threaded into
+   * decryptWithMetadata() so the returned signature is populated without
+   * a second parse or round-trip.
+   */
+  metadata?: MajikFileJSON;
 }

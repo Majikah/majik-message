@@ -9,8 +9,8 @@ import type { MajikMessageDatabase } from '../majik-context-wrapper/majik-messag
 import DynamicPlaceholder from '../foundations/DynamicPlaceholder'
 import { ChoiceButton } from '@renderer/globals/buttons'
 import { useLocation, useNavigate } from 'react-router-dom'
-import FileVault from '../functional/FileVault'
-import type { MajikContact } from '@majikah/majik-message'
+import FileVault from '../functional/FileVault/FileVault'
+import { MajikKeyStore, type CompressionLevel, type MajikContact } from '@majikah/majik-message'
 import MajikContactListSelector from '../MajikContactListSelector'
 import PopUpFormButton from '../foundations/PopUpFormButton'
 import CustomInputField from '../foundations/CustomInputField'
@@ -18,6 +18,10 @@ import DynamicSlidingDialogue from '../functional/DynamicSlidingDialogue'
 import UserFiles from '../functional/UserFiles'
 import { useMajikah } from '../majikah-session-wrapper/use-majikah'
 import GuideHelper from '../functional/GuideHelper'
+import type { DecryptResult, DecryptSignatureStatus, EncryptResult, SignerInfo } from './_types'
+import { MajikFile } from '@majikah/majik-file'
+import { useShepherd } from '@renderer/lib/shepherd-js/use-shepherd'
+import { launchTutorialFileVault } from '@renderer/lib/shepherd-js/tutorials/tutorial-file-vault'
 
 // ─── Local tokens ─────────────────────────────────────────────────────────────
 const FONT_MONO = "'Fira Mono', 'JetBrains Mono', monospace"
@@ -247,6 +251,7 @@ interface FilePanelProps {
 // ─── Component ────────────────────────────────────────────────────────────────
 const FilePanel: React.FC<FilePanelProps> = ({ majik }) => {
   const { majikah } = useMajikah()
+  const tour = useShepherd()
   const navigate = useNavigate()
   const location = useLocation()
 
@@ -356,18 +361,29 @@ const FilePanel: React.FC<FilePanelProps> = ({ majik }) => {
     }
   }
 
+  // ── Active signer info (for FileVault pre-encrypt display) ─────────────────
+  // Computed once per render — reads only the memory-cached key, no async needed.
+  const activeSignerInfo = useMemo((): SignerInfo | null => {
+    const account = majik.getActiveAccount()
+    if (!account) return null
+    const key = MajikKeyStore.get(account.id)
+    if (!key?.hasSigningKeys) return null
+    return {
+      signerId: key.fingerprint,
+      signerLabel: account.meta?.label ?? undefined,
+      isOwnAccount: true,
+      isKnownContact: true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [majik, refreshKey])
+
   // ── Encrypt handler ────────────────────────────────────────────────────────
 
   const handleEncryptFile = async (
     file: File,
-    mimeType: string
-  ): Promise<{
-    binary: Blob
-    originalName: string
-    originalSize: number
-    encryptedSize: number
-    hash: string
-  }> => {
+    mimeType: string,
+    compressionLevel: CompressionLevel
+  ): Promise<EncryptResult> => {
     const raw = await file.arrayBuffer()
 
     const recipientPubKeys = await Promise.all(
@@ -377,46 +393,109 @@ const FilePanel: React.FC<FilePanelProps> = ({ majik }) => {
       })
     )
 
-    const result = await majik.encryptFile({
-      data: raw,
-      context: 'user_upload',
-      originalName: file.name,
-      mimeType,
-      recipients: recipientPubKeys,
-      isTemporary: false,
-      bypassSizeLimit: true, // local use — no 100 MB cap
-      userId: majikah?.user?.id
-    })
-    console.log('Encryption successful. File:', result)
+    try {
+      const result = await majik.encryptFile({
+        data: raw,
+        context: 'user_upload',
+        originalName: file.name,
+        mimeType,
+        recipients: recipientPubKeys,
+        isTemporary: false,
+        bypassSizeLimit: true,
+        userId: majikah?.user?.id,
+        compressionLevel
+      })
 
-    return {
-      binary: result.binary,
-      originalName: file.name,
-      originalSize: file.size,
-      encryptedSize: result.binary.size,
-      hash: result.metadata.file_hash
+      // Build signerInfo from the result — the signature field on metadata
+      // is only populated when the account had signing keys.
+      let signerInfo: SignerInfo | null = null
+      if (result.metadata.signature) {
+        try {
+          const info = majik.getMajikFileSignerInfo(result.file)
+          if (info) {
+            signerInfo = {
+              signerId: info.signerId,
+              signerLabel: info.signerLabel ?? undefined,
+              isOwnAccount: info.isOwnAccount,
+              isKnownContact: info.isKnownContact
+            }
+          }
+        } catch (e) {
+          console.log('Signer Error: ', e)
+          // getMajikFileSignerInfo failed — still return the result, just no signer info
+        }
+      }
+
+      return {
+        binary: result.binary,
+        signedBinary: result.signedBinary,
+        originalName: file.name,
+        originalSize: file.size,
+        encryptedSize: result.binary.size,
+        hash: result.metadata.file_hash,
+        signerInfo
+      }
+    } catch (e) {
+      console.warn('Failed: ', e)
+      throw e
     }
   }
 
-  // ── Decrypt handler ────────────────────────────────────────────────────────
+  // ── Decrypt handler ─────────────────────────────────────────────────────────
 
-  const handleDecryptFile = async (
-    file: File
-  ): Promise<{
-    binary: Blob
-    originalName: string
-    originalSize: number
-    mimeType: string
-  }> => {
+  const handleDecryptFile = async (file: File): Promise<DecryptResult> => {
+    const rawBytes = new Uint8Array(await file.arrayBuffer())
+
+    // Check for an embedded MJKS trailer before decrypting
+    const hasMjksTrailer = MajikFile.hasMjksTrailer(rawBytes)
+
     const { bytes, originalName, mimeType } = await majik.decryptFile({ source: file })
 
-    console.log('Decryption successful. Original name:', originalName, 'MIME type:', mimeType)
+    let signatureStatus: DecryptSignatureStatus
+
+    if (!hasMjksTrailer) {
+      signatureStatus = { verdict: 'unsigned' }
+    } else {
+      try {
+        const signerKey = MajikKeyStore.get(majik.getActiveAccount()!.id)
+
+        if (signerKey?.hasSigningKeys) {
+          const result = await MajikFile.verifySignedMJKB(rawBytes, signerKey)
+          const allContacts = majik.listContacts(true)
+          const contact = allContacts.find((c) => c.fingerprint === result.signerId)
+          const isOwnAccount = majik
+            .listOwnAccounts()
+            .some((a) => a.fingerprint === result.signerId)
+
+          signatureStatus = {
+            verdict: result.valid ? 'valid' : 'invalid',
+            signerId: result.signerId,
+            signerLabel: contact?.meta?.label ?? undefined,
+            isOwnAccount,
+            isKnownContact: contact !== undefined,
+            timestamp: result.timestamp,
+            contentType: result.contentType
+          }
+        } else {
+          // Trailer present but can't verify — extract metadata for display
+          const embeddedSig = MajikFile.extractMjksSignature(rawBytes)
+          signatureStatus = {
+            verdict: 'unverified',
+            signerId: embeddedSig?.signerId,
+            timestamp: embeddedSig?.timestamp
+          }
+        }
+      } catch {
+        signatureStatus = { verdict: 'unverified' }
+      }
+    }
 
     return {
       binary: new Blob([bytes as BlobPart], { type: mimeType ?? 'application/octet-stream' }),
       originalName: originalName ?? file.name.replace(/\.mjkb$/i, ''),
       originalSize: bytes.byteLength,
-      mimeType: mimeType ?? 'application/octet-stream'
+      mimeType: mimeType ?? 'application/octet-stream',
+      signatureStatus
     }
   }
 
@@ -453,7 +532,7 @@ const FilePanel: React.FC<FilePanelProps> = ({ majik }) => {
         <HeaderActions>
           <GuideHelper
             docsPath="https://majikah.solutions/products/majik-message/docs/file-vault"
-            // startTour={() => launchTutorialMessages(tour)}
+            startTour={() => launchTutorialFileVault(tour)}
           />
 
           {/* My Files button — opens the sliding panel */}
@@ -556,6 +635,7 @@ const FilePanel: React.FC<FilePanelProps> = ({ majik }) => {
             onModeChange={handleModeChange}
             externalRefreshKey={recipientsVersion}
             decryptFile={importedFile}
+            signerInfo={activeSignerInfo}
           />
         </Body>
       )}

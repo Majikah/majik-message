@@ -4,24 +4,6 @@
  * IDB persistence + in-memory cache layer for MajikKey accounts.
  * Replaces MajikKeyStore as the account storage backend for MajikMessage.
  *
- * Design:
- *   - MajikKeyJSON is the canonical storage format (replaces MajikKeyStore.SerializedIdentity)
- *   - MajikKey is the canonical account object (replaces KeyStoreIdentity)
- *   - In-memory Map<id, MajikKey> caches unlocked accounts for the session
- *   - All crypto (KDF, encrypt/decrypt) stays inside MajikKey — this class only does IDB
- *
- * Migration from MajikKeyStore:
- *   Old accounts stored as SerializedIdentity (5 fields, PBKDF2) are loaded via
- *   fromSerializedIdentity() which reconstructs a locked MajikKey from the legacy format.
- *   On next unlock, MajikKey automatically uses the correct KDF (PBKDF2 for old accounts).
- *   On next passphrase change or importFromMnemonicBackup(), the account is fully upgraded.
- *
- * IDB schema:
- *   Store name: "majik-keys"  (separate from old "identities" store — intentional)
- *   Key path: "id"
- *   Value: MajikKeyJSON (full MajikKey serialization)
- *
- *   Legacy store: "identities" (MajikKeyStore format — read-only migration path)
  */
 
 import { MajikKey, MajikKeyJSON, SerializedIdentity } from "@majikah/majik-key";

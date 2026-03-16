@@ -3,12 +3,24 @@ import styled, { css, keyframes } from 'styled-components'
 import { toast } from 'sonner'
 import { CubeIcon, FolderIcon, KeyIcon } from '@phosphor-icons/react'
 import { MajikFileScanner } from '@/SDK/majik-file-scanner/majik-file-scanner'
+import type { FileScanResult } from '@/SDK/majik-file-scanner/majik-file-scanner'
+import { MajikFile, MJKB_MAGIC } from '@majikah/majik-file'
 import type {
-  FileScanResult,
-  RuleSeverity,
-  ScanRemark
-} from '@/SDK/majik-file-scanner/majik-file-scanner'
-import { MajikFile } from '@majikah/majik-file'
+  DecryptResult,
+  DecryptSignatureStatus,
+  EncryptResult,
+  SignerInfo
+} from '../../panels/_types'
+import EncryptSignerPanel from './EncryptSignerPanel'
+import {
+  ALLOWED_MIME_TYPES,
+  FILE_ICONS,
+  RISK_BAND_BG,
+  RISK_BAND_COLOR,
+  RISK_BAND_LABEL
+} from './_contants'
+import DecryptSignaturePanel from './DecryptSignaturePanel'
+import ScanResultBar from './ScanResultBar'
 
 type CompressionLevel =
   | 1
@@ -50,49 +62,6 @@ type CompressionPresetKey = keyof typeof CompressionPreset
 
 // ─── Local tokens ─────────────────────────────────────────────────────────────
 const FONT_MONO = "'Fira Mono', 'JetBrains Mono', monospace"
-
-// ─── Risk band colors ─────────────────────────────────────────────────────────
-const RISK_BAND_COLOR: Record<NonNullable<FileScanResult['riskBand']>, string> = {
-  clean: '#10b981',
-  low_risk: '#84cc16',
-  moderate_risk: '#f59e0b',
-  high_risk: '#ef4444',
-  critical_risk: '#dc2626'
-}
-
-const RISK_BAND_BG: Record<NonNullable<FileScanResult['riskBand']>, string> = {
-  clean: 'rgba(16, 185, 129, 0.08)',
-  low_risk: 'rgba(132, 204, 22, 0.08)',
-  moderate_risk: 'rgba(245, 158, 11, 0.08)',
-  high_risk: 'rgba(239, 68, 68, 0.08)',
-  critical_risk: 'rgba(220, 38, 38, 0.1)'
-}
-
-const RISK_BAND_LABEL: Record<NonNullable<FileScanResult['riskBand']>, string> = {
-  clean: 'Clean',
-  low_risk: 'Low Risk',
-  moderate_risk: 'Moderate Risk',
-  high_risk: 'High Risk',
-  critical_risk: 'Critical Risk'
-}
-
-const SEVERITY_ICON: Record<RuleSeverity, string> = {
-  danger: '❌',
-  critical: '⛔',
-  high: '🔴',
-  medium: '🟡',
-  low: '🔵',
-  info: '⚪'
-}
-
-const SEVERITY_COLOR: Record<RuleSeverity, string> = {
-  danger: '#f70606',
-  critical: '#dc2626',
-  high: '#ef4444',
-  medium: '#f59e0b',
-  low: '#6366f1',
-  info: '#6b7280'
-}
 
 // ─── Compression preset metadata ─────────────────────────────────────────────
 
@@ -168,162 +137,6 @@ function resolveAdaptiveLevel(
   }
   return { effective: desired, wasClamped: false }
 }
-
-// ─── MIME validation ──────────────────────────────────────────────────────────
-export const ALLOWED_MIME_TYPES = new Set([
-  'image/png',
-  'image/jpeg',
-  'image/gif',
-  'image/webp',
-  'image/avif',
-  'image/svg+xml',
-  'image/bmp',
-  'image/tiff',
-  'image/x-icon',
-  'image/heic',
-  'image/heif',
-  'image/jxl',
-  'image/vnd.adobe.photoshop',
-  'image/x-xcf',
-  'image/x-raw',
-  'image/x-canon-cr2',
-  'image/x-nikon-nef',
-  'image/x-sony-arw',
-  'video/mp4',
-  'video/webm',
-  'video/ogg',
-  'video/quicktime',
-  'video/x-msvideo',
-  'video/x-matroska',
-  'video/x-flv',
-  'video/3gpp',
-  'video/3gpp2',
-  'video/mpeg',
-  'video/x-ms-wmv',
-  'video/mp2t',
-  'video/x-m4v',
-  'audio/mpeg',
-  'audio/ogg',
-  'audio/wav',
-  'audio/webm',
-  'audio/aac',
-  'audio/flac',
-  'audio/x-m4a',
-  'audio/midi',
-  'audio/x-midi',
-  'audio/aiff',
-  'audio/x-aiff',
-  'audio/opus',
-  'audio/amr',
-  'audio/mp4',
-  'application/pdf',
-  'application/msword',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'application/vnd.ms-excel',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  'application/vnd.ms-powerpoint',
-  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-  'application/vnd.oasis.opendocument.text',
-  'application/vnd.oasis.opendocument.spreadsheet',
-  'application/vnd.oasis.opendocument.presentation',
-  'application/rtf',
-  'text/rtf',
-  'text/plain',
-  'text/html',
-  'text/css',
-  'text/csv',
-  'text/xml',
-  'text/markdown',
-  'text/javascript',
-  'application/javascript',
-  'application/typescript',
-  'application/json',
-  'application/xml',
-  'application/yaml',
-  'text/yaml',
-  'application/toml',
-  'application/graphql',
-  'text/x-python',
-  'text/x-java-source',
-  'text/x-c',
-  'text/x-c++',
-  'text/x-csharp',
-  'text/x-go',
-  'text/x-rust',
-  'text/x-swift',
-  'text/x-kotlin',
-  'text/x-ruby',
-  'text/x-php',
-  'text/x-sh',
-  'text/x-powershell',
-  'application/x-httpd-php',
-  'application/x-sql',
-  'text/x-lua',
-  'application/zip',
-  'application/x-zip-compressed',
-  'application/x-rar-compressed',
-  'application/x-rar',
-  'application/x-7z-compressed',
-  'application/x-tar',
-  'application/gzip',
-  'application/x-gzip',
-  'application/x-bzip2',
-  'application/x-xz',
-  'application/x-lzip',
-  'application/x-zstd',
-  'application/vnd.rar',
-  'application/x-msdownload',
-  'application/vnd.microsoft.portable-executable',
-  'application/x-msi',
-  'application/x-apple-diskimage',
-  'application/x-debian-package',
-  'application/x-rpm',
-  'application/x-sh',
-  'application/x-executable',
-  'application/octet-stream',
-  'font/ttf',
-  'font/otf',
-  'font/woff',
-  'font/woff2',
-  'application/font-woff',
-  'application/vnd.ms-fontobject',
-  'model/gltf+json',
-  'model/gltf-binary',
-  'model/obj',
-  'model/stl',
-  'application/x-blender',
-  'application/vnd.ms-3mfdocument',
-  'application/x-fbx',
-  'application/postscript',
-  'application/x-indesign',
-  'video/x-adobe-premiere',
-  'application/x-adobe-after-effects',
-  'application/x-xd',
-  'application/x-figma',
-  'application/x-sketch',
-  'application/x-affinity-designer',
-  'application/x-affinity-photo',
-  'application/x-vsix',
-  'application/x-ipynb+json',
-  'text/x-dockerfile',
-  'application/x-env',
-  'application/x-sqlite3',
-  'application/vnd.sqlite3',
-  'application/epub+zip',
-  'application/x-mobipocket-ebook',
-  'application/vnd.amazon.ebook',
-  'application/x-abiword',
-  'application/vnd.visio',
-  'application/x-iwork-pages-sffpages',
-  'application/x-iwork-numbers-sffnumbers',
-  'application/x-iwork-keynote-sffkey',
-  'application/x-pem-file',
-  'application/x-pkcs12',
-  'application/pkix-cert',
-  'application/x-x509-ca-cert'
-])
-
-const MJKB_MAGIC = new Uint8Array([0x4d, 0x4a, 0x4b, 0x42])
 
 async function isMjkbFile(file: File): Promise<boolean> {
   try {
@@ -404,30 +217,6 @@ function inferMimeFromName(name: string): string {
   return map[ext] || 'application/octet-stream'
 }
 
-const FILE_ICONS: Record<string, string> = {
-  'image/': '🖼️',
-  'video/': '🎬',
-  'audio/': '🎵',
-  'text/': '📝',
-  'application/pdf': '📄',
-  'application/json': '📋',
-  'application/zip': '🗜️',
-  'application/x-7z-compressed': '🗜️',
-  'application/x-tar': '🗜️',
-  'application/gzip': '🗜️',
-  'application/x-rar': '🗜️',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml': '📄',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml': '📊',
-  'application/vnd.openxmlformats-officedocument.presentationml': '📊',
-  'model/': '🧊',
-  'application/x-sqlite3': '🗄️',
-  'application/x-msdownload': '⚙️',
-  'application/x-executable': '⚙️',
-  'application/epub': '📚',
-  'font/': '🔤',
-  'application/octet-stream': '📦'
-}
-
 function getFileIcon(mime: string): string {
   for (const [prefix, ico] of Object.entries(FILE_ICONS)) {
     if (mime.startsWith(prefix)) return ico
@@ -448,9 +237,40 @@ async function ensureScanner(): Promise<void> {
   }
 }
 
+type ScanPhase = 'idle' | 'scanning' | 'clean' | 'flagged' | 'error'
+
+function scanPhaseIcon(phase: ScanPhase): string {
+  switch (phase) {
+    case 'scanning':
+      return '◈'
+    case 'clean':
+      return '✓'
+    case 'flagged':
+      return '⚠'
+    case 'error':
+      return '~'
+    default:
+      return ''
+  }
+}
+
+function scanPhaseLabel(phase: ScanPhase): string {
+  switch (phase) {
+    case 'scanning':
+      return 'Scanning…'
+    case 'clean':
+      return 'Scan clean'
+    case 'flagged':
+      return 'Threat detected'
+    case 'error':
+      return 'Scan inconclusive'
+    default:
+      return ''
+  }
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Mode = 'encrypt' | 'decrypt'
-type ScanPhase = 'idle' | 'scanning' | 'clean' | 'flagged' | 'error'
 
 interface FileState {
   file: File
@@ -463,23 +283,6 @@ interface ProcessStep {
   label: string
   done: boolean
   active: boolean
-}
-
-interface EncryptResult {
-  binary: Blob
-  originalName: string
-  originalSize: number
-  encryptedSize: number
-  hash: string
-  /** The effective Zstd level actually used (after adaptive clamping). */
-  effectiveCompressionLevel?: number
-}
-
-interface DecryptResult {
-  binary: Blob
-  originalName: string
-  originalSize: number
-  mimeType: string
 }
 
 // ─── Animations ───────────────────────────────────────────────────────────────
@@ -501,11 +304,6 @@ const progressSlide = keyframes`
 const scannerPulse = keyframes`
   0%, 100% { opacity: 1; }
   50%       { opacity: 0.5; }
-`
-
-const slideDown = keyframes`
-  from { opacity: 0; transform: translateY(-6px); max-height: 0; }
-  to   { opacity: 1; transform: translateY(0); max-height: 600px; }
 `
 
 // ─── Styled components ────────────────────────────────────────────────────────
@@ -858,294 +656,6 @@ const ClampNotice = styled.div`
   color: #f59e0b;
   line-height: 1.5;
   animation: ${fadeIn} 150ms ease both;
-`
-
-// ─── Scan bar ─────────────────────────────────────────────────────────────────
-
-const ScanBarWrap = styled.div<{ $phase: ScanPhase }>`
-  flex-shrink: 0;
-  border-top: 1px solid transparent;
-  transition: all 200ms ease;
-
-  ${({ $phase }) => {
-    switch ($phase) {
-      case 'scanning':
-        return css`
-          background: rgba(251, 191, 36, 0.03);
-          border-color: rgba(251, 191, 36, 0.08);
-        `
-      case 'clean':
-        return css`
-          background: rgba(16, 185, 129, 0.03);
-          border-color: rgba(16, 185, 129, 0.08);
-        `
-      case 'flagged':
-        return css`
-          background: rgba(239, 68, 68, 0.04);
-          border-color: rgba(239, 68, 68, 0.12);
-        `
-      case 'error':
-        return css`
-          background: rgba(251, 191, 36, 0.03);
-          border-color: rgba(251, 191, 36, 0.08);
-        `
-      default:
-        return css`
-          display: none;
-        `
-    }
-  }}
-`
-
-const ScanBarRow = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 13px;
-  font-family: ${FONT_MONO};
-  font-size: 10px;
-`
-
-const ScorePill = styled.div<{
-  $band: FileScanResult['riskBand']
-  $pulsing?: boolean
-}>`
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  font-family: ${FONT_MONO};
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  flex-shrink: 0;
-  border: 1.5px solid ${({ $band }) => RISK_BAND_COLOR[$band] ?? '#6b7280'};
-  color: ${({ $band }) => RISK_BAND_COLOR[$band] ?? '#6b7280'};
-  background: ${({ $band }) => RISK_BAND_BG[$band] ?? 'transparent'};
-  transition: all 200ms ease;
-  ${({ $pulsing }) =>
-    $pulsing &&
-    css`
-      opacity: 0.3;
-      animation: ${scannerPulse} 1.1s ease infinite;
-    `}
-`
-
-const ScanBarMeta = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  flex: 1;
-  min-width: 0;
-`
-
-const ScanBarStatusLine = styled.div<{
-  $band?: FileScanResult['riskBand']
-  $pulsing?: boolean
-}>`
-  font-family: ${FONT_MONO};
-  font-size: 10px;
-  font-weight: 600;
-  color: ${({ $band }) => ($band ? (RISK_BAND_COLOR[$band] ?? '#6b7280') : '#fbbf24')};
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  ${({ $pulsing }) =>
-    $pulsing &&
-    css`
-      animation: ${scannerPulse} 1.1s ease infinite;
-    `}
-`
-
-const ScanBarSubline = styled.div`
-  font-family: ${FONT_MONO};
-  font-size: 9px;
-  color: ${({ theme }) => theme.colors.textSecondary};
-  opacity: 0.5;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-`
-
-const ScanDetailsToggle = styled.button<{
-  $phase: ScanPhase
-  $open: boolean
-}>`
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 8px;
-  border-radius: 5px;
-  font-family: ${FONT_MONO};
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  cursor: pointer;
-  border: 1px solid transparent;
-  transition: all 120ms ease;
-
-  ${({ $phase, $open }) => {
-    const phaseColor: Record<ScanPhase, string> = {
-      clean: '#10b981',
-      flagged: '#ef4444',
-      error: '#f59e0b',
-      scanning: '#fbbf24',
-      idle: '#6b7280'
-    }
-    const c = phaseColor[$phase] ?? '#6b7280'
-    return css`
-      color: ${c};
-      border-color: ${$open ? c : 'transparent'};
-      background: ${$open ? `rgba(0,0,0,0.12)` : 'transparent'};
-      opacity: 0.75;
-      &:hover {
-        opacity: 1;
-        border-color: ${c};
-        background: rgba(0, 0, 0, 0.1);
-      }
-    `
-  }}
-`
-
-const ScanDetailPanel = styled.div`
-  overflow: hidden;
-  animation: ${slideDown} 200ms cubic-bezier(0.4, 0, 0.2, 1) both;
-  border-top: 1px solid rgba(255, 255, 255, 0.04);
-`
-
-const ScanDetailInner = styled.div`
-  padding: 10px 13px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-height: 260px;
-  overflow-y: auto;
-
-  &::-webkit-scrollbar {
-    width: 3px;
-  }
-  &::-webkit-scrollbar-track {
-    background: transparent;
-  }
-  &::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.1);
-    border-radius: 2px;
-  }
-`
-
-const ScanStatsRow = styled.div`
-  display: flex;
-  gap: 6px;
-`
-
-const ScanStatCell = styled.div<{ $color?: string }>`
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 6px 8px;
-  background: rgba(255, 255, 255, 0.025);
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  border-radius: 6px;
-`
-
-const ScanStatLabel = styled.div`
-  font-family: ${FONT_MONO};
-  font-size: 8px;
-  color: ${({ theme }) => theme.colors.textSecondary};
-  opacity: 0.45;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-`
-
-const ScanStatValue = styled.div<{ $color?: string }>`
-  font-family: ${FONT_MONO};
-  font-size: 11px;
-  font-weight: 700;
-  color: ${({ $color }) => $color ?? 'inherit'};
-`
-
-const RemarkList = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-`
-
-const RemarkSectionLabel = styled.div`
-  font-family: ${FONT_MONO};
-  font-size: 8px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: ${({ theme }) => theme.colors.textSecondary};
-  opacity: 0.4;
-  padding: 2px 0 0;
-`
-
-const RemarkRow = styled.div<{ $severity: RuleSeverity }>`
-  display: flex;
-  align-items: flex-start;
-  gap: 7px;
-  padding: 6px 8px;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.04);
-  border-left: 2px solid ${({ $severity }) => SEVERITY_COLOR[$severity]};
-  animation: ${fadeIn} 150ms ease both;
-`
-
-const RemarkIcon = styled.div<{ $severity: RuleSeverity }>`
-  font-size: 10px;
-  flex-shrink: 0;
-  margin-top: 1px;
-  color: ${({ $severity }) => SEVERITY_COLOR[$severity]};
-`
-
-const RemarkBody = styled.div`
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-`
-
-const RemarkRule = styled.div`
-  font-family: ${FONT_MONO};
-  font-size: 9px;
-  font-weight: 700;
-  color: ${({ theme }) => theme.colors.textPrimary};
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-`
-
-const RemarkDesc = styled.div`
-  font-family: ${FONT_MONO};
-  font-size: 9px;
-  color: ${({ theme }) => theme.colors.textSecondary};
-  opacity: 0.6;
-  line-height: 1.45;
-`
-
-const RemarkDeduction = styled.div<{ $severity: RuleSeverity }>`
-  flex-shrink: 0;
-  font-family: ${FONT_MONO};
-  font-size: 9px;
-  font-weight: 700;
-  color: ${({ $severity }) => SEVERITY_COLOR[$severity]};
-  opacity: 0.8;
-  margin-top: 1px;
-`
-
-const InfoNote = styled.div`
-  font-family: ${FONT_MONO};
-  font-size: 9px;
-  color: ${({ theme }) => theme.colors.textSecondary};
-  opacity: 0.35;
-  padding: 3px 0 0 2px;
 `
 
 // ─── Progress bar ─────────────────────────────────────────────────────────────
@@ -1526,6 +1036,13 @@ const ScanResultRow = styled(ResultRow)<{ $band?: FileScanResult['riskBand'] }>`
   background: ${({ $band }) => ($band ? RISK_BAND_BG[$band] : undefined)};
 `
 
+function scanResultAccent(phase: ScanPhase): 'clean' | 'flagged' | 'warn' | 'neutral' {
+  if (phase === 'clean') return 'clean'
+  if (phase === 'flagged') return 'flagged'
+  if (phase === 'error') return 'warn'
+  return 'neutral'
+}
+
 // ─── Pane footer ─────────────────────────────────────────────────────────────
 
 const PaneFooter = styled.div`
@@ -1639,208 +1156,8 @@ const StatValue = styled.div<{ $accent?: Mode | 'neutral' }>`
   }};
 `
 
-// ─── Scan phase helpers ───────────────────────────────────────────────────────
-
-function scanPhaseIcon(phase: ScanPhase): string {
-  switch (phase) {
-    case 'scanning':
-      return '◈'
-    case 'clean':
-      return '✓'
-    case 'flagged':
-      return '⚠'
-    case 'error':
-      return '~'
-    default:
-      return ''
-  }
-}
-
-function scanPhaseLabel(phase: ScanPhase): string {
-  switch (phase) {
-    case 'scanning':
-      return 'Scanning…'
-    case 'clean':
-      return 'Scan clean'
-    case 'flagged':
-      return 'Threat detected'
-    case 'error':
-      return 'Scan inconclusive'
-    default:
-      return ''
-  }
-}
-
-function scanResultAccent(phase: ScanPhase): 'clean' | 'flagged' | 'warn' | 'neutral' {
-  if (phase === 'clean') return 'clean'
-  if (phase === 'flagged') return 'flagged'
-  if (phase === 'error') return 'warn'
-  return 'neutral'
-}
-
-function scanBarShortLine(phase: ScanPhase, result: FileScanResult | null): string {
-  if (phase === 'scanning') return 'Running YARA scan locally — no data leaves your device…'
-  if (!result) return ''
-  if (phase === 'clean')
-    return `${result.remarks.length === 0 ? 'No threats detected' : 'All findings informational only'} · ${result.durationMs.toFixed(0)}ms`
-  if (phase === 'flagged') {
-    const top = result.remarks[0]
-    return top
-      ? `${result.remarks.length} rule(s) matched · worst: ${top.severity.toUpperCase()} [${top.rule}]`
-      : `${result.remarks.length} rule(s) matched`
-  }
-  if (phase === 'error') return 'Scan could not complete — result inconclusive'
-  return ''
-}
-
-// ─── ScanResultBar ────────────────────────────────────────────────────────────
-
-interface ScanResultBarProps {
-  phase: ScanPhase
-  result: FileScanResult | null
-  context: 'pre-encrypt' | 'post-decrypt'
-}
-
-const SEVERITY_ORDER_DISPLAY: RuleSeverity[] = [
-  'danger',
-  'critical',
-  'high',
-  'medium',
-  'low',
-  'info'
-]
-
-const ScanResultBar: React.FC<ScanResultBarProps> = ({ phase, result, context }) => {
-  const [open, setOpen] = useState(false)
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (phase === 'scanning') setOpen(false)
-  }, [phase])
-
-  if (phase === 'idle') return null
-
-  const canExpand = phase !== 'scanning' && result !== null
-  const actionableCount = result?.remarks.filter((r) => r.severity !== 'info').length ?? 0
-  const infoCount = result?.remarks.filter((r) => r.severity === 'info').length ?? 0
-
-  return (
-    <ScanBarWrap $phase={phase}>
-      <ScanBarRow>
-        {phase !== 'scanning' && result ? (
-          <ScorePill $band={result.riskBand}>{result.score}</ScorePill>
-        ) : (
-          <ScorePill $band="clean" $pulsing>
-            —
-          </ScorePill>
-        )}
-
-        <ScanBarMeta>
-          {phase === 'scanning' ? (
-            <ScanBarStatusLine $pulsing>
-              {scanPhaseIcon(phase)} {scanPhaseLabel(phase)}
-            </ScanBarStatusLine>
-          ) : result ? (
-            <ScanBarStatusLine $band={result.riskBand}>
-              {scanPhaseIcon(phase)}&nbsp;
-              {RISK_BAND_LABEL[result.riskBand]}
-              &nbsp;·&nbsp;
-              <span style={{ fontWeight: 400, opacity: 0.65 }}>
-                {context === 'pre-encrypt' ? 'Pre-encrypt' : 'Post-decrypt'} scan
-              </span>
-            </ScanBarStatusLine>
-          ) : null}
-          <ScanBarSubline>{scanBarShortLine(phase, result)}</ScanBarSubline>
-        </ScanBarMeta>
-
-        {canExpand && (
-          <ScanDetailsToggle $phase={phase} $open={open} onClick={() => setOpen((v) => !v)}>
-            {open ? '▲ Hide' : '▼ Details'}
-          </ScanDetailsToggle>
-        )}
-      </ScanBarRow>
-
-      {open && result && (
-        <ScanDetailPanel>
-          <ScanDetailInner>
-            <ScanStatsRow>
-              <ScanStatCell>
-                <ScanStatLabel>Score</ScanStatLabel>
-                <ScanStatValue $color={RISK_BAND_COLOR[result.riskBand]}>
-                  {result.score}/100
-                </ScanStatValue>
-              </ScanStatCell>
-              <ScanStatCell>
-                <ScanStatLabel>Risk</ScanStatLabel>
-                <ScanStatValue $color={RISK_BAND_COLOR[result.riskBand]}>
-                  {RISK_BAND_LABEL[result.riskBand]}
-                </ScanStatValue>
-              </ScanStatCell>
-              <ScanStatCell>
-                <ScanStatLabel>Findings</ScanStatLabel>
-                <ScanStatValue $color={actionableCount > 0 ? '#ef4444' : '#10b981'}>
-                  {actionableCount > 0 ? `${actionableCount} flagged` : 'None'}
-                </ScanStatValue>
-              </ScanStatCell>
-              <ScanStatCell>
-                <ScanStatLabel>Duration</ScanStatLabel>
-                <ScanStatValue>{result.durationMs.toFixed(0)}ms</ScanStatValue>
-              </ScanStatCell>
-            </ScanStatsRow>
-
-            {result.remarks.length === 0 ? (
-              <InfoNote>✓ File passed all YARA rules — no signatures matched.</InfoNote>
-            ) : (
-              <RemarkList>
-                {SEVERITY_ORDER_DISPLAY.filter((sev) => sev !== 'info').map((sev) => {
-                  const group = result.remarks.filter((r) => r.severity === sev)
-                  if (group.length === 0) return null
-                  return (
-                    <React.Fragment key={sev}>
-                      <RemarkSectionLabel>
-                        {SEVERITY_ICON[sev]} {sev.toUpperCase()} · −{group[0].deduction} pts each
-                      </RemarkSectionLabel>
-                      {group.map((remark: ScanRemark) => (
-                        <RemarkRow key={remark.rule} $severity={remark.severity}>
-                          <RemarkIcon $severity={remark.severity}>
-                            {SEVERITY_ICON[remark.severity]}
-                          </RemarkIcon>
-                          <RemarkBody>
-                            <RemarkRule>{remark.rule}</RemarkRule>
-                            <RemarkDesc>{remark.description}</RemarkDesc>
-                          </RemarkBody>
-                          <RemarkDeduction $severity={remark.severity}>
-                            −{remark.deduction}
-                          </RemarkDeduction>
-                        </RemarkRow>
-                      ))}
-                    </React.Fragment>
-                  )
-                })}
-
-                {infoCount > 0 && (
-                  <InfoNote>
-                    ⚪ {infoCount} informational finding
-                    {infoCount > 1 ? 's' : ''} (no score impact) ·{' '}
-                    {result.remarks
-                      .filter((r) => r.severity === 'info')
-                      .map((r) => r.rule)
-                      .join(', ')}
-                  </InfoNote>
-                )}
-              </RemarkList>
-            )}
-          </ScanDetailInner>
-        </ScanDetailPanel>
-      )}
-    </ScanBarWrap>
-  )
-}
-
 // ─── Props ────────────────────────────────────────────────────────────────────
 export interface FileVaultProps {
-  // compressionLevel is forwarded through onEncrypt so the orchestrator
-  // can pass it directly into encryptFile() without the UI owning the crypto.
   onEncrypt: (
     file: File,
     mimeType: string,
@@ -1850,6 +1167,12 @@ export interface FileVaultProps {
   onModeChange?: (mode: Mode) => void
   externalRefreshKey?: number
   decryptFile?: File
+  /**
+   * Info about the account that will sign encrypted files.
+   * When provided, shown in the input pane before/after encryption.
+   * When null/undefined, a "No signing keys" notice is shown instead.
+   */
+  signerInfo?: SignerInfo | null
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -1858,7 +1181,8 @@ const FileVault: React.FC<FileVaultProps> = ({
   onEncrypt,
   onDecrypt,
   onModeChange,
-  decryptFile
+  decryptFile,
+  signerInfo
 }) => {
   const [mode, setMode] = useState<Mode>('encrypt')
   const [inputFile, setInputFile] = useState<FileState | null>(null)
@@ -1869,6 +1193,11 @@ const FileVault: React.FC<FileVaultProps> = ({
   const [encryptResult, setEncryptResult] = useState<EncryptResult | null>(null)
   const [decryptResult, setDecryptResult] = useState<DecryptResult | null>(null)
   const [resultBlob, setResultBlob] = useState<Blob | null>(null)
+  // Add to existing state declarations
+  const [encryptSignerInfo, setEncryptSignerInfo] = useState<SignerInfo | null | undefined>(
+    undefined
+  )
+  const [decryptSigStatus, setDecryptSigStatus] = useState<DecryptSignatureStatus | null>(null)
 
   // ── Compression preset selection (encrypt mode only) ─────────────────────
   // Default to GOOD (lv 9) — strong compression without WASM risk on typical uploads.
@@ -1905,6 +1234,8 @@ const FileVault: React.FC<FileVaultProps> = ({
     setScanPhase('idle')
     setScanResult(null)
     setDecryptedIsNestedMjkb(false)
+    setEncryptSignerInfo(undefined) // ← add
+    setDecryptSigStatus(null) // ← add
   }
 
   const handleSetMode = (next: Mode): void => {
@@ -2088,7 +1419,9 @@ const FileVault: React.FC<FileVaultProps> = ({
       setProgress(100)
       setSteps((prev) => prev.map((s) => ({ ...s, done: true, active: false })))
       setEncryptResult(result)
-      setResultBlob(result.binary)
+      // Capture signer info from the result if the orchestrator provided it
+      setEncryptSignerInfo(result.signerInfo ?? null)
+      setResultBlob(result.signerInfo ? result.signedBinary : result.binary)
 
       // Compute the effective level for the toast description
       const { effective, wasClamped } = resolveAdaptiveLevel(inputFile.file.size, selectedPreset)
@@ -2191,6 +1524,8 @@ const FileVault: React.FC<FileVaultProps> = ({
       setProgress(100)
       setSteps((prev) => prev.map((s) => ({ ...s, done: true, active: false })))
       setDecryptResult(result)
+      // Show signature status from the decryption result
+      setDecryptSigStatus(result.signatureStatus ?? null)
       setResultBlob(result.binary)
     } catch (err) {
       toast.error('Decryption failed', {
@@ -2387,6 +1722,13 @@ const FileVault: React.FC<FileVaultProps> = ({
                     <span>{inputFile.validationMsg}</span>
                   </ErrorBar>
                 )}
+                {/* Add inside the encrypt mode input pane, below the MimeRow / ErrorBar */}
+                {mode === 'encrypt' && inputFile?.valid && (
+                  <EncryptSignerPanel
+                    signerInfo={encryptResult ? encryptSignerInfo : signerInfo}
+                    hasFile={true}
+                  />
+                )}
               </FileCard>
             )}
           </DropZone>
@@ -2578,6 +1920,17 @@ const FileVault: React.FC<FileVaultProps> = ({
                         {encryptResult.hash.slice(0, 24)}…
                       </ResultValue>
                     </ResultRow>
+                    {/* Signer info row — only shown when signed */}
+                    {encryptSignerInfo && (
+                      <ResultRow>
+                        <ResultLabel>Signed by</ResultLabel>
+                        <ResultValue $accent="encrypt">
+                          {encryptSignerInfo.signerLabel ??
+                            encryptSignerInfo.signerId.slice(0, 16) + '…'}
+                        </ResultValue>
+                      </ResultRow>
+                    )}
+
                     {scanPhase !== 'idle' && scanResult && (
                       <ScanResultRow $band={scanResult.riskBand}>
                         <ResultLabel>Pre-encrypt scan</ResultLabel>
@@ -2621,6 +1974,32 @@ const FileVault: React.FC<FileVaultProps> = ({
                   <ResultLabel>Decompressed</ResultLabel>
                   <ResultValue $accent="neutral">Zstd · self-describing</ResultValue>
                 </ResultRow>
+                {/* Signature summary row — inline in result card */}
+                <ResultRow>
+                  <ResultLabel>Signature</ResultLabel>
+                  <ResultValue
+                    $accent={
+                      !decryptSigStatus || decryptSigStatus.verdict === 'unsigned'
+                        ? 'neutral'
+                        : decryptSigStatus.verdict === 'valid'
+                          ? 'decrypt'
+                          : decryptSigStatus.verdict === 'invalid'
+                            ? 'flagged'
+                            : 'warn'
+                    }
+                  >
+                    {!decryptSigStatus || decryptSigStatus.verdict === 'unsigned'
+                      ? '◌ Not signed'
+                      : decryptSigStatus.verdict === 'valid'
+                        ? '✦ Verified'
+                        : decryptSigStatus.verdict === 'invalid'
+                          ? '⛔ Invalid — tampered'
+                          : '~ Present · unverified'}
+                  </ResultValue>
+                </ResultRow>
+
+                {/* Full signature panel — shows below the result card */}
+                <DecryptSignaturePanel status={decryptSigStatus} />
                 {/* ── Nested .mjkb inline indicator ── */}
                 {decryptedIsNestedMjkb && (
                   <ResultRow>
