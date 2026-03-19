@@ -1,0 +1,128 @@
+/* ================================
+   Fira Sans – Light (300)
+================================ */
+
+@font-face {
+  font-family: 'Fira Sans';
+  src: url('/fonts/FiraSans/FiraSans-Light.ttf') format('truetype');
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Fira Sans';
+  src: url('/fonts/FiraSans/FiraSans-LightItalic.ttf') format('truetype');
+  font-weight: 300;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* ================================
+   Fira Sans – Regular (400)
+================================ */
+
+@font-face {
+  font-family: 'Fira Sans';
+  src: url('/fonts/FiraSans/FiraSans-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Fira Sans';
+  src: url('/fonts/FiraSans/FiraSans-Italic.ttf') format('truetype');
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* ================================
+   Fira Sans – Medium (500)
+================================ */
+
+@font-face {
+  font-family: 'Fira Sans';
+  src: url('/fonts/FiraSans/FiraSans-Medium.ttf') format('truetype');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Fira Sans';
+  src: url('/fonts/FiraSans/FiraSans-MediumItalic.ttf') format('truetype');
+  font-weight: 500;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* ================================
+   Fira Sans – Bold (700)
+================================ */
+
+@font-face {
+  font-family: 'Fira Sans';
+  src: url('/fonts/FiraSans/FiraSans-Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Fira Sans';
+  src: url('/fonts/FiraSans/FiraSans-BoldItalic.ttf') format('truetype');
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* ================================
+   Fira Sans – ExtraBold (800)
+================================ */
+
+@font-face {
+  font-family: 'Fira Sans';
+  src: url('/fonts/FiraSans/FiraSans-ExtraBold.ttf') format('truetype');
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Fira Sans';
+  src: url('/fonts/FiraSans/FiraSans-ExtraBoldItalic.ttf') format('truetype');
+  font-weight: 800;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* ================================
+   Fira Sans – Black (900)
+================================ */
+
+@font-face {
+  font-family: 'Fira Sans';
+  src: url('/fonts/FiraSans/FiraSans-Black.ttf') format('truetype');
+  font-weight: 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Fira Sans';
+  src: url('/fonts/FiraSans/FiraSans-BlackItalic.ttf') format('truetype');
+  font-weight: 900;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* ================================
+   CSS Variable (Next.js-style)
+================================ */
+
+:root {
+  --font-fira-sans:
+    'Fira Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
