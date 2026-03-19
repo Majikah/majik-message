@@ -416,6 +416,8 @@ function App(): JSX.Element {
         body: `New Account for ${label || accountID} created successfully.`,
       });
 
+      window.location.reload();
+
       setRefreshKey((prev) => prev + 1);
     } catch (err) {
       console.error(err);
@@ -558,6 +560,7 @@ function App(): JSX.Element {
         title: "Account Imported Successfully",
         body: `New Account for ${label || mnemonicJSON.id} created successfully.`,
       });
+      window.location.reload();
       setRefreshKey((k) => k + 1);
     } catch (e) {
       console.error(e);

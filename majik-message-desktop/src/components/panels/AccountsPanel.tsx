@@ -281,7 +281,7 @@ const AccountsPanel: React.FC<AccountsPanelProps> = ({ majik, onUpdate }) => {
           title: "Account Created Successfully",
           body: `New Account for ${label || "Unknown"} created successfully.`,
         });
-
+        window.location.reload();
         return msg;
       },
       error: (err) => {
@@ -446,6 +446,7 @@ const AccountsPanel: React.FC<AccountsPanelProps> = ({ majik, onUpdate }) => {
         body: `New Account for ${label || mnemonicJSON.id} created successfully.`,
       });
       onUpdate?.(majik);
+      window.location.reload();
       setRefreshKey((k) => k + 1);
     } catch (e) {
       console.error(e);
