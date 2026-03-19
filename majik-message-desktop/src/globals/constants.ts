@@ -1,8 +1,4 @@
-export const API_ENDPOINT_PROD =
-  "https://p3qab1ealh.execute-api.ap-southeast-1.amazonaws.com";
 
-export const AWS_S3_BUCKET_NAME = "majikah-solutions-public";
-export const AWS_REGION = "ap-southeast-1";
 
 export const URL_OFFICIAL_DOMAIN = "majikah.solutions";
 
