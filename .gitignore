@@ -1,21 +1,18 @@
 majik-message-api
-majik-message-desktop/src/renderer/src/utils
-majik-message-desktop/src/renderer/src/SDK
-majik-message-desktop/src/renderer/src/redux
-majik-message-desktop/src/renderer/src/lib
 
-
-majik-message-desktop/src/renderer/src/components/majik-context-wrapper
-majik-message-desktop/src/renderer/src/components/majikah-session-wrapper
-majik-message-desktop/src/renderer/src/components/majikah-notification-wrapper
+majik-message-desktop/src/utils
+majik-message-desktop/src/SDK
+majik-message-desktop/src/redux
+majik-message-desktop/src/lib
+majik-message-desktop/src/components/majik-context-wrapper
+majik-message-desktop/src/components/majikah-session-wrapper
+majik-message-desktop/src/components/majikah-notification-wrapper
 majik-message-desktop/.env
 majik-message-desktop/src/main
-
 majik-message-desktop/package.json
 majik-message-desktop/package-lock.json
 
-
+_legacy_majik-message-desktop
 majik-message-chrome-extension/.env
-
 majik-message-chrome-extension/src/components/majik-context-wrapper
 majik-message-chrome-extension/src/components/majikah-session-wrapper

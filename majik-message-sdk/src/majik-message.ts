@@ -157,34 +157,34 @@ export class MajikMessage {
 
   // ── Private: Envelope helpers ────────────────────────────────────────────
 
-  /**
-   * Resolve a list of account/contact IDs into MajikRecipient objects.
-   * Each recipient needs their ML-KEM public key from MajikKeyStore.
-   */
-  private async _resolveRecipients(ids: string[]): Promise<MajikRecipient[]> {
-    return Promise.all(
-      ids.map(async (id) => {
-        const contact = this.contactDirectory.getContact(id);
-        if (!contact) throw new Error(`No contact found for id "${id}"`);
+  // /**
+  //  * Resolve a list of account/contact IDs into MajikRecipient objects.
+  //  * Each recipient needs their ML-KEM public key from MajikKeyStore.
+  //  */
+  // private async _resolveRecipients(ids: string[]): Promise<MajikRecipient[]> {
+  //   return Promise.all(
+  //     ids.map(async (id) => {
+  //       const contact = this.contactDirectory.getContact(id);
+  //       if (!contact) throw new Error(`No contact found for id "${id}"`);
 
-        // const key = await MajikKeyStore.load(id);
+  //       // const key = await MajikKeyStore.load(id);
 
-        const mlPubKey = base64ToUint8Array(contact.mlKey);
+  //       const mlPubKey = base64ToUint8Array(contact.mlKey);
 
-        if (!mlPubKey) {
-          throw new Error(
-            `Contact "${id}" has no ML-KEM public key. ` +
-              `They may need to upgrade their account via importFromMnemonicBackup().`,
-          );
-        }
+  //       if (!mlPubKey) {
+  //         throw new Error(
+  //           `Contact "${id}" has no ML-KEM public key. ` +
+  //             `They may need to upgrade their account via importFromMnemonicBackup().`,
+  //         );
+  //       }
 
-        return {
-          fingerprint: contact.fingerprint,
-          mlKemPublicKey: mlPubKey,
-        } satisfies MajikRecipient;
-      }),
-    );
-  }
+  //       return {
+  //         fingerprint: contact.fingerprint,
+  //         mlKemPublicKey: mlPubKey,
+  //       } satisfies MajikRecipient;
+  //     }),
+  //   );
+  // }
 
   /**
    * Resolve a list of account/contact IDs into MajikRecipient objects.
@@ -2676,6 +2676,12 @@ export class MajikMessage {
 
       try {
         this.contactDirectory.clear();
+      } catch {
+        /* ignore */
+      }
+
+      try {
+        await MajikKeyStore.deleteAll();
       } catch {
         /* ignore */
       }

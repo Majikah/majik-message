@@ -1,0 +1,225 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Majik Message",
+  "version": "1.3.0",
+  "identifier": "com.majikah.majik-message",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Majik Message",
+        "width": 1200,
+        "height": 850,
+        "minWidth": 600,
+        "minHeight": 850,
+        "visible": true,
+        "decorations": true,
+        "center": true,
+        "dragDropEnabled": false
+      }
+    ],
+    "security": {
+      "csp": {
+        "default-src": [
+          "'self'",
+          "https://accounts.google.com",
+          "https://connect.facebook.net",
+          "https://www.facebook.com",
+          "https://*.microsoft.com",
+          "https://*.majikah.solutions",
+          "https://*.r2.cloudflarestorage.com",
+          "wss://*.majikah.solutions",
+          "https://*.cloudflare.com",
+          "https://www.gstatic.com"
+        ],
+        "worker-src": ["'self'", "blob:"],
+        "font-src": [
+          "'self'",
+          "https://fonts.googleapis.com",
+          "https://fonts.gstatic.com",
+          "https://cdn.jsdelivr.net/npm/",
+          "https://client.crisp.chat"
+        ],
+        "img-src": [
+          "'self'",
+          "blob:",
+          "data:",
+          "asset:",
+          "https://asset.localhost",
+          "https://*.majikah.solutions",
+          "https://gydzizwxtftlmsdaiouw.supabase.co",
+          "https://cdn.hashnode.com",
+          "https://lh3.googleusercontent.com",
+          "https://www.facebook.com",
+          "https://i.ytimg.com",
+          "https://i.scdn.co",
+          "https://a1.sndcdn.com",
+          "https://i.pinimg.com",
+          "https://sketchfab.com",
+          "https://*.sketchfab.com",
+          "https://*.google.com",
+          "https://www.googletagmanager.com",
+          "https://cdn.ywxi.net",
+          "https://www.trustedsite.com",
+          "https://*.crisp.chat",
+          "https://crisp.chat",
+          "https://b.sf-syn.com",
+          "https://*.trustpilot.com",
+          "https://*.microsoft.com",
+          "https://*.giphy.com"
+        ],
+        "script-src": [
+          "'self'",
+          "'unsafe-inline'",
+          "'unsafe-eval'",
+          "'wasm-unsafe-eval'",
+          "https://www.googletagmanager.com",
+          "https://accounts.google.com",
+          "https://cdn.jsdelivr.net/npm/",
+          "https://connect.facebook.net",
+          "https://www.youtube.com",
+          "https://www.youtube-nocookie.com",
+          "https://s.ytimg.com",
+          "https://open.spotify.com",
+          "https://sketchfab.com",
+          "https://*.sketchfab.com",
+          "https://cdn.ywxi.net",
+          "https://www.trustedsite.com",
+          "https://client.crisp.chat",
+          "https://b.sf-syn.com",
+          "https://*.trustpilot.com",
+          "https://*.majikah.solutions",
+          "https://*.logr-in.com",
+          "https://*.cloudflare.com",
+          "https://*.microsoft.com",
+          "https://www.gstatic.com"
+        ],
+        "style-src": [
+          "'self'",
+          "'unsafe-inline'",
+          "https://accounts.google.com/gsi/style",
+          "https://fonts.googleapis.com",
+          "https://fonts.gstatic.com",
+          "https://cdn.jsdelivr.net/npm/",
+          "https://client.crisp.chat"
+        ],
+        "connect-src": [
+          "'self'",
+          "blob:",
+          "data:",
+          "asset:",
+          "https://asset.localhost",
+          "https://gydzizwxtftlmsdaiouw.supabase.co",
+          "https://www.googleapis.com",
+          "https://accounts.google.com",
+          "https://www.google-analytics.com",
+          "https://graph.facebook.com",
+          "https://www.youtube.com",
+          "https://www.youtube-nocookie.com",
+          "https://yt3.ggpht.com",
+          "https://open.spotify.com",
+          "https://majikah.solutions",
+          "https://www.majikah.solutions",
+          "https://dev-test.majikah.solutions",
+          "https://o4509590888710144.ingest.us.sentry.io",
+          "https://*.logr-in.com",
+          "https://sketchfab.com",
+          "https://*.sketchfab.com",
+          "https://s3-us-west-2.amazonaws.com",
+          "https://cdn.ywxi.net",
+          "https://www.trustedsite.com",
+          "https://client.relay.crisp.chat",
+          "wss://client.relay.crisp.chat",
+          "https://client.crisp.chat",
+          "https://*.trustpilot.com",
+          "https://*.majikah.solutions",
+          "wss://*.majikah.solutions",
+          "https://*.giphy.com",
+          "https://*.cloudflare.com",
+          "https://*.r2.cloudflarestorage.com",
+          "https://fcm.googleapis.com",
+          "https://firebaseinstallations.googleapis.com",
+          "https://*.firebaseio.com",
+          "wss://*.firebaseio.com",
+          "https://fcmregistrations.googleapis.com",
+          "https://google.github.io"
+        ],
+        "child-src": [
+          "'self'",
+          "blob:",
+          "https://www.youtube.com",
+          "https://www.youtube-nocookie.com",
+          "https://open.spotify.com",
+          "https://*.google.com"
+        ],
+        "media-src": [
+          "'self'",
+          "blob:",
+          "https://www.youtube.com",
+          "https://www.youtube-nocookie.com",
+          "https://open.spotify.com",
+          "https://sketchfab.com",
+          "https://*.sketchfab.com",
+          "https://*.google.com",
+          "https://*.majikah.solutions",
+          "https://*.giphy.com"
+        ],
+        "frame-src": [
+          "'self'",
+          "blob:",
+          "https://www.youtube.com",
+          "https://www.youtube-nocookie.com",
+          "https://open.spotify.com",
+          "https://accounts.google.com",
+          "https://sketchfab.com",
+          "https://*.sketchfab.com",
+          "https://*.google.com",
+          "https://www.trustedsite.com",
+          "https://*.cloudflare.com"
+        ],
+        "frame-ancestors": ["'none'"],
+        "object-src": ["'none'"],
+        "base-uri": ["'self'"]
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "wix": {
+        "language": "en-US"
+      },
+      "nsis": {
+        "installMode": "perMachine"
+      }
+    },
+
+    "fileAssociations": [
+      {
+        "ext": ["mjkb"],
+        "name": "Majik Binary File",
+        "description": "MajikFile Encrypted File",
+        "mimeType": "application/vnd.majikah.bundle",
+        "role": "Viewer"
+      }
+    ],
+    "publisher": "Majikah Information Technology Solutions",
+    "copyright": "© 2026 Majikah Information Technology Solutions. All rights reserved.",
+    "longDescription": "Post-quantum end-to-end encryption with ML-KEM-768. Seed phrase–based accounts. Auto-expiring messages. Offline-ready. Exportable encrypted messages. Tamper-proof threads with blockchain-like integrity. Quantum-resistant messaging.",
+    "shortDescription": "True end-to-end post-quantum encryption. No phone numbers. No passwords. Just your seed phrase and complete privacy—safe from quantum computers."
+  }
+}

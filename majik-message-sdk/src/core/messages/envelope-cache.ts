@@ -51,7 +51,7 @@ export interface EnvelopeCacheItem {
  * EnvelopeCache
  * ------------------------------- */
 export class EnvelopeCache {
-  private userProfile: string = "default";
+  // private userProfile: string = "default";
 
   private dbPromise: Promise<IDBDatabase>;
   private dbName: string;
@@ -69,7 +69,7 @@ export class EnvelopeCache {
     this.memoryCacheSize = config?.memoryCacheSize || 100;
     this.memoryCache = new Map();
 
-    this.userProfile = userProfile || "default";
+    // this.userProfile = userProfile || "default";
 
     this.dbPromise = this.initDB();
   }

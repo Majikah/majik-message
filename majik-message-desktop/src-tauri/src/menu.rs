@@ -1,0 +1,224 @@
+//menu.rs
+use tauri::{
+    menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu},
+    AppHandle, Emitter, Manager, Runtime,
+};
+
+pub fn build_menu<R: Runtime>(app: &AppHandle<R>, is_signed_in: bool) -> tauri::Result<Menu<R>> {
+    // ── About ──────────────────────────────────────────────────────────────
+
+    let about = PredefinedMenuItem::about(
+        app,
+        Some("About"), // label override, or None to use default
+        Some(AboutMetadata {
+            name: Some("Majik Message".into()),
+            version: Some(env!("CARGO_PKG_VERSION").into()),
+            copyright: Some(
+                "© 2026 Majikah Information Technology Solutions. All rights reserved.".into(),
+            ),
+            website: Some("https://message.majikah.solutions".into()),
+            icon: Some(app.default_window_icon().unwrap().clone()),
+            license: Some("Apache 2.0".into()),
+            authors: Some(vec!["Zelijah".into()]),
+            ..Default::default()
+        }),
+    )?;
+
+    // ── File ────────────────────────────────────────────────────────────
+    let encrypt_file = MenuItem::with_id(app, "encrypt-file", "Encrypt File", true, None::<&str>)?;
+    let decrypt_file = MenuItem::with_id(app, "decrypt-file", "Decrypt File", true, None::<&str>)?;
+
+    let file_menu = Submenu::with_items(app, "File", true, &[&encrypt_file, &decrypt_file])?;
+
+    // ── Account ────────────────────────────────────────────────────────────
+    let create_account =
+        MenuItem::with_id(app, "create-account", "Create Account", true, None::<&str>)?;
+    let import_account =
+        MenuItem::with_id(app, "import-account", "Import Account", true, None::<&str>)?;
+    let add_contact = MenuItem::with_id(app, "add-contact", "Add Contact", true, None::<&str>)?;
+    let minimize_to_tray = MenuItem::with_id(
+        app,
+        "minimize-to-tray",
+        "Minimize to Tray",
+        true,
+        None::<&str>,
+    )?;
+    let sign_in = MenuItem::with_id(app, "sign-in", "Sign In", !is_signed_in, None::<&str>)?;
+    let sign_out = MenuItem::with_id(app, "sign-out", "Sign Out", is_signed_in, None::<&str>)?;
+    let exit = MenuItem::with_id(app, "exit", "Exit", true, None::<&str>)?;
+
+    let account_menu = Submenu::with_items(
+        app,
+        "Account",
+        true,
+        &[
+            &create_account,
+            &import_account,
+            &PredefinedMenuItem::separator(app)?,
+            &add_contact,
+            &PredefinedMenuItem::separator(app)?,
+            &minimize_to_tray,
+            &PredefinedMenuItem::separator(app)?,
+            &sign_in,
+            &sign_out,
+            &PredefinedMenuItem::separator(app)?,
+            &exit,
+        ],
+    )?;
+
+    // ── Preferences ────────────────────────────────────────────────────────
+    let toggle_dark_mode = MenuItem::with_id(
+        app,
+        "toggle-dark-mode",
+        "Toggle Dark Mode",
+        true,
+        None::<&str>,
+    )?;
+
+    let preferences_menu = Submenu::with_items(app, "Preferences", true, &[&toggle_dark_mode])?;
+
+    // ── Tools ──────────────────────────────────────────────────────────────
+    let validate_thread = MenuItem::with_id(
+        app,
+        "validate-thread",
+        "Validate Thread",
+        true,
+        None::<&str>,
+    )?;
+    let launch_web_app =
+        MenuItem::with_id(app, "launch-web-app", "Launch Web App", true, None::<&str>)?;
+
+    let system_status =
+        MenuItem::with_id(app, "system-status", "System Status", true, None::<&str>)?;
+
+    let tools_menu = Submenu::with_items(
+        app,
+        "Tools",
+        true,
+        &[
+            &validate_thread,
+            &PredefinedMenuItem::separator(app)?,
+            &launch_web_app,
+            &PredefinedMenuItem::separator(app)?,
+            &system_status,
+        ],
+    )?;
+
+    // ── Help ───────────────────────────────────────────────────────────────
+    let docs = MenuItem::with_id(app, "docs", "Docs", true, None::<&str>)?;
+    let product_info = MenuItem::with_id(
+        app,
+        "product-info",
+        "Product Information",
+        true,
+        None::<&str>,
+    )?;
+    let developer = MenuItem::with_id(app, "developer", "Developer", true, None::<&str>)?;
+    let report_issue =
+        MenuItem::with_id(app, "report-issue", "Report an Issue", true, None::<&str>)?;
+    let submit_ticket =
+        MenuItem::with_id(app, "submit-ticket", "Submit Ticket", true, None::<&str>)?;
+
+    let help_menu = Submenu::with_items(
+        app,
+        "Help",
+        true,
+        &[
+            &docs,
+            &product_info,
+            &developer,
+            &PredefinedMenuItem::separator(app)?,
+            &report_issue,
+            &submit_ticket,
+        ],
+    )?;
+
+    Menu::with_items(
+        app,
+        &[
+            &file_menu,
+            &account_menu,
+            &preferences_menu,
+            &tools_menu,
+            &help_menu,
+            &about,
+        ],
+    )
+}
+
+pub fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, event_id: &str) {
+    match event_id {
+        // ── File ─────────────────────────────────────────────────────────
+        "encrypt-file" => {
+            let _ = app.emit("trigger-encrypt-file", ());
+        }
+        "decrypt-file" => {
+            let _ = app.emit("trigger-decrypt-file", ());
+        }
+        // ── Account ─────────────────────────────────────────────────────────
+        "create-account" => {
+            let _ = app.emit("trigger-create-account", ());
+        }
+        "import-account" => {
+            let _ = app.emit("trigger-import-account", ());
+        }
+        "add-contact" => {
+            let _ = app.emit("trigger-import-contact", ());
+        }
+        "minimize-to-tray" => {
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.hide();
+            }
+        }
+        "sign-in" => {
+            let _ = app.emit("trigger-auth-sign-in", ());
+        }
+        "sign-out" => {
+            let _ = app.emit("trigger-auth-sign-out", ());
+        }
+        "exit" => {
+            app.exit(0);
+        }
+
+        // ── Preferences ──────────────────────────────────────────────────────
+        "toggle-dark-mode" => {
+            let _ = app.emit("trigger-toggle-dark-mode", ());
+        }
+
+        // ── Tools ────────────────────────────────────────────────────────────
+        "validate-thread" => {
+            open_url(app, "https://message.majikah.solutions/threads/validate");
+        }
+        "launch-web-app" => {
+            open_url(app, "https://message.majikah.solutions/");
+        }
+
+        "system-status" => {
+            open_url(app, "https://stats.uptimerobot.com/AeguJiJOrR/");
+        }
+
+        // ── Help ─────────────────────────────────────────────────────────────
+        "docs" => {
+            open_url(app, "https://majikah.solutions/products/majik-message/docs");
+        }
+        "product-info" => {
+            open_url(app, "https://majikah.solutions/products/majik-message");
+        }
+        "developer" => {
+            open_url(app, "https://thezelijah.world/about");
+        }
+        "report-issue" => {
+            open_url(app, "https://github.com/Majikah/majik-message/issues");
+        }
+        "submit-ticket" => {
+            open_url(app, "https://majikah.solutions/support/tickets");
+        }
+
+        _ => {}
+    }
+}
+
+fn open_url<R: Runtime>(app: &AppHandle<R>, url: &str) {
+    use tauri_plugin_opener::OpenerExt;
+    let _ = app.opener().open_url(url, None::<&str>);
+}

@@ -7,7 +7,7 @@
  */
 
 import { MajikKey, MajikKeyJSON, SerializedIdentity } from "@majikah/majik-key";
-import { base64ToArrayBuffer } from "../utils/utilities";
+// import { base64ToArrayBuffer } from "../utils/utilities";
 import { KDF_VERSION } from "./constants";
 
 // ─── IDB Config ───────────────────────────────────────────────────────────────
@@ -462,11 +462,11 @@ export class MajikKeyStore {
       );
     }
 
-    // SerializedIdentity may or may not have encryptedPrivateKey
-    // (some records were stored without it — public-key-only contacts)
-    const encryptedPrivateKey = si.encryptedPrivateKey
-      ? base64ToArrayBuffer(si.encryptedPrivateKey)
-      : new ArrayBuffer(0);
+    // // SerializedIdentity may or may not have encryptedPrivateKey
+    // // (some records were stored without it — public-key-only contacts)
+    // const encryptedPrivateKey = si.encryptedPrivateKey
+    //   ? base64ToArrayBuffer(si.encryptedPrivateKey)
+    //   : new ArrayBuffer(0);
 
     // Reconstruct as a minimal MajikKeyJSON (v1 PBKDF2, no ML-KEM)
     const json: MajikKeyJSON = {
@@ -628,6 +628,29 @@ export class MajikKeyStore {
    */
   static async deleteIdentity(id: string): Promise<void> {
     return this.delete(id);
+  }
+
+  static async deleteAll(): Promise<void> {
+    const db = await this._getDB();
+
+    const clearStore = (storeName: string) =>
+      new Promise<void>((resolve, reject) => {
+        if (!db.objectStoreNames.contains(storeName)) return resolve();
+        const tx = db.transaction(storeName, "readwrite");
+        const req = tx.objectStore(storeName).clear();
+        req.onsuccess = () => resolve();
+        req.onerror = () =>
+          reject(
+            new MajikKeyStoreError(
+              `Failed to clear store: ${storeName}`,
+              req.error,
+            ),
+          );
+      });
+
+    await clearStore(STORE_NAME);
+    await clearStore(LEGACY_STORE_NAME);
+    this._keys.clear();
   }
 
   /**
