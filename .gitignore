@@ -12,6 +12,8 @@ majik-message-desktop/src/main
 majik-message-desktop/package.json
 majik-message-desktop/package-lock.json
 
+majik-message-desktop/public/firebase-messaging-sw.js
+
 _legacy_majik-message-desktop
 majik-message-chrome-extension/.env
 majik-message-chrome-extension/src/components/majik-context-wrapper
