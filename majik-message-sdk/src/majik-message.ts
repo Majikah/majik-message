@@ -644,6 +644,10 @@ export class MajikMessage {
       publicKey = { raw: new Uint8Array(rawBuffer) };
     }
 
+    if (!data?.id || !publicKey || !data?.fingerprint || !data?.mlKey) {
+      throw new Error("Invalid contact JSON");
+    }
+
     return new MajikContact({
       id: data.id,
       publicKey,
@@ -654,6 +658,15 @@ export class MajikMessage {
   }
 
   addContact(contact: MajikContact): void {
+    if (
+      !contact?.id ||
+      !contact?.publicKey ||
+      !contact?.fingerprint ||
+      !contact?.mlKey
+    ) {
+      throw new Error("Invalid contact JSON");
+    }
+
     this.contactDirectory.addContact(contact);
     this.emit("new-contact", contact);
     this.scheduleAutosave();

@@ -48,6 +48,15 @@ export class MajikContactDirectory {
    * ================================ */
 
   addContact(contact: MajikContact): this {
+    if (
+      !contact?.id ||
+      !contact?.publicKey ||
+      !contact?.fingerprint ||
+      !contact?.mlKey
+    ) {
+      throw new MajikContactDirectoryError("Invalid contact");
+    }
+
     if (!(contact instanceof MajikContact)) {
       throw new MajikContactDirectoryError("Invalid contact instance");
     }
