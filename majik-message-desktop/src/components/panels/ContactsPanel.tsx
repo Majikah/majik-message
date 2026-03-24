@@ -188,7 +188,16 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({ majik, onUpdate }) => {
       return;
     }
     try {
-      await majik.importContactFromString(inviteKey);
+      const importResponse = await majik.importContactFromString(inviteKey);
+
+      if (!importResponse.success) {
+        toast.error("Failed to Add New Contact", {
+          description: importResponse.message,
+          id: "error-majik-add",
+        });
+        return;
+      }
+
       setRefreshKey((prev) => prev + 1);
       toast.success("New Contact Added Succesfully", {
         description: inviteKey,

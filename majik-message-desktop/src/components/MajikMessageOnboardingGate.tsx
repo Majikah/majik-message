@@ -656,7 +656,7 @@ const MajikMessageOnboardingGate: React.FC<MajikMessageOnboardingGateProps> = ({
             <DialogOverlay />
             <GateContent>
               <DialogHeader>
-                <DialogTitle>Welcome to Majik Signature</DialogTitle>
+                <DialogTitle>Welcome to Majik Message</DialogTitle>
                 <DialogDescription>
                   Set up your first account to get started.
                 </DialogDescription>
