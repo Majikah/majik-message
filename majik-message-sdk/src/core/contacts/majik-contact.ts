@@ -104,6 +104,8 @@ export class MajikContact {
     mlKey: string,
     fingerprint: string,
     meta?: Partial<MajikContactMeta>,
+    edPublicKeyBase64?: string,
+    mlDsaPublicKeyBase64?: string,
   ): MajikContact {
     return new MajikContact({
       id,
@@ -111,6 +113,8 @@ export class MajikContact {
       fingerprint,
       meta,
       mlKey,
+      edPublicKeyBase64,
+      mlDsaPublicKeyBase64,
     });
   }
 

@@ -269,6 +269,8 @@ export class MajikContactDirectory {
         item.mlKey,
         item.fingerprint,
         item.meta,
+        item.edPublicKeyBase64,
+        item.mlDsaPublicKeyBase64,
       );
       this.contacts.set(contact.id, contact);
       this.fingerprintMap.set(contact.fingerprint, contact.id);
