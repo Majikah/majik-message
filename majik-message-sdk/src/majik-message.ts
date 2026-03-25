@@ -520,6 +520,8 @@ export class MajikMessage {
         publicKey: publicKeyBase64,
         fingerprint: contact.fingerprint,
         mlKey: contact.mlKey,
+        edPublicKeyBase64: contact.edPublicKeyBase64,
+        mlDsaPublicKeyBase64: contact.mlDsaPublicKeyBase64,
       } satisfies MajikContactCard,
       null,
       2,
@@ -562,6 +564,8 @@ export class MajikMessage {
           fingerprint: data.fingerprint,
           meta: { label: data.label },
           mlKey: data.mlKey,
+          edPublicKeyBase64: data.edPublicKeyBase64,
+          mlDsaPublicKeyBase64: data.mlDsaPublicKeyBase64,
         }),
       );
 
@@ -610,6 +614,8 @@ export class MajikMessage {
       publicKey: publicKeyBase64,
       fingerprint: contact.fingerprint,
       mlKey: contact.mlKey,
+      edPublicKeyBase64: contact.edPublicKeyBase64,
+      mlDsaPublicKeyBase64: contact.mlDsaPublicKeyBase64,
     };
 
     const jsonStr = JSON.stringify(jsonObj);
@@ -628,7 +634,7 @@ export class MajikMessage {
     const decompressed = gunzipSync(new Uint8Array(compressed));
     const jsonStr = new TextDecoder().decode(decompressed);
 
-    const data: any = JSON.parse(jsonStr);
+    const data: MajikContactCard = JSON.parse(jsonStr);
 
     const rawBuffer = base64ToArrayBuffer(data.publicKey as string);
     let publicKey: CryptoKey | { raw: Uint8Array };
@@ -654,6 +660,8 @@ export class MajikMessage {
       fingerprint: data.fingerprint,
       meta: { label: data.label },
       mlKey: data.mlKey,
+      edPublicKeyBase64: data.edPublicKeyBase64,
+      mlDsaPublicKeyBase64: data.mlDsaPublicKeyBase64,
     });
   }
 
