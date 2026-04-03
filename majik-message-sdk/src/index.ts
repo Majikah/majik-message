@@ -1,6 +1,5 @@
 export * from "./majik-message";
 export type * from "./core/types";
-export * from "./core/contacts/majik-contact";
 export * from "./core/contacts/majik-contact-directory";
 export * from "./core/crypto/constants";
 export * from "./core/crypto/crypto-provider";

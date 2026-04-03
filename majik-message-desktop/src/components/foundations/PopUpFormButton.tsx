@@ -1,110 +1,110 @@
-import React, { useState } from 'react'
-import styled from 'styled-components'
-import * as AlertDialog from '@radix-ui/react-alert-dialog'
+import React, { useState } from "react";
+import styled from "styled-components";
+import * as AlertDialog from "@radix-ui/react-alert-dialog";
 
-import StyledIconButton from './StyledIconButton'
-import { ActionButton } from '../../globals/buttons'
-import DuoButton from './DuoButton'
+import StyledIconButton from "./StyledIconButton";
+import { ActionButton } from "../../globals/buttons";
+import DuoButton from "./DuoButton";
 import {
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogOverlay,
-  DialogTitle
-} from '../../globals/styled-dialogs'
-import ScrollableForm from './ScrollableForm'
-import DynamicPlaceholder from './DynamicPlaceholder'
+  DialogTitle,
+} from "../../globals/styled-dialogs";
+import ScrollableForm from "./ScrollableForm";
+import DynamicPlaceholder from "./DynamicPlaceholder";
 
 const Button = styled(ActionButton)`
   min-width: 100px;
-`
+`;
 
 const ModalContainer = styled.div`
   display: flex;
   flex-direction: column;
 
   padding: 1rem 50px;
-`
+`;
 
 interface PopUpFormButtonProps {
-  id?: string
-  text?: string
-  disabled?: boolean
-  icon?: React.ComponentType
-  children: React.ReactNode
-  scrollable?: boolean
+  id?: string;
+  text?: string;
+  disabled?: boolean;
+  icon?: React.ComponentType;
+  children: React.ReactNode;
+  scrollable?: boolean;
   buttons: {
     cancel: {
-      text: string
-      onClick?: () => void
-      isDisabled?: boolean
-      hide?: boolean
-    }
+      text: string;
+      onClick?: () => void;
+      isDisabled?: boolean;
+      hide?: boolean;
+    };
     confirm: {
-      text: string
-      onClick?: () => void
-      isDisabled?: boolean
-      hide?: boolean
-      confirmationText?: string
-    }
-  }
+      text: string;
+      onClick?: () => void;
+      isDisabled?: boolean;
+      hide?: boolean;
+      confirmationText?: string;
+    };
+  };
   modal: {
-    title: string
-    description: string
-  }
+    title: string;
+    description: string;
+  };
   loading?: {
-    isLoading?: boolean
-    text?: string
-  }
-  isOpen?: boolean
-  onOpenChange?: (open: boolean) => void
+    isLoading?: boolean;
+    text?: string;
+  };
+  isOpen?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
 const PopUpFormButton: React.FC<PopUpFormButtonProps> = ({
   id,
-  text = 'Confirm',
+  text = "Confirm",
   disabled = false,
   icon,
   children,
   scrollable = false,
   buttons = {
     cancel: {
-      text: 'Cancel',
-      isDisabled: false,
-      hide: false
-    },
-    confirm: {
-      text: 'Confirm',
+      text: "Cancel",
       isDisabled: false,
       hide: false,
-      confirmationText: 'Are you sure you want to proceed with this action?'
-    }
+    },
+    confirm: {
+      text: "Confirm",
+      isDisabled: false,
+      hide: false,
+      confirmationText: "Are you sure you want to proceed with this action?",
+    },
   },
   modal = {
-    title: 'Confirm Action',
-    description: 'Are you sure you want to proceed with this action?'
+    title: "Confirm Action",
+    description: "Are you sure you want to proceed with this action?",
   },
   loading = {
     isLoading: false,
-    text: 'Loading...'
+    text: "Loading...",
   },
   isOpen,
-  onOpenChange
+  onOpenChange,
 }) => {
-  const [internalOpen, setInternalOpen] = useState<boolean>(false)
+  const [internalOpen, setInternalOpen] = useState<boolean>(false);
 
-  const open = isOpen ?? internalOpen
-  const setOpen = onOpenChange ?? setInternalOpen
+  const open = isOpen ?? internalOpen;
+  const setOpen = onOpenChange ?? setInternalOpen;
 
   const handleOnConfirm = (): void => {
-    buttons?.confirm?.onClick?.()
-    setOpen(false) // Close dialog after confirming
-  }
+    buttons?.confirm?.onClick?.();
+    setOpen(false); // Close dialog after confirming
+  };
 
   const handleOnCancel = (): void => {
-    buttons?.cancel?.onClick?.()
-    setOpen(false) // Close dialog after confirming
-  }
+    buttons?.cancel?.onClick?.();
+    setOpen(false); // Close dialog after confirming
+  };
 
   return (
     <>
@@ -145,6 +145,8 @@ const PopUpFormButton: React.FC<PopUpFormButtonProps> = ({
                 textCancelButton={buttons.cancel.text}
                 textProceedButton={buttons.confirm.text}
                 confirmationText={buttons.confirm.confirmationText}
+                hideButtonA={buttons.cancel.hide}
+                hideButtonB={buttons.confirm.hide}
               >
                 {[children]}
               </ScrollableForm>
@@ -169,7 +171,7 @@ const PopUpFormButton: React.FC<PopUpFormButtonProps> = ({
         </AlertDialog.Portal>
       </AlertDialog.Root>
     </>
-  )
-}
+  );
+};
 
-export default PopUpFormButton
+export default PopUpFormButton;

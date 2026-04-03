@@ -16,7 +16,6 @@ import {
 import ThreadRow from "./ThreadRow";
 import {
   MajikMessageThread,
-  type MajikContact,
   type MajikMessageThreadID,
   type MajikMessageThreadSummary,
 } from "@majikah/majik-message";
@@ -34,6 +33,7 @@ import { launchTutorialThreads } from "@/lib/shepherd-js/tutorials/tutorial-thre
 import { useShepherd } from "@/lib/shepherd-js/use-shepherd";
 import GuideHelper from "@/components/functional/GuideHelper";
 import { MajikMessageIdentitySelector } from "@/components/MajikMessageIdentitySelector";
+import { MajikContact } from "@majikah/majik-contact";
 
 // ─── Local tokens ─────────────────────────────────────────────────────────────
 const FONT_MONO = "'Fira Mono', 'JetBrains Mono', monospace";

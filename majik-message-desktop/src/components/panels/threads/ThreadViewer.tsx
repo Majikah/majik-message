@@ -821,7 +821,7 @@ export const ThreadViewer: React.FC<ThreadViewerProps> = ({
                 thread.isClosed() ||
                 fetchedMails.length <= 0
               }
-              icon={CheckIcon}
+              icon={{ icon: CheckIcon }}
               strict
               text="Close Thread"
               requiredText={majikah.user!.email}
@@ -846,7 +846,7 @@ export const ThreadViewer: React.FC<ThreadViewerProps> = ({
               disabled={thread.hasDeletionApproval(
                 majik.currentIdentity!.publicKey,
               )}
-              icon={TrashIcon}
+              icon={{ icon: TrashIcon }}
               strict
               text="Delete"
               requiredText={majikah.user!.email}
@@ -861,7 +861,7 @@ export const ThreadViewer: React.FC<ThreadViewerProps> = ({
               disabled={
                 !thread.hasDeletionApproval(majik.currentIdentity!.publicKey)
               }
-              icon={HandPalmIcon}
+              icon={{ icon: HandPalmIcon }}
               strict
               text="Cancel Deletion"
               alertTextTitle="Revoke Deletion Request"

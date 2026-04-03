@@ -15,7 +15,6 @@ import { PlusIcon, UserIcon } from "@phosphor-icons/react";
 
 import {
   jsonToSeed,
-  MajikContact,
   seedStringToArray,
   type MnemonicJSON,
 } from "@majikah/majik-message";
@@ -27,6 +26,7 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { writeFile } from "@tauri-apps/plugin-fs";
 import { sendNotification } from "@tauri-apps/plugin-notification";
 import { MajikMessageDatabase } from "../majik-context-wrapper/majik-message-database";
+import { MajikContact } from "@majikah/majik-contact";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const MAX_ACCOUNT_LIMIT = 25;
@@ -281,7 +281,7 @@ const AccountsPanel: React.FC<AccountsPanelProps> = ({ majik, onUpdate }) => {
           title: "Account Created Successfully",
           body: `New Account for ${label || "Unknown"} created successfully.`,
         });
-     
+
         return msg;
       },
       error: (err) => {

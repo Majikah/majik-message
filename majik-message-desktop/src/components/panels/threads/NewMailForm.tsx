@@ -8,7 +8,6 @@ import {
 } from "@phosphor-icons/react";
 
 import type {
-  MajikContact,
   MajikMessagePublicKey,
   MajikMessageThread,
 } from "@majikah/majik-message";
@@ -19,6 +18,7 @@ import { MailInputBox } from "@/components/functional/MailInputBox";
 import { isDevEnvironment } from "@/utils/utils";
 import ThreadAttachments from "./ThreadAttachments";
 import type { MajikFile } from "@majikah/majik-file";
+import { MajikContact } from "@majikah/majik-contact";
 
 // ─── Animations ───────────────────────────────────────────────────────────────
 

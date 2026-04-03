@@ -5,7 +5,7 @@ import {
   type MajikContactCard,
   type MajikContactMeta,
   type SerializedMajikContact,
-} from "./core/contacts/majik-contact";
+} from "@majikah/majik-contact";
 import { KEY_ALGO } from "./core/crypto/constants";
 import { ScannerEngine } from "./core/scanner/scanner-engine";
 import { MessageEnvelope } from "./core/messages/message-envelope";
@@ -59,7 +59,14 @@ import {
 } from "@majikah/majik-file";
 
 import {
+  EnvelopeInfo,
+  ExpectedSigner,
   MajikSignature,
+  SealInfo,
+  SealVerificationResult,
+  SignatoriesFilter,
+  SignatoriesResult,
+  SignatoryInfo,
   type MajikSignatureJSON,
   type MajikSignerPublicKeys,
   type VerificationResult,
@@ -350,12 +357,8 @@ export class MajikMessage {
       throw new Error("Account with the same ID already exists");
     }
     const keyContact = key.toContact();
-    const contactJSON = await keyContact.toJSON();
-    const reParsedContact = MajikContact.fromJSON(contactJSON);
 
-    console.log("Account: ", key);
-
-    this.addOwnAccount(reParsedContact);
+    this.addOwnAccount(keyContact);
     return { id: key.id, fingerprint: key.fingerprint };
   }
 
@@ -370,11 +373,9 @@ export class MajikMessage {
     const key = await MajikKey.create(mnemonic, passphrase, label);
     await MajikKeyStore.addMajikKey(key);
 
-    const keyContact = await key.toContact().toJSON();
+    const keyContact = key.toContact();
 
-    const reParsedContact = MajikContact.fromJSON(keyContact);
-
-    this.addOwnAccount(reParsedContact);
+    this.addOwnAccount(keyContact);
     return { id: key.id, fingerprint: key.fingerprint, backup: key.backup };
   }
 
@@ -486,8 +487,20 @@ export class MajikMessage {
     return this.contactDirectory.getContact(id) ?? null;
   }
 
+  hasContact(id: string): boolean {
+    if (!id?.trim()) throw new Error("Invalid contact ID");
+    return this.contactDirectory.hasContact(id);
+  }
+
+  async hasContactByPublicKeyBase64(
+    publicKey: MajikMessagePublicKey,
+  ): Promise<boolean> {
+    if (!publicKey?.trim()) throw new Error("Invalid contact public key");
+    return await this.contactDirectory.hasContactByPublicKeyBase64(publicKey);
+  }
+
   async getContactByPublicKey(
-    publicKeyBase64: string,
+    publicKeyBase64: MajikMessagePublicKey,
   ): Promise<MajikContact | null> {
     if (!publicKeyBase64?.trim()) throw new Error("Invalid public key");
     return (
@@ -1887,6 +1900,7 @@ export class MajikMessage {
       timestamp?: string;
       mimeType?: string;
       accountId?: string;
+      expectedSigners?: ExpectedSigner[];
     },
   ): Promise<{
     blob: Blob;
@@ -1913,6 +1927,7 @@ export class MajikMessage {
         contentType: options?.contentType,
         timestamp: options?.timestamp,
         mimeType: options?.mimeType,
+        expectedSigners: options?.expectedSigners,
       });
     } catch (err) {
       this.emit("error", err, { context: "signFile" });
@@ -2375,6 +2390,182 @@ export class MajikMessage {
     return this.signFile(file, options);
   }
 
+  // ── Multi-sig & Allowlist ─────────────────────────────────────────────────
+
+  /**
+   * Build an ExpectedSigner entry from a MajikKey.
+   * Use this to construct the expectedSigners array passed to signFile().
+   * The key does not need to be unlocked.
+   *
+   * @example
+   *   const { blob } = await majik.signFile(file, {
+   *     expectedSigners: [
+   *       MajikSignatureClient.expectedSignerFromKey(aliceKey),
+   *       MajikSignatureClient.expectedSignerFromKey(bobKey),
+   *     ],
+   *   });
+   */
+  static expectedSignerFromKey(key: MajikKey): ExpectedSigner {
+    return MajikSignature.expectedSignerFromKey(key);
+  }
+
+  /**
+   * Get the allowlist from a file without verifying any signatures.
+   * Returns null for open-signing files or unsigned files.
+   *
+   * @example
+   *   const list = await majik.getAllowlist(file);
+   *   if (list) console.log("Restricted to", list.map(e => e.signerId));
+   */
+  async getAllowlist(
+    file: Blob,
+    options?: { mimeType?: string },
+  ): Promise<ExpectedSigner[] | null> {
+    try {
+      return MajikSignature.getAllowlist(file, options);
+    } catch (err) {
+      this.emit("error", err, { context: "getAllowlist" });
+      throw err;
+    }
+  }
+
+  /**
+   * Check whether a MajikKey is permitted to add a signature to this file.
+   * Accounts for seal status and allowlist membership (full three-field check).
+   *
+   * @example
+   *   const { permitted, reason } = await majik.canSign(file, key);
+   *   if (!permitted) showError(reason);
+   */
+  async canSign(
+    file: Blob,
+    key: MajikKey,
+    options?: { mimeType?: string },
+  ): Promise<{ permitted: boolean; reason?: string }> {
+    try {
+      return MajikSignature.canSign(file, key, options);
+    } catch (err) {
+      this.emit("error", err, { context: "canSign" });
+      throw err;
+    }
+  }
+
+  /**
+   * Returns true when the file has a restricted multi-sig envelope
+   * (allowlist with more than one expected signer).
+   * Returns false for unsigned, open-signing, or single-signer files.
+   */
+  async isMultiSig(
+    file: Blob,
+    options?: { mimeType?: string },
+  ): Promise<boolean> {
+    try {
+      return MajikSignature.isMultiSig(file, options);
+    } catch (err) {
+      this.emit("error", err, { context: "isMultiSig" });
+      throw err;
+    }
+  }
+
+  /**
+   * Core signatories method — returns all, signed, and pending arrays.
+   *
+   * When an allowlist is present:
+   *   - all     = every expected signer with their signing status
+   *   - signed  = those who have already signed
+   *   - pending = those who are expected but have not yet signed
+   *
+   * When no allowlist is present:
+   *   - all / signed = actual signers (everyone has signed by definition)
+   *   - pending      = always empty
+   *
+   * Returns null if the file has no envelope.
+   *
+   * @example
+   *   const result = await majik.getSignatories(file);
+   *   console.log(`${result?.signed.length} of ${result?.all.length} signed`);
+   */
+  async getSignatories(
+    file: Blob,
+    options?: { mimeType?: string },
+    filter?: SignatoriesFilter,
+  ): Promise<SignatoriesResult | null> {
+    try {
+      return MajikSignature.getSignatories(file, options, filter);
+    } catch (err) {
+      this.emit("error", err, { context: "getSignatories" });
+      throw err;
+    }
+  }
+
+  /**
+   * Returns only signatories who have already signed.
+   * Alias for getSignatories(file, options, "signed").
+   */
+  async getSignedSignatories(
+    file: Blob,
+    options?: { mimeType?: string },
+  ): Promise<SignatoriesResult | null> {
+    try {
+      return MajikSignature.getSignedSignatories(file, options);
+    } catch (err) {
+      this.emit("error", err, { context: "getSignedSignatories" });
+      throw err;
+    }
+  }
+
+  /**
+   * Returns only signatories who are expected but have not yet signed.
+   * Alias for getSignatories(file, options, "pending").
+   */
+  async getPendingSignatories(
+    file: Blob,
+    options?: { mimeType?: string },
+  ): Promise<SignatoriesResult | null> {
+    try {
+      return MajikSignature.getPendingSignatories(file, options);
+    } catch (err) {
+      this.emit("error", err, { context: "getPendingSignatories" });
+      throw err;
+    }
+  }
+
+  /**
+   * Returns all signatories with full status information.
+   * Alias for getSignatories(file, options, "all").
+   */
+  async getAllSignatories(
+    file: Blob,
+    options?: { mimeType?: string },
+  ): Promise<SignatoriesResult | null> {
+    try {
+      return MajikSignature.getAllSignatories(file, options);
+    } catch (err) {
+      this.emit("error", err, { context: "getAllSignatories" });
+      throw err;
+    }
+  }
+
+  /**
+   * Returns the issuer — the signer who established the allowlist and
+   * controls sealing. Returns null for open-signing or unsigned files.
+   *
+   * @example
+   *   const issuer = await majik.getIssuer(file);
+   *   if (issuer) console.log("Issued by", majik.resolveSignerLabel(issuer.signerId));
+   */
+  async getIssuer(
+    file: Blob,
+    options?: { mimeType?: string },
+  ): Promise<SignatoryInfo | null> {
+    try {
+      return MajikSignature.getIssuer(file, options);
+    } catch (err) {
+      this.emit("error", err, { context: "getIssuer" });
+      throw err;
+    }
+  }
+
   /**
    * Extract metadata from a file's embedded signature without verifying it.
    *
@@ -2401,6 +2592,127 @@ export class MajikMessage {
       return MajikSignature.extractFrom(file, options);
     } catch (err) {
       this.emit("error", err, { context: "getFileSignatureInfo" });
+      throw err;
+    }
+  }
+
+  /**
+   * Return a complete summary of the envelope state in one file read.
+   * Covers: isMultiSig, isSealed, issuer, all signatories, allowlist, seal info.
+   * Useful for rendering a signing status UI without multiple separate calls.
+   *
+   * Returns null if the file has no envelope.
+   *
+   * @example
+   *   const info = await majik.getEnvelopeInfo(file);
+   *   if (info?.isSealed) console.log("Sealed by", info.sealInfo?.sealedBy);
+   *   console.log(`${info?.signatories?.signed.length} of ${info?.signatories?.all.length} signed`);
+   */
+  async getEnvelopeInfo(
+    file: Blob,
+    options?: { mimeType?: string },
+  ): Promise<EnvelopeInfo | null> {
+    try {
+      return MajikSignature.getEnvelopeInfo(file, options);
+    } catch (err) {
+      this.emit("error", err, { context: "getEnvelopeInfo" });
+      throw err;
+    }
+  }
+
+  // ── Seal ──────────────────────────────────────────────────────────────────
+
+  /**
+   * Seal a restricted multi-sig file, preventing any further signatures.
+   *
+   * Only the issuer (the signer who established the allowlist) may seal.
+   * Resolves the signing key from the keystore — the account must be loaded
+   * but does NOT need to be unlocked (sealing does not use private keys).
+   *
+   * @example
+   *   const { blob, sealInfo } = await majik.seal(signedFile);
+   *   console.log("Sealed at", sealInfo.sealTimestamp);
+   */
+  async seal(
+    file: Blob,
+    options?: { mimeType?: string; timestamp?: string; accountId?: string },
+  ): Promise<{
+    blob: Blob;
+    sealInfo: SealInfo;
+    handler: string;
+    mimeType: string;
+  }> {
+    const id = options?.accountId ?? this.getActiveAccount()?.id;
+    if (!id)
+      throw new Error("No active account — call setActiveAccount() first");
+
+    try {
+      const key = MajikKeyStore.get(id);
+      if (!key) throw new Error(`Account not found in keystore: "${id}"`);
+
+      return MajikSignature.seal(file, key, {
+        mimeType: options?.mimeType,
+        timestamp: options?.timestamp,
+      });
+    } catch (err) {
+      this.emit("error", err, { context: "seal" });
+      throw err;
+    }
+  }
+
+  /**
+   * Verify the seal hash against the current signatories and seal timestamp.
+   * Returns invalid if the envelope is not sealed.
+   * Does NOT verify individual cryptographic signatures — call verifyFile() for that.
+   *
+   * @example
+   *   const result = await majik.verifySeal(file);
+   *   if (result.valid) console.log("Sealed by", result.sealedBy, "at", result.sealTimestamp);
+   */
+  async verifySeal(
+    file: Blob,
+    options?: { mimeType?: string },
+  ): Promise<SealVerificationResult> {
+    try {
+      return MajikSignature.verifySeal(file, options);
+    } catch (err) {
+      this.emit("error", err, { context: "verifySeal" });
+      throw err;
+    }
+  }
+
+  /**
+   * Get seal metadata without verifying.
+   * Returns null if the file is not sealed or has no envelope.
+   *
+   * @example
+   *   const info = await majik.getSealInfo(file);
+   *   if (info) console.log("Sealed by", majik.resolveSignerLabel(info.sealedBy));
+   */
+  async getSealInfo(
+    file: Blob,
+    options?: { mimeType?: string },
+  ): Promise<SealInfo | null> {
+    try {
+      return MajikSignature.getSealInfo(file, options);
+    } catch (err) {
+      this.emit("error", err, { context: "getSealInfo" });
+      throw err;
+    }
+  }
+
+  /**
+   * Returns true if the file has a sealed envelope (structural check, no crypto).
+   * Use verifySeal() to confirm the seal hash is intact.
+   */
+  async isSealed(
+    file: Blob,
+    options?: { mimeType?: string },
+  ): Promise<boolean> {
+    try {
+      return MajikSignature.isSealed(file, options);
+    } catch (err) {
+      this.emit("error", err, { context: "isSealed" });
       throw err;
     }
   }

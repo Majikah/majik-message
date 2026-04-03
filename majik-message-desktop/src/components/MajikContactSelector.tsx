@@ -14,7 +14,7 @@ import {
 import { DotsThreeIcon, EraserIcon, PlusIcon } from "@phosphor-icons/react";
 import theme from "@/globals/theme";
 
-import { MajikContact } from "@majikah/majik-message";
+import { MajikContact } from "@majikah/majik-contact";
 
 // ---------------- Styled Components ---------------- //
 

@@ -44,7 +44,7 @@ import type {
 import UserFileQuota from "./UserFileQuota";
 import type { MajikMessageDatabase } from "../majik-context-wrapper/majik-message-database";
 import { toast } from "sonner";
-import { MajikKeyStore, type MajikContact } from "@majikah/majik-message";
+import { MajikKeyStore} from "@majikah/majik-message";
 import MajikContactListSelector from "../MajikContactListSelector";
 import moment from "moment";
 import {
@@ -54,6 +54,7 @@ import {
 import { useShepherd } from "@/lib/shepherd-js/use-shepherd";
 import GuideHelper from "./GuideHelper";
 import { launchTutorialCloudStorage } from "@/lib/shepherd-js/tutorials/tutorial-cloud-storage";
+import { MajikContact } from "@majikah/majik-contact";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const FONT_MONO = "'Fira Mono', 'JetBrains Mono', monospace";

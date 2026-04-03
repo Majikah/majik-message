@@ -21,24 +21,14 @@ import data from "@emoji-mart/data";
 import Picker from "@emoji-mart/react";
 import { Grid } from "@giphy/react-components";
 import type { MajikahSession } from "../majikah-session-wrapper/majikah-session";
+import { isReserved } from "../base/_message_parsers";
+
 
 // ─── Local tokens ─────────────────────────────────────────────────────────────
 const FONT_MONO = "'Fira Mono', 'JetBrains Mono', monospace";
 const MAX_CHARS = 10000;
 
 // ─── GIF compositing helper ───────────────────────────────────────────────────
-/**
- * The GIF URL is never inserted into the textarea. It lives in a separate
- * `selectedGif` state and is appended to the message only at send time using
- * a sentinel tag: [gif:URL]
- *
- * Format:  "<user text>\n[gif:https://media.giphy.com/media/abc/giphy.gif]"
- * Or:      "[gif:https://media.giphy.com/media/abc/giphy.gif]"  (no text)
- *
- * This makes the URL unambiguous on the receiving side — the bubble just looks
- * for the [gif:…] suffix, strips it from display text, and renders the image.
- * The entire composed string (text + tag) is what gets encrypted.
- */
 function composeMessageWithGif(text: string, gifUrl: string | null): string {
   const trimmed = text.trim();
   if (!gifUrl) return trimmed;
@@ -51,18 +41,12 @@ function composeMessageWithGif(text: string, gifUrl: string | null): string {
 const buildTrendingFetcher =
   () => async (offset: number, majikah: MajikahSession) => {
     const queryKey = `__TRENDING__:${offset}:20`;
-
-    // 1️⃣ Check IDB first
     const cached = await loadQueryResult(queryKey);
     if (cached) return cached;
-
     const result = await majikah.apiClient.get<API_RESPONSE_GIPHY_RESULT>(
       `/giphy/trending?offset=${offset}&limit=20`,
     );
-
-    // 3️⃣ Save to IDB
     await saveQueryResult(queryKey, result.data);
-
     return result.data;
   };
 
@@ -70,19 +54,12 @@ const buildSearchFetcher =
   (query: string) => async (offset: number, majikah: MajikahSession) => {
     const normalized = query.trim().toLowerCase();
     const queryKey = `${normalized}:${offset}:20`;
-
-    // 1️⃣ Check IDB
     const cached = await loadQueryResult(queryKey);
     if (cached) return cached;
-
-    // 2️⃣ Fetch from server
     const result = await majikah.apiClient.get<API_RESPONSE_GIPHY_RESULT>(
       `/giphy/search?q=${encodeURIComponent(normalized)}&offset=${offset}&limit=20`,
     );
-
-    // 3️⃣ Save to IDB
     await saveQueryResult(queryKey, result.data);
-
     return result.data;
   };
 
@@ -98,7 +75,6 @@ const Wrapper = styled.div`
   width: 100%;
 `;
 
-// ─── GIF preview strip (sits above the input row) ─────────────────────────────
 const GifPreviewStrip = styled.div`
   display: flex;
   align-items: center;
@@ -155,7 +131,20 @@ const GifPreviewLabel = styled.span`
   text-transform: uppercase;
 `;
 
-// ─── Input row ─────────────────────────────────────────────────────────────
+// ─── Reserved input warning banner ───────────────────────────────────────────
+const ReservedWarning = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  background: rgba(248, 113, 113, 0.08);
+  border-top: 1px solid rgba(248, 113, 113, 0.18);
+  font-family: ${FONT_MONO};
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: #f87171;
+`;
+
 const InputRow = styled.div`
   display: flex;
   align-items: flex-start;
@@ -210,15 +199,19 @@ const GifLabel = styled.span`
   line-height: 1;
 `;
 
-const TextareaWrap = styled.div<{ $focused: boolean }>`
+const TextareaWrap = styled.div<{ $focused: boolean; $reserved: boolean }>`
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
   background: ${({ theme }) => theme.colors.secondaryBackground};
   border: 1px solid
-    ${({ $focused, theme }) =>
-      $focused ? theme.colors.primary : "transparent"};
+    ${({ $focused, $reserved, theme }) =>
+      $reserved
+        ? "rgba(248, 113, 113, 0.45)"
+        : $focused
+          ? theme.colors.primary
+          : "transparent"};
   border-radius: 12px;
   overflow: hidden;
   transition: border-color 150ms ease;
@@ -309,7 +302,6 @@ const SendBtn = styled.button`
   }
 `;
 
-// ─── Popover shell ────────────────────────────────────────────────────────────
 const Popover = styled.div`
   position: absolute;
   bottom: calc(100% + 8px);
@@ -414,6 +406,9 @@ interface ChatInputBoxProps {
   enableEmoji?: boolean;
 }
 
+// ─── Reserved warning toast ID (deduplicated) ─────────────────────────────────
+const RESERVED_TOAST_ID = "majik-reserved-input-warning";
+
 // ─── Component ────────────────────────────────────────────────────────────────
 export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
   majikah,
@@ -429,16 +424,7 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
   const [value, setValue] = useState("");
   const [focused, setFocused] = useState(false);
   const [pickerMode, setPickerMode] = useState<PickerMode>(null);
-
-  // ── Staged GIF state ───────────────────────────────────────────────────────
-  /**
-   * `selectedGif` holds the staged IGif object (never put in the textarea).
-   * On select → replaces any previous selection.
-   * On send   → URL is appended as [gif:URL] suffix then state is cleared.
-   * On dismiss → cleared without sending.
-   */
   const [selectedGif, setSelectedGif] = useState<IGif | null>(null);
-
   const [gifQuery, setGifQuery] = useState("");
   const [debouncedGifQuery, setDebouncedGifQuery] = useState("");
   const [gifGridKey, setGifGridKey] = useState(0);
@@ -504,17 +490,16 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
     [debouncedGifQuery],
   );
 
-  // ── GIF select → stage, replace any previous, close picker ───────────────
+  // ── GIF select ─────────────────────────────────────────────────────────────
   const handleGifSelect = useCallback((gif: IGif, e: React.SyntheticEvent) => {
     e.preventDefault();
-    // Replaces any previously staged GIF — no accumulation
     setSelectedGif(gif);
     setPickerMode(null);
     setGifQuery("");
     setDebouncedGifQuery("");
   }, []);
 
-  // ── Emoji insertion at cursor ──────────────────────────────────────────────
+  // ── Emoji insertion ────────────────────────────────────────────────────────
   const insertEmoji = useCallback(
     (emoji: { native: string }) => {
       const ta = textareaRef.current;
@@ -551,26 +536,39 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
     setPickerMode((prev) => (prev === mode ? null : mode));
   };
 
-  // ── Send ───────────────────────────────────────────────────────────────────
+  // ── Reserved system message guard ─────────────────────────────────────────
   /**
-   * Composes the final encrypted string at send time:
-   *   text only          → "hey there"
-   *   gif only           → "[gif:https://media.giphy.com/...]"
-   *   text + gif         → "hey there\n[gif:https://media.giphy.com/...]"
+   * `isReserved` is a regex-only pre-check (no sanitisation cost). We run it
+   * against the raw textarea value, not the composed string, so a user cannot
+   * manually construct [gif:…], [majikah:sys:mm:contact:share:…], or
+   * [majikah:sys:mm:contact:request] and have it treated as a system message.
    *
-   * The composed string is what gets passed to onSend() and subsequently
-   * encrypted. The textarea and staged GIF are both cleared after send.
+   * Effects:
+   *   - Textarea border turns red
+   *   - Inline warning banner appears above the input row
+   *   - Send button is disabled
+   *   - handleSend hard-returns as a defence-in-depth backstop
    */
+  const inputIsReserved = isReserved(value);
+
+  // ── Send ───────────────────────────────────────────────────────────────────
   const handleSend = async (): Promise<void> => {
+    // Defence-in-depth: block even if the button somehow wasn't disabled
+    if (inputIsReserved) {
+      toast.error("Message contains reserved content.", {
+        description: "System tags cannot be sent manually.",
+        id: RESERVED_TOAST_ID,
+      });
+      return;
+    }
+
     if (disabled) {
       toast.error("Assign recipients first.");
       return;
     }
 
     const gifUrl = selectedGif?.images?.original?.url ?? null;
-
     const composed = composeMessageWithGif(value, gifUrl);
-
     if (!composed) return;
 
     try {
@@ -609,9 +607,9 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
   // ── Derived ────────────────────────────────────────────────────────────────
   const charCount = value.length;
   const nearLimit = charCount > MAX_CHARS * 0.9;
-  const canSend = value.trim().length > 0 || selectedGif !== null;
+  const canSend =
+    !inputIsReserved && (value.trim().length > 0 || selectedGif !== null);
 
-  // ── GIF preview thumbnail URL (small, for the strip) ─────────────────────
   const gifPreviewUrl =
     selectedGif?.images?.fixed_height_small?.url ??
     selectedGif?.images?.fixed_height?.url ??
@@ -665,7 +663,7 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
         </Popover>
       )}
 
-      {/* GIF preview strip — shown only when a GIF is staged */}
+      {/* GIF preview strip */}
       {selectedGif && gifPreviewUrl && enableGIF && (
         <GifPreviewStrip>
           <GifPreviewThumb>
@@ -684,6 +682,13 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
           </GifPreviewThumb>
           <GifPreviewLabel>GIF attached · tap to replace</GifPreviewLabel>
         </GifPreviewStrip>
+      )}
+
+      {/* Reserved system tag warning banner */}
+      {inputIsReserved && (
+        <ReservedWarning>
+          ⚠ Message contains a reserved system tag and cannot be sent.
+        </ReservedWarning>
       )}
 
       {/* Input row */}
@@ -714,7 +719,7 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
           )}
         </Toolbar>
 
-        <TextareaWrap $focused={focused}>
+        <TextareaWrap $focused={focused} $reserved={inputIsReserved}>
           <StyledTextarea
             ref={textareaRef}
             value={value}
@@ -743,7 +748,11 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
         <SendBtn
           onClick={handleSend}
           disabled={!canSend}
-          title="Send message"
+          title={
+            inputIsReserved
+              ? "Message contains a reserved system tag"
+              : "Send message"
+          }
           type="button"
         >
           <PaperPlaneRightIcon size={16} weight="bold" />

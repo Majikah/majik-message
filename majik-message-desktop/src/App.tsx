@@ -17,7 +17,6 @@ import { useMajik } from "./components/majik-context-wrapper/use-majik";
 import {
   jsonToSeed,
   MajikKeyStore,
-  MajikContact,
   seedStringToArray,
   type MnemonicJSON,
 } from "@majikah/majik-message";
@@ -61,6 +60,7 @@ import EmailThreads from "./components/panels/threads/EmailThreads";
 import { NotificationDot } from "./components/functional/Notification/NotificationDot";
 import ConversationSidePanel from "./components/panels/conversations/ConversationSidePanel";
 import { useFirebaseTauriPush } from "./lib/firebase/use-firebase-notifications";
+import { MajikContact } from "@majikah/majik-contact";
 
 const RootContainer = styled.div`
   display: flex;
@@ -771,7 +771,7 @@ function App(): JSX.Element {
           <CustomInputField
             currentValue={inviteKey}
             onChange={(e) => setInviteKey(e)}
-            maxChar={5000}
+            maxChar={10000}
             label="Invite Key"
             required
             importProp={{

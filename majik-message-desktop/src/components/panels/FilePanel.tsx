@@ -17,7 +17,6 @@ import FileVault from "../functional/FileVault/FileVault";
 import {
   MajikKeyStore,
   type CompressionLevel,
-  type MajikContact,
 } from "@majikah/majik-message";
 import MajikContactListSelector from "../MajikContactListSelector";
 import PopUpFormButton from "../foundations/PopUpFormButton";
@@ -36,6 +35,7 @@ import { MajikFile } from "@majikah/majik-file";
 import { useShepherd } from "@/lib/shepherd-js/use-shepherd";
 import { launchTutorialFileVault } from "@/lib/shepherd-js/tutorials/tutorial-file-vault";
 import UserFiles from "../functional/UserFiles";
+import { MajikContact } from "@majikah/majik-contact";
 
 // ─── Local tokens ─────────────────────────────────────────────────────────────
 const FONT_MONO = "'Fira Mono', 'JetBrains Mono', monospace";
@@ -599,7 +599,7 @@ const FilePanel: React.FC<FilePanelProps> = ({ majik }) => {
             <CustomInputField
               currentValue={inviteKey}
               onChange={(e) => setInviteKey(e)}
-              maxChar={500}
+              maxChar={10000}
               label="Invite Key"
               required
               importProp={{ type: "txt" }}

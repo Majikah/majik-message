@@ -11,7 +11,7 @@ import {
   useRef,
   useState,
 } from "react";
-import styled from "styled-components";
+import styled, { css, keyframes } from "styled-components";
 import type { MajikMessageDatabase } from "../majik-context-wrapper/majik-message-database";
 import { toast } from "sonner";
 import DynamicPlaceholder from "../foundations/DynamicPlaceholder";
@@ -22,25 +22,19 @@ import type { ChatMessagePayload } from "../majikah-session-wrapper/messages/maj
 import { useTypingIndicators } from "./TypingIndicator/useTypingIndicator";
 import { TypingIndicator } from "./TypingIndicator/TypingIndicator";
 import { sendNotification } from "@tauri-apps/plugin-notification";
+import {
+  AddressBookIcon,
+  UserCirclePlusIcon,
+  UsersThreeIcon,
+  WarningIcon,
+} from "@phosphor-icons/react";
+import DynamicSlidingDialogue from "./DynamicSlidingDialogue";
+import UserContactInvitations from "./UserContactInvitations";
 
 // ─── Local tokens ─────────────────────────────────────────────────────────────
 const FONT_MONO = "'Fira Mono', 'JetBrains Mono', monospace";
 
 // ─── useNow — OUTSIDE the component ──────────────────────────────────────────
-/**
- * CRITICAL: This hook must live outside ConversationMessages.
- *
- * When defined inside the component, every setNow() tick triggers a full
- * re-render of ConversationMessages, which rebuilds the fetchedMessages.map()
- * and passes new JSX / prop objects to every CBaseChatBubble. Even with stable
- * `key` props, the `message` prop object reference changes, which caused the
- * isMounted ref to reset mid-flight in the decrypt effect.
- *
- * Defined outside, useNow() re-renders only the component that calls it.
- * CBaseChatBubble receives `now` as a prop, but since it's a primitive number
- * and the bubble is memoized (see MemoizedBubble below), it only re-renders
- * when `now` actually matters for expiry display — not every tick.
- */
 function useNow(interval = 1000): number {
   // eslint-disable-next-line react-hooks/purity
   const [now, setNow] = useState(Date.now());
@@ -88,10 +82,6 @@ const ScrollArea = styled.div`
 `;
 
 // ─── Date separator ───────────────────────────────────────────────────────────
-/**
- * Mono label between day groups — gives the message stream a clear
- * temporal structure without heavy visual weight.
- */
 const DateSeparator = styled.div`
   display: flex;
   align-items: center;
@@ -116,16 +106,210 @@ const SepLabel = styled.span`
   white-space: nowrap;
 `;
 
+// ─── Missing contacts banner ──────────────────────────────────────────────────
+
+const bannerIn = keyframes`
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+`;
+
+const Banner = styled.div`
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 16px;
+  background: rgba(245, 158, 11, 0.07);
+  border-bottom: 1px solid rgba(245, 158, 11, 0.18);
+  animation: ${bannerIn} 200ms cubic-bezier(0.4, 0, 0.2, 1) both;
+`;
+
+const BannerHeader = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #f59e0b;
+`;
+
+const BannerIcon = styled.div`
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+`;
+
+const BannerTitle = styled.span`
+  font-family: ${FONT_MONO};
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #f59e0b;
+`;
+
+const BannerBody = styled.p`
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  opacity: 0.8;
+`;
+
+const BannerActions = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+`;
+
+const bannerBtnBase = css`
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: 8px;
+  font-family: ${FONT_MONO};
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition:
+    background 120ms ease,
+    opacity 120ms ease,
+    transform 80ms ease;
+  white-space: nowrap;
+
+  &:hover {
+    opacity: 0.85;
+    transform: translateY(-1px);
+  }
+  &:active {
+    transform: translateY(0);
+  }
+`;
+
+const BannerBtnPrimary = styled.button`
+  ${bannerBtnBase}
+  background: rgba(245, 158, 11, 0.15);
+  border-color: rgba(245, 158, 11, 0.3);
+  color: #f59e0b;
+`;
+
+const BannerBtnSecondary = styled.button`
+  ${bannerBtnBase}
+  background: ${({ theme }) => theme.colors.secondaryBackground};
+  border-color: rgba(255, 255, 255, 0.07);
+  color: ${({ theme }) => theme.colors.textSecondary};
+`;
+
+const BannerChipRow = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+`;
+
+const ContactChip = styled.button`
+  ${bannerBtnBase}
+  background: rgba(245, 158, 11, 0.08);
+  border-color: rgba(245, 158, 11, 0.2);
+  color: #f59e0b;
+  font-size: 9px;
+  padding: 3px 9px;
+`;
+
 // ─── Memoized bubble wrapper ──────────────────────────────────────────────────
 const MemoizedBubble = memo(CBaseChatBubble, (prev, next) => {
   if (prev.message.getID() !== next.message.getID()) return false;
   if (prev.isOwn !== next.isOwn) return false;
   if (prev.majik !== next.majik) return false;
   if (prev.canDelete !== next.canDelete) return false;
-  // Only re-render for now changes if message has an expiry
   if (prev.message.getExpiresAt() && prev.now !== next.now) return false;
   return true;
 });
+
+// ─── Missing contacts banner component ───────────────────────────────────────
+
+interface MissingContactsBannerProps {
+  missingKeys: string[];
+  /** Called when user requests a single contact's card by their public key. */
+  onRequestContact: (publicKey: string) => void;
+  /** Called when user requests all missing contacts at once. */
+  onRequestAll: () => void;
+  /** Called when user wants to view their pending invitations/requests. */
+  onViewInvitations: () => void;
+}
+
+const MissingContactsBanner: React.FC<MissingContactsBannerProps> = ({
+  missingKeys,
+  onRequestContact,
+  onRequestAll,
+  onViewInvitations,
+}) => {
+  const count = missingKeys.length;
+
+  // Abbreviate a public key for display: first 6 … last 4
+  const abbrev = (key: string): string =>
+    key.length > 12 ? `${key.slice(0, 6)}…${key.slice(-4)}` : key;
+
+  return (
+    <Banner>
+      <BannerHeader>
+        <BannerIcon>
+          <WarningIcon size={14} weight="fill" />
+        </BannerIcon>
+        <BannerTitle>
+          {count === 1
+            ? "1 participant not in your directory"
+            : `${count} participants not in your directory`}
+        </BannerTitle>
+      </BannerHeader>
+
+      <BannerBody>
+        {count === 1
+          ? "One participant in this conversation isn't saved in your contact directory. You can request their contact card, or check your pending invitations."
+          : "Some participants in this conversation aren't in your contact directory. Request their contact cards individually, or send a request to everyone at once."}
+      </BannerBody>
+
+      {/* Per-contact request chips — only shown when there are multiple missing */}
+      {count > 1 && (
+        <BannerChipRow>
+          {missingKeys.map((key) => (
+            <ContactChip
+              key={key}
+              type="button"
+              title={`Request contact card from ${key}`}
+              onClick={() => onRequestContact(key)}
+            >
+              <UserCirclePlusIcon size={10} weight="bold" />
+              {abbrev(key)}
+            </ContactChip>
+          ))}
+        </BannerChipRow>
+      )}
+
+      <BannerActions>
+        {count === 1 ? (
+          <BannerBtnPrimary
+            type="button"
+            onClick={() => onRequestContact(missingKeys[0])}
+          >
+            <UserCirclePlusIcon size={11} weight="bold" />
+            Request Contact
+          </BannerBtnPrimary>
+        ) : (
+          <BannerBtnPrimary type="button" onClick={onRequestAll}>
+            <UsersThreeIcon size={11} weight="bold" />
+            Request All
+          </BannerBtnPrimary>
+        )}
+
+        <BannerBtnSecondary type="button" onClick={onViewInvitations}>
+          <AddressBookIcon size={11} weight="bold" />
+          View Invitations
+        </BannerBtnSecondary>
+      </BannerActions>
+    </Banner>
+  );
+};
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -152,6 +336,9 @@ export const ConversationMessages = forwardRef<
   );
   const [loading, setIsLoading] = useState(false);
 
+  // ── Missing contacts state ─────────────────────────────────────────────────
+  const [missingContactKeys, setMissingContactKeys] = useState<string[]>([]);
+
   const { typingUsers, isAnyoneTyping } = useTypingIndicators(
     client,
     senderKey,
@@ -161,6 +348,8 @@ export const ConversationMessages = forwardRef<
   const messageRefsMap = useRef<Map<string, HTMLDivElement>>(new Map());
   const markedAsReadRef = useRef<Set<string>>(new Set());
   const displayNamesRef = useRef<Record<string, string>>({});
+
+  const [invitationsOpen, setInvitationsOpen] = useState<boolean>(false);
 
   // ── Load messages ──────────────────────────────────────────────────────────
   const loadInitialMessages = useCallback(async () => {
@@ -250,6 +439,91 @@ export const ConversationMessages = forwardRef<
     fetchNames();
   }, [conversationID, majik, fetchedMessages]);
 
+  // ── Check for missing contacts ─────────────────────────────────────────────
+  /**
+   * Runs whenever the message list updates (new messages may reveal new
+   * participants) or when the conversation changes. Excludes the current
+   * user's own key so we never prompt them to add themselves.
+   */
+  useEffect(() => {
+    if (fetchedMessages.length === 0) return;
+
+    const checkMissingContacts = async () => {
+      const participants = fetchedMessages[0].getParticipants();
+      const currentKey = senderKey;
+
+      // Map each participant to a boolean indicating if they're missing
+      const missingFlags = await Promise.all(
+        participants.map(async (participant) => {
+          if (currentKey && participant === currentKey) return false;
+          try {
+            const hasContact =
+              await majik.hasContactByPublicKeyBase64(participant);
+            return !hasContact;
+          } catch {
+            return false;
+          }
+        }),
+      );
+
+      // Filter participants based on the missingFlags
+      const missing = participants.filter((_, index) => missingFlags[index]);
+      setMissingContactKeys(missing);
+    };
+
+    checkMissingContacts();
+  }, [fetchedMessages, senderKey, majik, conversationID]);
+
+  // ── Missing contact banner handlers (placeholder) ─────────────────────────
+  const handleRequestContact = useCallback(
+    async (publicKey: string): Promise<void> => {
+      try {
+        const response = await majik.createContactInvite(publicKey);
+
+        if (response.success) {
+          toast.success("Contact request sent", {
+            description:
+              response.message ||
+              `Requested contact card from ${publicKey.slice(0, 8)}…`,
+            id: `contact-request-${publicKey}`,
+          });
+        } else {
+          toast.error("Contact request failed", {
+            description:
+              response.message ||
+              `Failed to request contact card from ${publicKey.slice(0, 8)}…`,
+            id: `contact-request-error-${publicKey}`,
+          });
+        }
+      } catch (error: any) {
+        toast.error("Contact request failed", {
+          description:
+            error?.message ||
+            `Failed to request contact card from ${publicKey.slice(0, 8)}…`,
+          id: `contact-request-error-${publicKey}`,
+          action: {
+            onClick: handleViewInvitations,
+            label: "View Invitations",
+          },
+        });
+      }
+    },
+    [],
+  );
+
+  const handleRequestAll = useCallback((): void => {
+    // TODO: implement — send contact requests to all missingContactKeys
+    console.log("[placeholder] requestAll", missingContactKeys);
+    toast.info("Contact requests sent", {
+      description: `Requested contact cards from ${missingContactKeys.length} participants.`,
+      id: "contact-request-all",
+    });
+  }, [missingContactKeys]);
+
+  const handleViewInvitations = useCallback((): void => {
+    setInvitationsOpen(true);
+  }, []);
+
   // ── Realtime event handlers ────────────────────────────────────────────────
   useEffect(() => {
     if (!client) return;
@@ -264,7 +538,6 @@ export const ConversationMessages = forwardRef<
         let didInsert = false;
 
         setFetchedMessages((prev) => {
-          // Already exists → no insert, no toast
           if (prev.some((m) => m.getID() === msg.getID())) {
             return prev;
           }
@@ -325,7 +598,6 @@ export const ConversationMessages = forwardRef<
       }
     });
 
-    // Listen for users joining
     client.on("user_joined", async (data) => {
       if (data.user !== majik.currentIdentity?.publicKey) {
         const userDisplayName = displayNamesRef.current[data.user];
@@ -342,7 +614,6 @@ export const ConversationMessages = forwardRef<
       }
     });
 
-    // Listen for users leaving
     client.on("user_left", async (data) => {
       if (data.user !== majik.currentIdentity?.publicKey) {
         const userDisplayName = displayNamesRef.current[data.user];
@@ -363,21 +634,21 @@ export const ConversationMessages = forwardRef<
       const errorMessage = data.message;
       console.warn(`Error: ${errorMessage}`);
 
-      // Guard: only handle "Invalid recipients"
       if (errorMessage !== "Invalid recipients") {
         return;
       }
 
       toast.error("Invalid Recipient", {
-        description: `One or more participants in this conversation are no longer registered, so your message couldn’t be delivered.`,
+        description: `One or more participants in this conversation are no longer registered, so your message couldn't be delivered.`,
         id: `toast-error-invalid-recipient}`,
       });
 
       sendNotification({
         title: "Majik Message",
-        body: `${errorMessage}: One or more participants in this conversation are no longer registered, so your message couldn’t be delivered.`,
+        body: `${errorMessage}: One or more participants in this conversation are no longer registered, so your message couldn't be delivered.`,
       });
     });
+
     return () => {
       client.off("message", handleIncomingMessage);
     };
@@ -532,16 +803,27 @@ export const ConversationMessages = forwardRef<
     });
   };
 
+  // ── Derived ────────────────────────────────────────────────────────────────
+  const hasMissingContacts = missingContactKeys.length > 0;
+
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <Root>
+      {/* Missing contacts banner — pinned above the scroll area */}
+      {hasMissingContacts && (
+        <MissingContactsBanner
+          missingKeys={missingContactKeys}
+          onRequestContact={handleRequestContact}
+          onRequestAll={handleRequestAll}
+          onViewInvitations={handleViewInvitations}
+        />
+      )}
+
       <ScrollArea>
-        {/* 1. Only show the full-screen loader if we have NO messages at all */}
         {loading && fetchedMessages.length === 0 ? (
           <DynamicPlaceholder loading>Loading messages…</DynamicPlaceholder>
         ) : (
           <>
-            {/* 2. Optional: A small, non-intrusive loader at the top if you are refreshing */}
             {loading && fetchedMessages.length > 0 && (
               <div
                 style={{ opacity: 0.5, fontSize: "10px", textAlign: "center" }}
@@ -551,7 +833,7 @@ export const ConversationMessages = forwardRef<
             )}
 
             {fetchedMessages.map((msg, index) => {
-              const isOwn = msg.isSender(senderKey!); // Added ! because we check length above
+              const isOwn = msg.isSender(senderKey!);
               const prevMsg = index > 0 ? fetchedMessages[index - 1] : null;
               const showSeparator =
                 !prevMsg ||
@@ -593,6 +875,22 @@ export const ConversationMessages = forwardRef<
 
         <div ref={bottomRef} />
       </ScrollArea>
+      <DynamicSlidingDialogue
+        isOpen={invitationsOpen}
+        onOpenChange={setInvitationsOpen}
+        modal={{
+          title: "My SLinks",
+          description: "View and manage all your published signed links.",
+        }}
+        buttons={{
+          cancel: { text: "Close", hide: true },
+          confirm: { text: "Done", hide: true },
+        }}
+        scrollable={false}
+        width={820}
+      >
+        <UserContactInvitations majik={majik} />
+      </DynamicSlidingDialogue>
     </Root>
   );
 });

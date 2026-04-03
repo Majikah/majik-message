@@ -17,13 +17,14 @@ import {
 import { MajikFile } from "@majikah/majik-file";
 import type { FileContext, MajikFileJSON } from "@majikah/majik-file";
 
-import type { MajikContact, MajikMessageThread } from "@majikah/majik-message";
+import type { MajikMessageThread } from "@majikah/majik-message";
 import { toast } from "sonner";
 import { MajikMessageDatabase } from "@/components/majik-context-wrapper/majik-message-database";
 
 import { MajikFileScanner } from "@/SDK/majik-file-scanner/majik-file-scanner";
 import type { FileScanResult } from "@/SDK/majik-file-scanner/majik-file-scanner";
 import type { UploadIntentBody } from "@/components/majikah-session-wrapper/types/files-api";
+import { MajikContact } from "@majikah/majik-contact";
 
 // ─── Animations ───────────────────────────────────────────────────────────────
 

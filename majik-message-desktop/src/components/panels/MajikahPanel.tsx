@@ -13,7 +13,6 @@ import { useCallback, useEffect, useState } from "react";
 import PopUpFormButton from "../foundations/PopUpFormButton";
 import { PlusIcon } from "@phosphor-icons/react";
 import type {
-  MajikContact,
   MajikMessageIdentity,
 } from "@majikah/majik-message";
 import { toast } from "sonner";
@@ -24,6 +23,7 @@ import { columnsAccountIdentities } from "../tables/identities/columns-account-i
 import ThemeToggle from "../functional/ThemeToggle";
 import ConfirmationButton from "../foundations/ConfirmationButton";
 import { useNavigate } from "react-router-dom";
+import { MajikContact } from "@majikah/majik-contact";
 
 // ─── Local tokens ─────────────────────────────────────────────────────────────
 const FONT_MONO = "'Fira Mono', 'JetBrains Mono', monospace";

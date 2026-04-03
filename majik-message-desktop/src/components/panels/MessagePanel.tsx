@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import PopUpFormButton from "../foundations/PopUpFormButton";
 import { LockKeyIcon, UserPlusIcon } from "@phosphor-icons/react";
 import CustomInputField from "../foundations/CustomInputField";
-import { MajikContact, MessageEnvelope } from "@majikah/majik-message";
+import { MessageEnvelope } from "@majikah/majik-message";
 
 import { toast } from "sonner";
 
@@ -18,6 +18,7 @@ import { useNavigate } from "react-router-dom";
 import GuideHelper from "../functional/GuideHelper";
 import { launchTutorialMessages } from "@/lib/shepherd-js/tutorials/tutorial-messages";
 import { useShepherd } from "@/lib/shepherd-js/use-shepherd";
+import { MajikContact } from "@majikah/majik-contact";
 
 // ─── Local tokens ─────────────────────────────────────────────────────────────
 const FONT_MONO = "'Fira Mono', 'JetBrains Mono', monospace";

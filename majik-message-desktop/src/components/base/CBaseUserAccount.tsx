@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import styled, { css } from "styled-components";
-import { MajikContact } from "@majikah/majik-message";
+import { MajikContact } from "@majikah/majik-contact";
 import { isDevEnvironment } from "../../utils/utils";
 import DeleteButton from "../foundations/DeleteButton";
 import StyledIconButton from "../foundations/StyledIconButton";
@@ -708,7 +708,7 @@ const CBaseUserAccount: React.FC<CBaseUserAccountProps> = ({
               <ConfirmationButton
                 text="Block"
                 onClick={() => onBlock(itemData)}
-                icon={ProhibitIcon}
+                icon={{ icon: ProhibitIcon }}
                 alertTextTitle="Block Contact"
                 strict
               />
@@ -719,7 +719,7 @@ const CBaseUserAccount: React.FC<CBaseUserAccountProps> = ({
               <ConfirmationButton
                 text="Unblock"
                 onClick={() => onUnBlock(itemData)}
-                icon={CheckCircleIcon}
+                icon={{ icon: CheckCircleIcon }}
                 alertTextTitle="Unblock Contact"
                 strict
               />

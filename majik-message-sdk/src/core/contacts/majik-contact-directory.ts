@@ -6,7 +6,7 @@ import {
   MajikContact,
   MajikContactData,
   SerializedMajikContact,
-} from "./majik-contact";
+} from "@majikah/majik-contact";
 
 /* -------------------------------
  * Types
@@ -187,6 +187,20 @@ export class MajikContactDirectory {
 
   hasContact(id: string): boolean {
     return this.contacts.has(id);
+  }
+
+  /**
+   * Checks if a contact exists by their public key (base64)
+   */
+  async hasContactByPublicKeyBase64(publicKeyBase64: string): Promise<boolean> {
+    if (!publicKeyBase64 || typeof publicKeyBase64 !== "string") {
+      throw new MajikContactDirectoryError(
+        "Public key must be a non-empty base64 string",
+      );
+    }
+
+    const contact = await this.getContactByPublicKeyBase64(publicKeyBase64);
+    return contact !== undefined;
   }
 
   clear(): this {

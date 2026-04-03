@@ -43,6 +43,7 @@ export const RealtimeChatInput: React.FC<RealtimeChatInputProps> = ({
   maxHeight = 200,
   participants = [],
   conversationID,
+  disabled,
 }) => {
   const client = useMajikMessageRealtime();
   const [, setValue] = useState("");
@@ -163,7 +164,7 @@ export const RealtimeChatInput: React.FC<RealtimeChatInputProps> = ({
         majikah={majikah}
         onSend={handleSend}
         onUpdate={handleChange}
-        disabled={!participants || participants.length <= 0}
+        disabled={!participants || participants.length <= 0 || disabled}
         maxHeight={maxHeight}
       />
     </InputWrapper>

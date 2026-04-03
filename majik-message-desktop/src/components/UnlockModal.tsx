@@ -18,7 +18,7 @@ import { useNavigate } from "react-router-dom";
 import { ChoiceButton } from "@src/globals/buttons";
 import ConfirmationButton from "./foundations/ConfirmationButton";
 import { MajikMessageAccountSelector } from "./MajikMessageAccountSelector";
-import type { MajikContact } from "@majikah/majik-message";
+import type { MajikContact } from "@majikah/majik-contact";
 import { MajikMessageDatabase } from "./majik-context-wrapper/majik-message-database";
 
 const ModalContainer = styled.div`

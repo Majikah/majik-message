@@ -7,12 +7,12 @@ import { ButtonPrimaryConfirm } from "@/globals/buttons";
 import { downloadBlob, isDevEnvironment } from "@/utils/utils";
 import type { MajikMessageDatabase } from "./majik-context-wrapper/majik-message-database";
 import type {
-  MajikContact,
   MajikMessagePublicKey,
 } from "@majikah/majik-message";
 import { MajikContactListSelector } from "./MajikContactListSelector";
 import { ChatInputBox } from "./functional/ChatInputBox";
 import type { MajikahSession } from "./majikah-session-wrapper/majikah-session";
+import { MajikContact } from "@majikah/majik-contact";
 
 /* ---------------------------------------------
  * Styled Components

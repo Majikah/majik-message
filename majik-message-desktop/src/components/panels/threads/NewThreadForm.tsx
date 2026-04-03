@@ -2,7 +2,7 @@ import React, { useMemo, useState } from "react";
 import styled from "styled-components";
 
 import type { MajikMessageDatabase } from "../../majik-context-wrapper/majik-message-database";
-import type { MajikContact } from "@majikah/majik-message";
+import type { MajikContact } from "@majikah/majik-contact";
 import { MajikContactListSelector } from "../../MajikContactListSelector";
 import CustomInputField from "@/components/foundations/CustomInputField";
 

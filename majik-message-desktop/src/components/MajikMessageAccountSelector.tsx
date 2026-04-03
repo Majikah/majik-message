@@ -10,7 +10,7 @@ import { CaretUpDownIcon, UserIcon } from "@phosphor-icons/react";
 import { Tooltip } from "react-tooltip";
 import theme from "../globals/theme";
 import { useMajik } from "./majik-context-wrapper/use-majik";
-import type { MajikContact } from "@majikah/majik-message";
+import type { MajikContact } from "@majikah/majik-contact";
 import { toast } from "sonner";
 
 const OptionContainer = styled.div`
