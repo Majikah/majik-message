@@ -3,6 +3,9 @@ use tauri_plugin_global_shortcut::{
     Builder, Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState,
 };
 
+use std::env;
+use std::path::PathBuf;
+
 mod menu;
 mod tray;
 
@@ -25,6 +28,11 @@ fn set_auth_state(app: tauri::AppHandle, signed_in: bool) -> Result<(), String> 
     }
 
     Ok(())
+}
+
+#[tauri::command]
+fn get_instance_id(instance_id: tauri::State<String>) -> String {
+    instance_id.inner().clone()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -52,8 +60,23 @@ pub fn run() {
                 })
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![set_auth_state])
+        .invoke_handler(tauri::generate_handler![set_auth_state, get_instance_id])
         .setup(|app| {
+            // 🧠 Get instance ID (default = "default")
+            let instance_id = env::var("TAURI_INSTANCE_ID").unwrap_or_else(|_| "default".into());
+
+            // 📂 Build isolated app data path
+            let base_dir = app.path().app_data_dir().unwrap();
+            let instance_dir: PathBuf = base_dir.join(&instance_id);
+
+            std::fs::create_dir_all(&instance_dir).expect("failed to create instance dir");
+
+            println!("🚀 Running instance: {}", instance_id);
+            println!("📂 App data dir: {:?}", instance_dir);
+
+            // (Optional but recommended) expose to frontend
+            app.manage(instance_id.clone());
+
             // App menu
             let menu = menu::build_menu(app.handle(), false)?;
             app.set_menu(menu)?;
@@ -66,8 +89,12 @@ pub fn run() {
                 Shortcut::new(Some(Modifiers::CONTROL), Code::KeyD),
             ];
 
-            // Register initially (app starts focused)
-            app.global_shortcut().register_multiple(shortcuts.clone())?;
+            let multi = env::var("TAURI_INSTANCE_ID").is_ok();
+
+            if !multi {
+                // Register initially (app starts focused)
+                app.global_shortcut().register_multiple(shortcuts.clone())?;
+            }
 
             let handle = app.handle().clone();
             app.on_menu_event(move |_app, event| {

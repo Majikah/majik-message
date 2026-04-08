@@ -25,6 +25,10 @@ import DOMPurify from "dompurify";
 
 const GIF_TAG_RE = /\n?\[gif:(https?:\/\/[^\]]+)\]$/;
 
+const IMG_TAG_RE = /\n?\[img:([^\]]+)\]$/;
+
+const CALL_TAG_RE = /\n?\[call:([^\]]+)\]$/;
+
 const GIPHY_ORIGIN_ALLOWLIST = new Set([
   "https://media.giphy.com",
   "https://i.giphy.com",
@@ -78,7 +82,12 @@ const CONTACT_REQUEST_TAG_RE = /\n?\[majikah:sys:mm:contact:request\]$/;
 
 // ─── Parse result types ───────────────────────────────────────────────────────
 
-export type MessageKind = "text" | "gif" | "contact_share" | "contact_request";
+export type MessageKind =
+  | "text"
+  | "gif"
+  | "call"
+  | "contact_share"
+  | "contact_request";
 
 interface BaseResult {
   /** The human-readable body of the message (may be empty string). */
@@ -181,6 +190,7 @@ export function parseMessage(raw: string): ParsedMessage {
  *
  * Covered sentinels:
  *   - [gif:<url>]
+ *   - [img:<url>]
  *   - [majikah:sys:mm:contact:share:<payload>]
  *   - [majikah:sys:mm:contact:request]
  *
@@ -196,6 +206,8 @@ export function isReserved(raw: string): boolean {
   if (!raw) return false;
   return (
     GIF_TAG_RE.test(raw) ||
+    IMG_TAG_RE.test(raw) ||
+    CALL_TAG_RE.test(raw) ||
     CONTACT_SHARE_TAG_RE.test(raw) ||
     CONTACT_REQUEST_TAG_RE.test(raw)
   );

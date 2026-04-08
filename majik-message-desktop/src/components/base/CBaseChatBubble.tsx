@@ -4,7 +4,7 @@ import { MajikMessageChat, MessageEnvelope } from "@majikah/majik-message";
 
 import DeleteButton from "../foundations/DeleteButton";
 import StyledIconButton from "../foundations/StyledIconButton";
-import { DownloadIcon, LinkIcon } from "@phosphor-icons/react";
+import { DownloadIcon, ImageSquareIcon, LinkIcon } from "@phosphor-icons/react";
 
 import moment from "moment";
 import type { MajikMessageDatabase } from "../majik-context-wrapper/majik-message-database";
@@ -13,25 +13,24 @@ import { downloadBlob } from "@/utils/utils";
 
 import DOMPurify from "dompurify";
 import { sendNotification } from "@tauri-apps/plugin-notification";
+import {
+  ChatImageRenderer,
+  type ChatImageReadyInfo,
+} from "./ChatImageRenderer";
+import { CallMessageRenderer, CallReadyInfo } from "./CallMessageRenderer";
 
 // ─── Local tokens ─────────────────────────────────────────────────────────────
 const FONT_MONO = "'Fira Mono', 'JetBrains Mono', monospace";
 
-// ─── GIF message parser ───────────────────────────────────────────────────────
-/**
- * Parses a decrypted message string for the [gif:URL] sentinel tag written
- * by ChatInputBox at compose time.
- *
- * Security layers (in order):
- *   1. Strict regex  — only matches the exact [gif:…] pattern, nothing else
- *   2. Origin allowlist — only official Giphy CDN hostnames accepted
- *   3. DOMPurify — sanitizes the extracted URL string
- *   4. Identity check — if DOMPurify mutated the URL at all, it is rejected
- *
- * If any layer fails, the raw tag is shown as plain text (safe, non-confusing).
- * We never use dangerouslySetInnerHTML — the URL goes into <img src> only.
- */
+// ─── Regex Patterns ───────────────────────────────────────────────────────
 const GIF_TAG_RE = /\n?\[gif:(https?:\/\/[^\]]+)\]$/;
+const IMG_TAG_RE = /\n?\[img:([^\]]+)\]$/;
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const CALL_TAG_RE =
+  /\n?\[call:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\]$/i;
+
+// ─── GIF message parser ───────────────────────────────────────────────────────
 
 const GIPHY_ORIGIN_ALLOWLIST = new Set([
   "https://media.giphy.com",
@@ -56,33 +55,75 @@ function isAllowedGiphyUrl(url: string): boolean {
   }
 }
 
+// ─── Image message parser ─────────────────────────────────────────────────────
+
 interface ParsedMessage {
   text: string;
   gifUrl: string | null;
+  imgFileId: string | null;
+  callId: string | null; // ← new
 }
 
-function parseMessageGif(raw: string): ParsedMessage {
-  const match = raw.match(GIF_TAG_RE);
-  if (!match) return { text: raw, gifUrl: null };
-
-  const extractedUrl = match[1];
-  const text = raw.slice(0, raw.length - match[0].length);
-
-  if (!isAllowedGiphyUrl(extractedUrl)) {
-    return { text: raw, gifUrl: null };
+function parseMessageContent(raw: string): ParsedMessage {
+  // Call record
+  const callMatch = raw.match(CALL_TAG_RE);
+  if (callMatch) {
+    const text = raw.slice(0, raw.length - callMatch[0].length);
+    return { text, gifUrl: null, imgFileId: null, callId: callMatch[1] };
   }
 
-  const sanitizedUrl = DOMPurify.sanitize(extractedUrl, {
-    ALLOWED_TAGS: [],
-    ALLOWED_ATTR: [],
-    FORCE_BODY: true,
-  }).trim();
-
-  if (sanitizedUrl !== extractedUrl) {
-    return { text: raw, gifUrl: null };
+  // Encrypted image
+  const imgMatch = raw.match(IMG_TAG_RE);
+  if (imgMatch) {
+    const fileId = imgMatch[1].trim();
+    if (UUID_RE.test(fileId)) {
+      const text = raw.slice(0, raw.length - imgMatch[0].length);
+      return { text, gifUrl: null, imgFileId: fileId, callId: null };
+    }
   }
 
-  return { text, gifUrl: sanitizedUrl };
+  // GIF  (existing logic unchanged)
+  const gifMatch = raw.match(GIF_TAG_RE);
+  if (gifMatch) {
+    const extractedUrl = gifMatch[1];
+    const text = raw.slice(0, raw.length - gifMatch[0].length);
+
+    if (!isAllowedGiphyUrl(extractedUrl)) {
+      return { text: raw, gifUrl: null, imgFileId: null, callId: null };
+    }
+
+    const sanitizedUrl = DOMPurify.sanitize(extractedUrl, {
+      ALLOWED_TAGS: [],
+      ALLOWED_ATTR: [],
+      FORCE_BODY: true,
+    }).trim();
+
+    if (sanitizedUrl !== extractedUrl) {
+      return { text: raw, gifUrl: null, imgFileId: null, callId: null };
+    }
+
+    return { text, gifUrl: sanitizedUrl, imgFileId: null, callId: null };
+  }
+
+  return { text: raw, gifUrl: null, imgFileId: null, callId: null };
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Derives a sensible download filename from the MIME type.
+ * Falls back to "image" if the type is unrecognised.
+ */
+function extensionFromMime(mimeType: string): string {
+  const map: Record<string, string> = {
+    "image/webp": "webp",
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/gif": "gif",
+    "image/avif": "avif",
+    "image/heic": "heic",
+  };
+  return map[mimeType] ?? "image";
 }
 
 // ─── Animations ───────────────────────────────────────────────────────────────
@@ -145,15 +186,21 @@ const Actions = styled.div<{ $enabled: boolean }>`
     `}
 `;
 
-const Bubble = styled.div<{ $isOwn: boolean; $hasGif: boolean }>`
-  /* No padding when GIF fills the bubble — GifMedia handles its own spacing */
-  padding: ${({ $hasGif }) => ($hasGif ? "0" : "10px 14px")};
+const Bubble = styled.div<{
+  $isOwn: boolean;
+  $hasGif: boolean;
+  $hasImg: boolean;
+  $hasCall: boolean; // ← new
+}>`
+  padding: ${({ $hasGif, $hasImg, $hasCall }) =>
+    $hasGif || $hasImg || $hasCall ? "0" : "10px 14px"};
+  min-height: ${({ $hasGif, $hasImg, $hasCall }) =>
+    $hasGif || $hasImg || $hasCall ? "0" : "42px"};
   border-radius: 16px;
   font-size: 13px;
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
-  min-height: ${({ $hasGif }) => ($hasGif ? "0" : "42px")};
   min-width: 60px;
   width: fit-content;
   position: relative;
@@ -176,15 +223,7 @@ const Bubble = styled.div<{ $isOwn: boolean; $hasGif: boolean }>`
         `}
 `;
 
-// ─── GIF media components ──────────────────────────────────────────────────
-/**
- * GifMedia renders inside the Bubble so it inherits the gradient/background
- * and the bubble's border-radius. The GIF image is full-width, caption below.
- *
- * The <img> src comes exclusively from parseMessageGif which has already
- * passed 4 security checks. referrerPolicy="no-referrer" prevents the
- * Giphy server from seeing the user's origin URL.
- */
+// ─── GIF media components ─────────────────────────────────────────────────────
 const GifMedia = styled.div`
   display: flex;
   flex-direction: column;
@@ -229,7 +268,22 @@ const GifAttribution = styled.div`
   text-align: right;
 `;
 
-// ─── Meta ──────────────────────────────────────────────────────────────────
+// ─── Image media components ───────────────────────────────────────────────────
+
+const ImageMedia = styled.div`
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: inherit;
+`;
+
+const ImageCaption = styled.div`
+  padding: 8px 12px 10px;
+  font-size: 13px;
+  line-height: 1.55;
+`;
+
+// ─── Meta ─────────────────────────────────────────────────────────────────────
 const MetaRow = styled.div<{ $isOwn: boolean }>`
   display: flex;
   align-items: center;
@@ -265,12 +319,12 @@ const ExpiryPill = styled.span<{ $expired: boolean }>`
       ? css`
           background: rgba(248, 113, 113, 0.12);
           color: #f87171;
-          border: 1px solid rgba(248, 113, 113, 0.2);
+          border: 1px solid rgba(248, 113, 113, 0.18);
         `
       : css`
           background: rgba(245, 158, 11, 0.12);
           color: #f59e0b;
-          border: 1px solid rgba(245, 158, 11, 0.2);
+          border: 1px solid rgba(245, 158, 11, 0.18);
         `}
 `;
 
@@ -320,7 +374,7 @@ const CBaseChatBubble: React.FC<CBaseChatBubbleProps> = ({
   const [gifLoaded, setGifLoaded] = useState(false);
   const [gifError, setGifError] = useState(false);
 
-  // ── Ref-based mount guard (survives parent re-renders) ─────────────────────
+  // ── Ref-based mount guard ──────────────────────────────────────────────────
   const isMounted = useRef(true);
   useEffect(() => {
     isMounted.current = true;
@@ -329,6 +383,10 @@ const CBaseChatBubble: React.FC<CBaseChatBubbleProps> = ({
     };
   }, []);
 
+  // ── Decrypted image info — populated by ChatImageRenderer.onReady ─────────
+  // Stored in a ref (not state) so it never triggers a re-render.
+  const imageReadyRef = useRef<ChatImageReadyInfo | null>(null);
+
   const messageId = message.getID();
 
   // ── Decrypt ────────────────────────────────────────────────────────────────
@@ -336,6 +394,7 @@ const CBaseChatBubble: React.FC<CBaseChatBubbleProps> = ({
     setText("");
     setGifLoaded(false);
     setGifError(false);
+    imageReadyRef.current = null;
 
     let envelope: MessageEnvelope;
     try {
@@ -367,21 +426,28 @@ const CBaseChatBubble: React.FC<CBaseChatBubbleProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messageId]);
 
-  // ── Parse GIF from decrypted plaintext ────────────────────────────────────
-  const { text: displayText, gifUrl } = useMemo(
-    () => (text ? parseMessageGif(text) : { text: "", gifUrl: null }),
+  // ── Parse decrypted text ───────────────────────────────────────────────────
+  const {
+    text: displayText,
+    gifUrl,
+    imgFileId,
+    callId, // ← new
+  } = useMemo(
+    () =>
+      text
+        ? parseMessageContent(text)
+        : { text: "", gifUrl: null, imgFileId: null, callId: null },
     [text],
   );
 
   const hasGif = gifUrl !== null;
+  const hasImg = imgFileId !== null;
+  const hasCall = callId !== null;
 
   const imgRef = useRef<HTMLImageElement | null>(null);
-
   useEffect(() => {
     const img = imgRef.current;
-    if (img && img.complete && img.naturalWidth > 0) {
-      setGifLoaded(true);
-    }
+    if (img && img.complete && img.naturalWidth > 0) setGifLoaded(true);
   }, [gifUrl]);
 
   // ── Derived values ─────────────────────────────────────────────────────────
@@ -434,12 +500,7 @@ const CBaseChatBubble: React.FC<CBaseChatBubbleProps> = ({
         description: raw.length > 120 ? raw.slice(0, 120) + "…" : raw,
         id: `toast-success-share-${message.getID()}`,
       });
-      // Native Notification
-
-      sendNotification({
-        title: "Copied to clipboard",
-        body: raw,
-      });
+      sendNotification({ title: "Copied to clipboard", body: raw });
     } catch (err) {
       toast.error("Failed to copy", {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -454,8 +515,6 @@ const CBaseChatBubble: React.FC<CBaseChatBubbleProps> = ({
     const raw = message.getCompressedMessage();
     const blob = new Blob([raw], { type: "application/octet-stream" });
     downloadBlob(blob, "txt", message.getRedisKey() || "Majik Message");
-    // Native Notification
-
     sendNotification({
       title: "Message Downloaded",
       body:
@@ -463,11 +522,115 @@ const CBaseChatBubble: React.FC<CBaseChatBubbleProps> = ({
     });
   };
 
+  /**
+   * Downloads the already-decrypted image directly from the object URL
+   * that ChatImageRenderer created. No re-fetch, no re-decrypt.
+   */
+  const handleDownloadImage = (): void => {
+    const info = imageReadyRef.current;
+    if (!info) {
+      toast.error("Image not ready", {
+        description: "Please wait for the image to finish loading.",
+        id: `toast-error-imgdl-${messageId}`,
+      });
+      return;
+    }
+
+    const ext = extensionFromMime(info.mimeType);
+    const filename = info.originalName ?? `majik-image-${messageId}.${ext}`;
+
+    const a = document.createElement("a");
+    a.href = info.objectUrl;
+    a.download = filename;
+    a.click();
+
+    sendNotification({
+      title: "Image Downloaded",
+      body: filename,
+    });
+  };
+
   const hasActions =
     canShare ||
     canDownload ||
+    (hasImg && canDownload) ||
     (!!onDelete && canDelete && isOwn) ||
     (!!onEdit && canEdit && isOwn);
+
+  const renderBubbleContent = () => {
+    switch (true) {
+      case hasImg:
+        return (
+          <ImageMedia>
+            <ChatImageRenderer
+              conversationId={message.getConversationID()}
+              fileId={imgFileId!}
+              majik={majik}
+              maxWidth={320}
+              onReady={(info) => {
+                imageReadyRef.current = info;
+              }}
+            />
+            {displayText ? (
+              <ImageCaption data-private>{displayText}</ImageCaption>
+            ) : null}
+          </ImageMedia>
+        );
+
+      case hasCall:
+        return (
+          <CallMessageRenderer
+            majik={majik}
+            callId={callId!}
+            messageTimestamp={new Date(message.getTimestamp()).toISOString()}
+            isOwn={isOwn}
+            onReady={(_info: CallReadyInfo) => {}}
+          />
+        );
+
+      case hasGif:
+        return (
+          <GifMedia>
+            {!gifLoaded && !gifError && <GifSkeleton />}
+
+            {!gifError && (
+              <GifImage
+                ref={imgRef}
+                src={gifUrl!}
+                alt={displayText || "GIF"}
+                onLoad={() => setGifLoaded(true)}
+                onError={() => setGifError(true)}
+                style={{ display: "block" }}
+                loading="lazy"
+                data-private
+              />
+            )}
+
+            {gifError && (
+              <GifSkeleton
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 11,
+                  color: "rgba(255,255,255,0.3)",
+                  fontFamily: FONT_MONO,
+                }}
+              >
+                <span>GIF unavailable</span>
+              </GifSkeleton>
+            )}
+
+            {displayText && <GifCaption data-private>{displayText}</GifCaption>}
+
+            <GifAttribution>via GIPHY</GifAttribution>
+          </GifMedia>
+        );
+
+      default:
+        return displayText;
+    }
+  };
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
@@ -491,6 +654,15 @@ const CBaseChatBubble: React.FC<CBaseChatBubbleProps> = ({
                 size={22}
               />
             )}
+            {/* Download decrypted image — only shown for image messages */}
+            {hasImg && canDownload && (
+              <StyledIconButton
+                icon={ImageSquareIcon}
+                title="Download image"
+                onClick={handleDownloadImage}
+                size={22}
+              />
+            )}
             {!!onDelete && canDelete && isOwn && (
               <DeleteButton
                 title="message"
@@ -499,53 +671,14 @@ const CBaseChatBubble: React.FC<CBaseChatBubbleProps> = ({
             )}
           </Actions>
 
-          <Bubble $isOwn={isOwn} $hasGif={hasGif} data-private>
-            {hasGif ? (
-              <GifMedia>
-                {/* Skeleton shown while loading, hidden on load/error */}
-                {!gifLoaded && !gifError && <GifSkeleton />}
-
-                {/* img src is the DOMPurify-sanitized, allowlisted URL only */}
-                {!gifError && (
-                  <GifImage
-                    ref={imgRef}
-                    src={gifUrl!}
-                    alt={displayText || "GIF"}
-                    onLoad={() => setGifLoaded(true)}
-                    onError={() => setGifError(true)}
-                    style={{ display: "block" }}
-                    // referrerPolicy="no-referrer"
-                    loading="lazy"
-                    data-private
-                  />
-                )}
-
-                {gifError && (
-                  <GifSkeleton
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontSize: 11,
-                      color: "rgba(255,255,255,0.3)",
-                      fontFamily: FONT_MONO,
-                    }}
-                  >
-                    {/* styled-components doesn't allow direct text in div — use span */}
-                    <span>GIF unavailable</span>
-                  </GifSkeleton>
-                )}
-
-                {/* Caption text — only shown if the user wrote a message alongside the GIF */}
-                {displayText && (
-                  <GifCaption data-private>{displayText}</GifCaption>
-                )}
-
-                <GifAttribution>via GIPHY</GifAttribution>
-              </GifMedia>
-            ) : (
-              displayText
-            )}
+          <Bubble
+            $isOwn={isOwn}
+            $hasGif={hasGif}
+            $hasImg={hasImg}
+            $hasCall={hasCall}
+            data-private
+          >
+            {renderBubbleContent()}
           </Bubble>
         </BubbleRow>
 

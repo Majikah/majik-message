@@ -44,7 +44,7 @@ import type {
 import UserFileQuota from "./UserFileQuota";
 import type { MajikMessageDatabase } from "../majik-context-wrapper/majik-message-database";
 import { toast } from "sonner";
-import { MajikKeyStore} from "@majikah/majik-message";
+import { MajikKeyStore } from "@majikah/majik-message";
 import MajikContactListSelector from "../MajikContactListSelector";
 import moment from "moment";
 import {
@@ -1554,7 +1554,9 @@ const UserFiles: React.FC<UserFilesProps> = ({
       setLoading(true);
       try {
         const data = await majik.getFiles(activeContext, 50, 0, force);
-        setFiles(data);
+        setFiles(Array.isArray(data) ? data : []);
+        console.log("getFiles result:", typeof data, data);
+        setFiles(data || []);
       } catch (e) {
         console.error("getFiles failed", e);
       } finally {
@@ -1600,7 +1602,7 @@ const UserFiles: React.FC<UserFilesProps> = ({
 
   const searchableFiles = useMemo(
     () =>
-      files.map((f) => ({
+      files?.map((f) => ({
         ...f,
         _searchText: [f.original_name, f.mime_type, f.context, f.file_hash]
           .filter(Boolean)

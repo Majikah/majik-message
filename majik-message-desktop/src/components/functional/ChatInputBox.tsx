@@ -7,7 +7,12 @@ import {
   useEffect,
 } from "react";
 import styled, { css } from "styled-components";
-import { PaperPlaneRightIcon, SmileyIcon, XIcon } from "@phosphor-icons/react";
+import {
+  PaperPlaneRightIcon,
+  SmileyIcon,
+  XIcon,
+  ImageIcon,
+} from "@phosphor-icons/react";
 import { toast } from "sonner";
 
 import {
@@ -23,10 +28,15 @@ import { Grid } from "@giphy/react-components";
 import type { MajikahSession } from "../majikah-session-wrapper/majikah-session";
 import { isReserved } from "../base/_message_parsers";
 
-
 // ─── Local tokens ─────────────────────────────────────────────────────────────
 const FONT_MONO = "'Fira Mono', 'JetBrains Mono', monospace";
 const MAX_CHARS = 10000;
+
+// ─── Image upload constants ───────────────────────────────────────────────────
+const IMAGE_MAX_BYTES = 10 * 1024 * 1024; // 10 MB
+const IMAGE_MAX_DIMENSION = 4000; // px
+const IMAGE_ACCEPT = "image/jpeg,image/jpg,image/png,image/webp";
+const IMAGE_ACCEPT_EXTS = ["jpg", "jpeg", "png", "webp"];
 
 // ─── GIF compositing helper ───────────────────────────────────────────────────
 function composeMessageWithGif(text: string, gifUrl: string | null): string {
@@ -34,6 +44,54 @@ function composeMessageWithGif(text: string, gifUrl: string | null): string {
   if (!gifUrl) return trimmed;
   if (!trimmed) return `[gif:${gifUrl}]`;
   return `${trimmed}\n[gif:${gifUrl}]`;
+}
+
+// ─── Image validation ─────────────────────────────────────────────────────────
+
+/**
+ * Validates a File for chat image upload:
+ *   - Must be jpeg/jpg/png/webp
+ *   - Must be ≤ 10 MB
+ *   - Dimensions must be ≤ 4000 × 4000
+ *
+ * Returns null on success, or an error message string.
+ */
+async function validateImageFile(file: File): Promise<string | null> {
+  // ── Extension / MIME check ────────────────────────────────────────────────
+  const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+  if (!IMAGE_ACCEPT_EXTS.includes(ext)) {
+    return `Unsupported format "${ext}". Allowed: ${IMAGE_ACCEPT_EXTS.join(", ")}`;
+  }
+
+  // ── Size check ────────────────────────────────────────────────────────────
+  if (file.size > IMAGE_MAX_BYTES) {
+    const mb = (file.size / 1024 / 1024).toFixed(1);
+    return `Image too large (${mb} MB). Maximum is 10 MB.`;
+  }
+
+  // ── Dimension check ───────────────────────────────────────────────────────
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      if (
+        img.naturalWidth > IMAGE_MAX_DIMENSION ||
+        img.naturalHeight > IMAGE_MAX_DIMENSION
+      ) {
+        resolve(
+          `Image too large (${img.naturalWidth}×${img.naturalHeight}px). Maximum is ${IMAGE_MAX_DIMENSION}×${IMAGE_MAX_DIMENSION}px.`,
+        );
+      } else {
+        resolve(null);
+      }
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve("Could not read image dimensions.");
+    };
+    img.src = url;
+  });
 }
 
 // ─── Giphy client fetchers ────────────────────────────────────────────────────
@@ -129,6 +187,82 @@ const GifPreviewLabel = styled.span`
   color: ${({ theme }) => theme.colors.textSecondary};
   opacity: 0.5;
   text-transform: uppercase;
+`;
+
+// ─── Image preview strip ──────────────────────────────────────────────────────
+
+const ImagePreviewStrip = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px 0;
+`;
+
+const ImagePreviewThumb = styled.div`
+  position: relative;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(62, 207, 142, 0.35);
+  flex-shrink: 0;
+  height: 72px;
+  width: auto;
+  max-width: 120px;
+  background: ${({ theme }) => theme.colors.secondaryBackground};
+`;
+
+const ImagePreviewImg = styled.img`
+  height: 72px;
+  width: auto;
+  max-width: 120px;
+  display: block;
+  object-fit: cover;
+`;
+
+const ImagePreviewDismiss = styled.button`
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.65);
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: rgba(255, 255, 255, 0.85);
+  transition: background 100ms;
+  &:hover {
+    background: rgba(0, 0, 0, 0.85);
+  }
+`;
+
+const ImagePreviewMeta = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+`;
+
+const ImagePreviewLabel = styled.span`
+  font-family: ${FONT_MONO};
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  opacity: 0.5;
+  text-transform: uppercase;
+`;
+
+const ImagePreviewStatus = styled.span<{
+  $uploading?: boolean;
+  $error?: boolean;
+}>`
+  font-family: ${FONT_MONO};
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  color: ${({ $uploading, $error }) =>
+    $error ? "#f06449" : $uploading ? "#f5a623" : "#3ecf8e"};
+  opacity: 0.85;
 `;
 
 // ─── Reserved input warning banner ───────────────────────────────────────────
@@ -394,6 +528,22 @@ const GifAttribution = styled.div`
 // ─── Types ────────────────────────────────────────────────────────────────────
 type PickerMode = "emoji" | "gif" | null;
 
+/** Status of an image being prepared for upload by the parent */
+export type ImageUploadStatus =
+  | "validating"
+  | "scanning"
+  | "uploading"
+  | "ready"
+  | "error";
+
+export interface SelectedImageState {
+  file: File;
+  /** Object URL for preview — revoke when done */
+  previewUrl: string;
+  status: ImageUploadStatus;
+  errorMessage?: string;
+}
+
 interface ChatInputBoxProps {
   majikah: MajikahSession;
   onSend: (text: string) => Promise<void> | void;
@@ -404,6 +554,22 @@ interface ChatInputBoxProps {
   sendOnEnter?: boolean;
   enableGIF?: boolean;
   enableEmoji?: boolean;
+  /** Enable the image upload button */
+  enableImageUpload?: boolean;
+  /**
+   * Called when the user selects a valid image file.
+   * The parent is responsible for scanning, encrypting, and uploading.
+   * The parent should call back via `imageUploadStatus` to reflect progress.
+   */
+  onSelectImage?: (file: File) => void;
+  /**
+   * Current image upload state driven by the parent.
+   * When provided and status === "ready", the image is treated as attached
+   * (similar to a selected GIF) and is sent with the next message.
+   */
+  imageUploadState?: SelectedImageState | null;
+  /** Called when the user dismisses the selected/uploading image */
+  onDismissImage?: () => void;
 }
 
 // ─── Reserved warning toast ID (deduplicated) ─────────────────────────────────
@@ -420,6 +586,10 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
   sendOnEnter = true,
   enableGIF = true,
   enableEmoji = true,
+  enableImageUpload = false,
+  onSelectImage,
+  imageUploadState,
+  onDismissImage,
 }) => {
   const [value, setValue] = useState("");
   const [focused, setFocused] = useState(false);
@@ -432,6 +602,7 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const popoverRef = useRef<HTMLDivElement | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
   const onEmojiSelectRef = useRef<(emoji: { native: string }) => void>(
     () => {},
   );
@@ -536,24 +707,60 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
     setPickerMode((prev) => (prev === mode ? null : mode));
   };
 
+  // ── Image file picker ──────────────────────────────────────────────────────
+  const handleImageInputChange = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      // Reset input so the same file can be re-picked after dismissal
+      e.target.value = "";
+      if (!file || !onSelectImage) return;
+
+      const validationError = await validateImageFile(file);
+      if (validationError) {
+        toast.error("Image rejected", {
+          description: validationError,
+          id: "toast-img-validation",
+          duration: 6000,
+        });
+        return;
+      }
+
+      onSelectImage(file);
+    },
+    [onSelectImage],
+  );
+
   // ── Reserved system message guard ─────────────────────────────────────────
-  /**
-   * `isReserved` is a regex-only pre-check (no sanitisation cost). We run it
-   * against the raw textarea value, not the composed string, so a user cannot
-   * manually construct [gif:…], [majikah:sys:mm:contact:share:…], or
-   * [majikah:sys:mm:contact:request] and have it treated as a system message.
-   *
-   * Effects:
-   *   - Textarea border turns red
-   *   - Inline warning banner appears above the input row
-   *   - Send button is disabled
-   *   - handleSend hard-returns as a defence-in-depth backstop
-   */
   const inputIsReserved = isReserved(value);
+
+  // ── Derived image state ────────────────────────────────────────────────────
+  const imageIsUploading =
+    imageUploadState?.status === "validating" ||
+    imageUploadState?.status === "scanning" ||
+    imageUploadState?.status === "uploading";
+
+  const imageIsReady = imageUploadState?.status === "ready";
+  const imageHasError = imageUploadState?.status === "error";
+
+  const imageStatusLabel = (() => {
+    switch (imageUploadState?.status) {
+      case "validating":
+        return "Validating…";
+      case "scanning":
+        return "Scanning…";
+      case "uploading":
+        return "Uploading…";
+      case "ready":
+        return "Ready to send";
+      case "error":
+        return imageUploadState.errorMessage ?? "Upload failed";
+      default:
+        return "";
+    }
+  })();
 
   // ── Send ───────────────────────────────────────────────────────────────────
   const handleSend = async (): Promise<void> => {
-    // Defence-in-depth: block even if the button somehow wasn't disabled
     if (inputIsReserved) {
       toast.error("Message contains reserved content.", {
         description: "System tags cannot be sent manually.",
@@ -569,13 +776,21 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
 
     const gifUrl = selectedGif?.images?.original?.url ?? null;
     const composed = composeMessageWithGif(value, gifUrl);
-    if (!composed) return;
+
+    // Block send while image is still processing
+    if (imageUploadState && imageIsUploading) {
+      toast.info("Please wait — image is still uploading.");
+      return;
+    }
+
+    if (!composed && !imageIsReady) return;
 
     try {
       await onSend(composed);
       setValue("");
       setSelectedGif(null);
       onUpdate?.(composed);
+      // Note: parent clears imageUploadState after onSend resolves
     } catch (err) {
       console.error("Failed to send message", err);
     }
@@ -608,7 +823,10 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
   const charCount = value.length;
   const nearLimit = charCount > MAX_CHARS * 0.9;
   const canSend =
-    !inputIsReserved && (value.trim().length > 0 || selectedGif !== null);
+    !inputIsReserved &&
+    !imageIsUploading &&
+    !imageHasError &&
+    (value.trim().length > 0 || selectedGif !== null || imageIsReady);
 
   const gifPreviewUrl =
     selectedGif?.images?.fixed_height_small?.url ??
@@ -618,6 +836,17 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <Wrapper ref={wrapperRef}>
+      {/* Hidden image file input */}
+      {enableImageUpload && (
+        <input
+          ref={imageInputRef}
+          type="file"
+          accept={IMAGE_ACCEPT}
+          hidden
+          onChange={handleImageInputChange}
+        />
+      )}
+
       {/* Popover */}
       {pickerMode && (
         <Popover ref={popoverRef} data-private>
@@ -684,6 +913,37 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
         </GifPreviewStrip>
       )}
 
+      {/* Image preview strip */}
+      {enableImageUpload && imageUploadState && (
+        <ImagePreviewStrip>
+          <ImagePreviewThumb>
+            <ImagePreviewImg
+              src={imageUploadState.previewUrl}
+              alt="Selected image"
+              data-private
+            />
+            <ImagePreviewDismiss
+              onClick={onDismissImage}
+              title="Remove image"
+              type="button"
+            >
+              <XIcon size={10} weight="bold" />
+            </ImagePreviewDismiss>
+          </ImagePreviewThumb>
+          <ImagePreviewMeta>
+            <ImagePreviewLabel>
+              {imageIsReady ? "Image attached" : "Processing image…"}
+            </ImagePreviewLabel>
+            <ImagePreviewStatus
+              $uploading={imageIsUploading}
+              $error={imageHasError}
+            >
+              {imageStatusLabel}
+            </ImagePreviewStatus>
+          </ImagePreviewMeta>
+        </ImagePreviewStrip>
+      )}
+
       {/* Reserved system tag warning banner */}
       {inputIsReserved && (
         <ReservedWarning>
@@ -717,6 +977,20 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
               <GifLabel>GIF</GifLabel>
             </ToolBtn>
           )}
+          {enableImageUpload && (
+            <ToolBtn
+              $active={!!imageUploadState}
+              title="Upload image"
+              onClick={() => imageInputRef.current?.click()}
+              type="button"
+              disabled={!!imageUploadState}
+            >
+              <ImageIcon
+                size={15}
+                weight={imageUploadState ? "fill" : "regular"}
+              />
+            </ToolBtn>
+          )}
         </Toolbar>
 
         <TextareaWrap $focused={focused} $reserved={inputIsReserved}>
@@ -728,9 +1002,11 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}
             placeholder={
-              selectedGif
-                ? "Add a message to go with your GIF…"
-                : (placeholder ?? "Message… (Shift+Enter for new line)")
+              imageUploadState
+                ? "Add a caption for your image…"
+                : selectedGif
+                  ? "Add a message to go with your GIF…"
+                  : (placeholder ?? "Message… (Shift+Enter for new line)")
             }
             rows={1}
             $maxHeight={maxHeight}
@@ -751,7 +1027,9 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
           title={
             inputIsReserved
               ? "Message contains a reserved system tag"
-              : "Send message"
+              : imageIsUploading
+                ? "Image is still uploading…"
+                : "Send message"
           }
           type="button"
         >

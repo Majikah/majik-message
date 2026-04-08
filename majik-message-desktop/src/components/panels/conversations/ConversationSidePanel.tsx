@@ -37,6 +37,9 @@ import { launchTutorialChats } from "@/lib/shepherd-js/tutorials/tutorial-chats"
 import { useShepherd } from "@/lib/shepherd-js/use-shepherd";
 import StyledIconButton from "@/components/foundations/StyledIconButton";
 
+import { IncomingCallBanner } from "@/components/majikah-session-wrapper/calls/IncomingCallBanner";
+import { MajikCallOverlay } from "@/components/majikah-session-wrapper/calls/MajikCallOverlay";
+
 // ─── Animations ───────────────────────────────────────────────────────────────
 const slideIn = keyframes`
   from { opacity: 0; transform: translateX(8px); }
@@ -423,7 +426,10 @@ const ConversationSidePanel: React.FC<ConversationSidePanelProps> = ({
               <MajikMessageRealtimeChatClientProvider
                 conversationID={selectedConversation.conversation_id}
                 account={stableIdentity}
+                majik={majik}
               >
+                <IncomingCallBanner majik={majik} />
+                <MajikCallOverlay />
                 <ConversationMessages
                   conversationID={selectedConversation.conversation_id}
                   majik={majik}

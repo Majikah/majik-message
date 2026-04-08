@@ -24,6 +24,7 @@ import { TypingIndicator } from "./TypingIndicator/TypingIndicator";
 import { sendNotification } from "@tauri-apps/plugin-notification";
 import {
   AddressBookIcon,
+  PhoneCallIcon,
   UserCirclePlusIcon,
   UsersThreeIcon,
   WarningIcon,
@@ -806,6 +807,39 @@ export const ConversationMessages = forwardRef<
   // ── Derived ────────────────────────────────────────────────────────────────
   const hasMissingContacts = missingContactKeys.length > 0;
 
+  const handleStartCall = useCallback(() => {
+    if (!conversationID || !senderKey) return;
+
+    const participants = fetchedMessages[0]?.getParticipants() ?? [];
+
+    if (!participants || participants.length === 0) {
+      console.warn("startCall: no participants available", { conversationID });
+      toast.error(
+        "Unable to start call: no participants found in this conversation.",
+      );
+      return;
+    }
+
+    if (participants.length > 2) {
+      toast.error(
+        "Realtime Audio calls are currently limited to 2 participants.",
+      );
+      return;
+    }
+
+    console.log("startCall: invoking client.startCall", {
+      conversationID,
+      senderKey,
+      participants,
+    });
+
+    client?.startCall({
+      conversationID: conversationID,
+      localPublicKey: senderKey,
+      participantPublicKeys: participants,
+    });
+  }, [conversationID, senderKey, client, fetchedMessages]);
+
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <Root>
@@ -818,6 +852,22 @@ export const ConversationMessages = forwardRef<
           onViewInvitations={handleViewInvitations}
         />
       )}
+
+      {!hasMissingContacts &&
+        fetchedMessages[0]?.getParticipants().length <= 2 && (
+          <Banner>
+            <BannerActions>
+              <BannerBtnPrimary
+                type="button"
+                onClick={handleStartCall}
+                disabled={fetchedMessages[0]?.getParticipants().length > 2}
+              >
+                <PhoneCallIcon size={11} weight="bold" />
+                Start Call
+              </BannerBtnPrimary>
+            </BannerActions>
+          </Banner>
+        )}
 
       <ScrollArea>
         {loading && fetchedMessages.length === 0 ? (

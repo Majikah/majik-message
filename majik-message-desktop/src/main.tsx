@@ -33,6 +33,7 @@ createRoot(document.getElementById("root")!).render(
                     <NotificationsProvider>
                       <LogRocketInit />
                       <App />
+                      <div id="call-overlay-root" />
                       <Toaster
                         expand={true}
                         position="top-center"
