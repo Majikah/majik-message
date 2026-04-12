@@ -15,8 +15,11 @@ import {
   CloudArrowUpIcon,
   DownloadSimpleIcon,
   IdentificationBadgeIcon,
+  KeyboardIcon,
   MagicWandIcon,
   ShieldCheckIcon,
+  UploadSimpleIcon,
+  WarningDiamondIcon,
   WifiHighIcon,
   WifiSlashIcon,
 } from "@phosphor-icons/react";
@@ -39,6 +42,10 @@ import {
 import { prepareDownloadAnchor } from "@/utils/utils";
 import type { MajikahSession } from "./majikah-session-wrapper/majikah-session";
 import { MajikMessageDatabase } from "./majik-context-wrapper/majik-message-database";
+import { useNavigate } from "react-router-dom";
+import DropImportAccount from "./foundations/DropImportAccount";
+import { useMajikPreferences } from "@/hooks/use-majik-preferences";
+import { useMajikTutorials } from "@/hooks/use-majik-tutorials";
 
 // ─── Animations ───────────────────────────────────────────────────────────────
 
@@ -351,6 +358,80 @@ const ScrollContainer = styled.div`
   }
 `;
 
+// ─── Import mode toggle ───────────────────────────────────────────────────────
+const ImportModeToggle = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+`;
+
+const ModeToggleButton = styled.button<{ $active: boolean }>`
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid
+    ${({ theme, $active }) =>
+      $active ? theme.colors.primary : theme.colors.secondaryBackground};
+  background: ${({ theme, $active }) =>
+    $active ? `${theme.colors.primary}18` : theme.colors.secondaryBackground};
+  color: ${({ theme, $active }) =>
+    $active ? theme.colors.primary : theme.colors.textSecondary};
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  letter-spacing: 0.02em;
+
+  &:hover {
+    border-color: ${({ theme }) => theme.colors.primary};
+    color: ${({ theme }) => theme.colors.primary};
+  }
+`;
+
+// ─── Security warning ─────────────────────────────────────────────────────────
+const SecurityWarning = styled.div`
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(220, 60, 60, 0.07);
+  border: 1px solid rgba(220, 60, 60, 0.22);
+  margin-bottom: 2em;
+  animation: ${fadeIn} 0.2s ease;
+`;
+
+const SecurityWarningIcon = styled.div`
+  flex-shrink: 0;
+  color: #e05050;
+  margin-top: 1px;
+`;
+
+const SecurityWarningBody = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+`;
+
+const SecurityWarningTitle = styled.p`
+  font-size: 11px;
+  font-weight: 700;
+  color: #e05050;
+  margin: 0;
+  letter-spacing: 0.02em;
+`;
+
+const SecurityWarningText = styled.p`
+  font-size: 11px;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  margin: 0;
+  line-height: 1.5;
+  opacity: 0.8;
+`;
+
 // ─── Loading shimmer ──────────────────────────────────────────────────────────
 
 const ShimmerText = styled.span`
@@ -380,23 +461,29 @@ type GatePhase = "tour" | "account" | "register" | "done";
 
 interface MajikMessageOnboardingGateProps {
   children: React.ReactNode;
-  majikah: MajikahSession;
   majik: MajikMessageDatabase;
+  majikah: MajikahSession;
   onUpdate?: (updated: MajikMessageDatabase) => void;
   /** Placeholder — replace with your Shepherd tour launcher */
   onLaunchTour?: () => Promise<void> | void;
-  bypass?: boolean;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
 const MajikMessageOnboardingGate: React.FC<MajikMessageOnboardingGateProps> = ({
   children,
-  bypass = false,
   majik,
+  majikah,
   onUpdate,
   onLaunchTour,
 }) => {
+  const navigate = useNavigate();
+  const {
+    hasPreference,
+    add: addPreference,
+    remove: removePreference,
+  } = useMajikPreferences();
+  const { hasTutorial } = useMajikTutorials();
   const [phase, setPhase] = useState<GatePhase | null>(null); // null = still evaluating
   const [refreshKey, setRefreshKey] = useState(0);
 
@@ -413,12 +500,10 @@ const MajikMessageOnboardingGate: React.FC<MajikMessageOnboardingGateProps> = ({
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(
     null,
   );
-  const [isRegistering] = useState(false);
+  const [isRegistering, setIsRegistering] = useState(false);
 
-  // ── Tour guard — fires only once, after all gate steps finish ──────────────
-  const tourFiredRef = useRef(false);
-  // ── Tracks whether the user started with zero accounts (brand-new) ──────────
-  const isFirstTimeUserRef = useRef(false);
+  // ── Import mode: "drop" | "manual" ────────────────────────────────────────
+  const [importMode, setImportMode] = useState<"drop" | "manual">("drop");
 
   useEffect(() => {
     const accounts = majik.listOwnAccounts();
@@ -426,45 +511,47 @@ const MajikMessageOnboardingGate: React.FC<MajikMessageOnboardingGateProps> = ({
     const hasOnline = accounts.some((a) => a.isMajikahRegistered());
 
     if (!hasAccounts) {
-      tourFiredRef.current = false;
-      isFirstTimeUserRef.current = true; // ← mark as first-time
       setPhase("account");
     } else if (!hasOnline) {
-      // Has local accounts but none online — returning user who stayed offline.
-      // Do NOT mark as first-time; skip tour entirely.
-      isFirstTimeUserRef.current = false;
-      setPhase("register");
+      // Check if ALL unregistered accounts have been skipped
+      const unregistered = accounts.filter((a) => !a.isMajikahRegistered());
+      const allSkipped = unregistered.every((a) =>
+        hasPreference(`majik_skip_register_${a.id}`),
+      );
+
+      if (allSkipped) {
+        setPhase("tour"); // skip register, go straight to tour/done
+      } else {
+        setPhase("register");
+      }
     } else {
-      setPhase("tour"); // tour trigger guards itself with both refs
+      setPhase("tour");
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [majik, refreshKey]);
 
   // ── Tour trigger — runs only after account + register steps are done ───────
   useEffect(() => {
-    if (phase !== "tour" || tourFiredRef.current) return;
+    if (phase !== "tour") return;
 
     // Only launch for users who started with zero accounts
-    if (!isFirstTimeUserRef.current) {
+    if (hasTutorial("tutorial-majik-message-onboarding:v:0.0.1")) {
       setPhase("done");
       return;
     }
 
-    tourFiredRef.current = true;
-
     const runTour = async (): Promise<void> => {
       try {
-        await new Promise((r) => setTimeout(r, 50));
         await onLaunchTour?.();
-      } catch (e) {
-        console.warn("Onboarding tutorial skipped: ", e);
+      } catch {
         // tour error is non-fatal
       } finally {
         setPhase("done");
       }
     };
 
-    void runTour();
-  }, [phase, onLaunchTour]);
+    runTour();
+  }, [phase, onLaunchTour, hasTutorial]);
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -492,17 +579,16 @@ const MajikMessageOnboardingGate: React.FC<MajikMessageOnboardingGateProps> = ({
   // Check whether the new account is already registered online. If it is,
   // skip the register step and go straight to the tour. Otherwise show register.
 
-  // const advanceAfterAccount = async (accountId: string): Promise<void> => {
-  //   // try {
-  //   //   const doesExist = await majik.identityExists(accountId);
-  //   //   majik.setContactMajikahStatus(accountId, doesExist);
-  //   //   setPhase(doesExist ? "tour" : "register");
-  //   // } catch {
-  //   //   // Network error — fall back to the register step so the user can retry
-  //   //   setPhase("register");
-  //   // }
-  //   setPhase("tour");
-  // };
+  const advanceAfterAccount = async (accountId: string): Promise<void> => {
+    try {
+      const doesExist = await majik.identityExists(accountId);
+      majik.setContactMajikahStatus(accountId, doesExist);
+      setPhase(doesExist ? "tour" : "register");
+    } catch {
+      // Network error — fall back to the register step so the user can retry
+      setPhase("register");
+    }
+  };
   // ── Create account ─────────────────────────────────────────────────────────
 
   const handleCreateAccount = async (): Promise<void> => {
@@ -533,8 +619,8 @@ const MajikMessageOnboardingGate: React.FC<MajikMessageOnboardingGateProps> = ({
       refresh();
 
       // Check online status before deciding next phase
-      // await advanceAfterAccount(created.id);
-      setPhase("tour");
+      await advanceAfterAccount(created.id);
+
       return `Account "${label}" created.`;
     };
 
@@ -551,7 +637,7 @@ const MajikMessageOnboardingGate: React.FC<MajikMessageOnboardingGateProps> = ({
     if (!mnemonicJSON?.id?.trim() || !passphrase?.trim()) return;
 
     const run = async (): Promise<string> => {
-      await majik.importAccountFromMnemonicBackup(
+      const imported = await majik.importAccountFromMnemonicBackup(
         mnemonicJSON.id,
         mnemonic.trim(),
         passphrase.trim(),
@@ -562,8 +648,8 @@ const MajikMessageOnboardingGate: React.FC<MajikMessageOnboardingGateProps> = ({
       refresh();
 
       // Check online status before deciding next phase
-      // await advanceAfterAccount(imported.id);
-      setPhase("tour");
+      await advanceAfterAccount(imported.id);
+
       return "Account imported.";
     };
 
@@ -574,43 +660,51 @@ const MajikMessageOnboardingGate: React.FC<MajikMessageOnboardingGateProps> = ({
     });
   };
 
-  // // ── Register online ────────────────────────────────────────────────────────
+  // ── Register online ────────────────────────────────────────────────────────
 
-  // const handleRegisterOnline = async (): Promise<void> => {
-  //   if (!selectedAccountId) return;
+  const handleRegisterOnline = async (): Promise<void> => {
+    if (!selectedAccountId) return;
 
-  //   const contact = majik.getOwnAccountById(selectedAccountId);
-  //   if (!contact) return;
+    const contact = majik.getOwnAccountById(selectedAccountId);
+    if (!contact) return;
 
-  //   if (!majikah.isAuthenticated && !majikah.user) {
-  //     toast.info("Login Required", {
-  //       description: `A Majikah account is required to register a Majik Key seed phrase account online.`,
-  //     });
-  //     navigate("/majikah");
-  //     setPhase("tour");
-  //     return;
-  //   }
+    if (!majikah.isAuthenticated && !majikah.user) {
+      toast.info("Login Required", {
+        description: `A Majikah account is required to register a Majik Key seed phrase account online.`,
+      });
+      navigate("/majikah");
+      setPhase("tour");
+      return;
+    }
 
-  //   setIsRegistering(true);
-  //   try {
-  //     await majik.createIdentity(contact);
-  //     toast.success("Registered online!", {
-  //       description: `Account is now discoverable on Majikah.`,
-  //     });
-  //     onUpdate?.(majik);
-  //     refresh();
-  //     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  //   } catch (e: any) {
-  //     toast.error("Registration failed", { description: e?.message });
-  //   } finally {
-  //     setIsRegistering(false);
-  //   }
-  // };
+    setIsRegistering(true);
+    try {
+      await majik.createIdentity(contact);
+      toast.success("Registered online!", {
+        description: `Account is now discoverable on Majikah.`,
+      });
+      onUpdate?.(majik);
+      refresh();
+      removePreference(`majik_skip_register_${selectedAccountId}`);
 
-  // ── "Stay offline" from register step — still launch tour ─────────────────
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (e: any) {
+      toast.error("Registration failed", { description: e?.message });
+    } finally {
+      setIsRegistering(false);
+    }
+  };
 
-  const handleStayOffline = (): void => {
-    setPhase("tour");
+  // ── Drop import handlers ───────────────────────────────────────────────────
+  const handleDropFileLoaded = (json: MnemonicJSON): void => {
+    setMnemonicJSON(json);
+    setMnemonic(jsonToSeed(json));
+  };
+
+  const handleDropClear = (): void => {
+    setMnemonicJSON(undefined);
+    setMnemonic("");
+    setPassphrase("");
   };
 
   // ── Derived ────────────────────────────────────────────────────────────────
@@ -625,6 +719,15 @@ const MajikMessageOnboardingGate: React.FC<MajikMessageOnboardingGateProps> = ({
     () => localAccounts.filter((a) => !a.isMajikahRegistered()),
     [localAccounts],
   );
+
+  // ── "Stay offline" from register step — still launch tour ─────────────────
+
+  const handleStayOffline = (): void => {
+    unregisteredAccounts.forEach((account) => {
+      addPreference(`majik_skip_register_${account.id}`);
+    });
+    setPhase("tour");
+  };
 
   // ── Render guard ───────────────────────────────────────────────────────────
 
@@ -734,6 +837,24 @@ const MajikMessageOnboardingGate: React.FC<MajikMessageOnboardingGateProps> = ({
                         </StepHint>
                       </StepHeader>
 
+                      {/* Security warning */}
+                      <SecurityWarning>
+                        <SecurityWarningIcon>
+                          <WarningDiamondIcon size={15} weight="fill" />
+                        </SecurityWarningIcon>
+                        <SecurityWarningBody>
+                          <SecurityWarningTitle>
+                            Keep this private
+                          </SecurityWarningTitle>
+                          <SecurityWarningText>
+                            Never share your seed phrase or backup JSON file
+                            with anyone. Anyone who has them gains full access
+                            to your account. Store your backup in a safe,
+                            offline location.
+                          </SecurityWarningText>
+                        </SecurityWarningBody>
+                      </SecurityWarning>
+
                       <CustomInputField
                         onChange={setLabel}
                         maxChar={100}
@@ -774,13 +895,54 @@ const MajikMessageOnboardingGate: React.FC<MajikMessageOnboardingGateProps> = ({
                         currentValue={label}
                         sensitive
                       />
-                      <SeedKeyInput
-                        requireBackupKey
-                        importProp={{ type: "json" }}
-                        onUpdatePassphrase={handleUpdatePassphrase}
-                        onChange={handleSeedKeyChange}
-                        currentValue={mnemonicJSON}
-                      />
+
+                      {/* Mode toggle */}
+                      <ImportModeToggle>
+                        <ModeToggleButton
+                          $active={importMode === "drop"}
+                          onClick={() => {
+                            setImportMode("drop");
+                            handleDropClear();
+                          }}
+                          type="button"
+                        >
+                          <UploadSimpleIcon size={12} />
+                          Backup file
+                        </ModeToggleButton>
+                        <ModeToggleButton
+                          $active={importMode === "manual"}
+                          onClick={() => {
+                            setImportMode("manual");
+                            handleDropClear();
+                          }}
+                          type="button"
+                        >
+                          <KeyboardIcon size={12} />
+                          Enter manually
+                        </ModeToggleButton>
+                      </ImportModeToggle>
+
+                      {/* Drop zone */}
+                      {importMode === "drop" && (
+                        <DropImportAccount
+                          passphrase={passphrase}
+                          onPassphraseChange={handleUpdatePassphrase}
+                          mnemonicJSON={mnemonicJSON}
+                          onFileLoaded={handleDropFileLoaded}
+                          onClear={handleDropClear}
+                        />
+                      )}
+
+                      {/* Manual input (existing flow) */}
+                      {importMode === "manual" && (
+                        <SeedKeyInput
+                          requireBackupKey
+                          importProp={{ type: "json" }}
+                          onUpdatePassphrase={handleUpdatePassphrase}
+                          onChange={handleSeedKeyChange}
+                          currentValue={mnemonicJSON}
+                        />
+                      )}
                     </>
                   )}
                 </StepWrapper>
@@ -831,7 +993,7 @@ const MajikMessageOnboardingGate: React.FC<MajikMessageOnboardingGateProps> = ({
 
   // ── STEP: register online ──────────────────────────────────────────────────
 
-  if (phase === "register" && !bypass) {
+  if (phase === "register") {
     return (
       <>
         {children}
@@ -923,7 +1085,7 @@ const MajikMessageOnboardingGate: React.FC<MajikMessageOnboardingGateProps> = ({
                     $primary
                     type="button"
                     disabled={!selectedAccountId || isRegistering}
-                    // onClick={handleRegisterOnline}
+                    onClick={handleRegisterOnline}
                   >
                     {isRegistering ? (
                       <ShimmerText>Registering…</ShimmerText>

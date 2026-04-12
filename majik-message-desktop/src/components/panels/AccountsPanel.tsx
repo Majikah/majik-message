@@ -1,4 +1,4 @@
-import styled from "styled-components";
+import styled, { keyframes } from "styled-components";
 import { useEffect, useMemo, useState } from "react";
 
 import { toast } from "sonner";
@@ -11,7 +11,13 @@ import { ImportIcon } from "lucide-react";
 import { SeedKeyInput } from "../foundations/SeedKeyInput";
 
 import { downloadBlob } from "../../utils/utils";
-import { PlusIcon, UserIcon } from "@phosphor-icons/react";
+import {
+  KeyboardIcon,
+  PlusIcon,
+  UploadSimpleIcon,
+  UserIcon,
+  WarningDiamondIcon,
+} from "@phosphor-icons/react";
 
 import {
   jsonToSeed,
@@ -27,6 +33,13 @@ import { writeFile } from "@tauri-apps/plugin-fs";
 import { sendNotification } from "@tauri-apps/plugin-notification";
 import { MajikMessageDatabase } from "../majik-context-wrapper/majik-message-database";
 import { MajikContact } from "@majikah/majik-contact";
+import DropImportAccount from "../foundations/DropImportAccount";
+
+// ─── Animations ───────────────────────────────────────────────────────────────
+const fadeIn = keyframes`
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+`;
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const MAX_ACCOUNT_LIMIT = 25;
@@ -167,6 +180,84 @@ const LimitBadge = styled.span`
   white-space: nowrap;
 `;
 
+// ─── Import mode toggle ───────────────────────────────────────────────────────
+const ImportModeToggle = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+`;
+
+const ModeToggleButton = styled.button<{ $active: boolean }>`
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid
+    ${({ theme, $active }) =>
+      $active
+        ? (theme.colors.primary)
+        : theme.colors.secondaryBackground};
+  background: ${({ theme, $active }) =>
+    $active
+      ? `${theme.colors.primary}18`
+      : theme.colors.secondaryBackground};
+  color: ${({ theme, $active }) =>
+    $active ? (theme.colors.primary) : theme.colors.textSecondary};
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  letter-spacing: 0.02em;
+
+  &:hover {
+    border-color: ${({ theme }) => theme.colors.primary};
+    color: ${({ theme }) => theme.colors.primary};
+  }
+`;
+
+// ─── Security warning ─────────────────────────────────────────────────────────
+const SecurityWarning = styled.div`
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(220, 60, 60, 0.07);
+  border: 1px solid rgba(220, 60, 60, 0.22);
+  margin-bottom: 2em;
+  animation: ${fadeIn} 0.2s ease;
+`;
+
+const SecurityWarningIcon = styled.div`
+  flex-shrink: 0;
+  color: #e05050;
+  margin-top: 1px;
+`;
+
+const SecurityWarningBody = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+`;
+
+const SecurityWarningTitle = styled.p`
+  font-size: 11px;
+  font-weight: 700;
+  color: #e05050;
+  margin: 0;
+  letter-spacing: 0.02em;
+`;
+
+const SecurityWarningText = styled.p`
+  font-size: 11px;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  margin: 0;
+  line-height: 1.5;
+  opacity: 0.8;
+`;
+
 // ─── Props ────────────────────────────────────────────────────────────────────
 interface PassphraseUpdateParams {
   id: string;
@@ -189,6 +280,9 @@ const AccountsPanel: React.FC<AccountsPanelProps> = ({ majik, onUpdate }) => {
   const [mnemonicJSON, setMnemonicJSON] = useState<MnemonicJSON | undefined>(
     undefined,
   );
+
+  // ── Import mode: "drop" | "manual" ────────────────────────────────────────
+  const [importMode, setImportMode] = useState<"drop" | "manual">("drop");
 
   // ── Listen for account changes ─────────────────────────────────────────────
   useEffect(() => {
@@ -490,39 +584,6 @@ const AccountsPanel: React.FC<AccountsPanelProps> = ({ majik, onUpdate }) => {
     }
   };
 
-  // // ── Register online ────────────────────────────────────────────────────────
-  // const processRegisterOnline = async (
-  //   contact: MajikContact,
-  // ): Promise<string> => {
-  //   if (contact.isMajikahRegistered())
-  //     throw new Error("Already registered online.");
-  //   const res = await majik.createIdentity(contact);
-  //   if (res !== null && res.message) {
-  //     return `Account for ${res.data.public_key} is now registered online!`;
-  //   }
-  //   const pk = await contact.getPublicKeyBase64();
-  //   return `Problem creating online account for ${pk}`;
-  // };
-
-  // const handleRegisterOnline = async (contact: MajikContact): Promise<void> => {
-  //   try {
-  //     toast.promise(processRegisterOnline(contact), {
-  //       loading: "Registering Online…",
-  //       success: (msg) => {
-  //         onUpdate?.(majik);
-  //         setRefreshKey((prev) => prev + 1);
-  //         return msg;
-  //       },
-  //       error: (err) => `${err.message}`,
-  //     });
-  //   } catch (err) {
-  //     toast.error("Online Registration Failed", {
-  //       description: err instanceof Error ? err.message : "An error occurred",
-  //       id: "toast-error-register",
-  //     });
-  //   }
-  // };
-
   // ── Form helpers ───────────────────────────────────────────────────────────
   const resetForm = (): void => {
     setLabel("");
@@ -539,6 +600,18 @@ const AccountsPanel: React.FC<AccountsPanelProps> = ({ majik, onUpdate }) => {
     if (!input || input.seed.length <= 0) return;
     setMnemonicJSON(input);
     setMnemonic(jsonToSeed(input));
+  };
+
+  // ── Drop import handlers ───────────────────────────────────────────────────
+  const handleDropFileLoaded = (json: MnemonicJSON): void => {
+    setMnemonicJSON(json);
+    setMnemonic(jsonToSeed(json));
+  };
+
+  const handleDropClear = (): void => {
+    setMnemonicJSON(undefined);
+    setMnemonic("");
+    setPassphrase("");
   };
 
   // ── Accounts list ──────────────────────────────────────────────────────────
@@ -597,6 +670,7 @@ const AccountsPanel: React.FC<AccountsPanelProps> = ({ majik, onUpdate }) => {
               },
             }}
           >
+            {/* Display name (shared by both modes) */}
             <CustomInputField
               onChange={(e) => setLabel(e)}
               maxChar={100}
@@ -605,20 +679,58 @@ const AccountsPanel: React.FC<AccountsPanelProps> = ({ majik, onUpdate }) => {
               currentValue={label}
               sensitive
             />
-            <SeedKeyInput
-              importProp={{ type: "json" }}
-              requireBackupKey
-              onUpdatePassphrase={handleUpdatePassphrase}
-              onChange={handleSeedKeyChange}
-              currentValue={
-                mnemonicJSON
-                  ? {
-                      ...mnemonicJSON,
-                      phrase: passphrase,
-                    }
-                  : undefined
-              }
-            />
+
+            {/* Mode toggle */}
+            <ImportModeToggle>
+              <ModeToggleButton
+                $active={importMode === "drop"}
+                onClick={() => {
+                  setImportMode("drop");
+                  handleDropClear();
+                }}
+                type="button"
+              >
+                <UploadSimpleIcon size={12} />
+                Backup file
+              </ModeToggleButton>
+              <ModeToggleButton
+                $active={importMode === "manual"}
+                onClick={() => {
+                  setImportMode("manual");
+                  handleDropClear();
+                }}
+                type="button"
+              >
+                <KeyboardIcon size={12} />
+                Enter manually
+              </ModeToggleButton>
+            </ImportModeToggle>
+
+            {/* Drop zone */}
+            {importMode === "drop" && (
+              <DropImportAccount
+                passphrase={passphrase}
+                onPassphraseChange={handleUpdatePassphrase}
+                mnemonicJSON={mnemonicJSON}
+                onFileLoaded={handleDropFileLoaded}
+                onClear={handleDropClear}
+              />
+            )}
+
+            {/* Manual input (existing flow) */}
+            {importMode === "manual" && (
+              <SeedKeyInput
+                importProp={{ type: "json" }}
+                requireBackupKey
+                onUpdatePassphrase={handleUpdatePassphrase}
+                onChange={handleSeedKeyChange}
+                currentValue={
+                  mnemonicJSON
+                    ? { ...mnemonicJSON, phrase: passphrase }
+                    : undefined
+                }
+              />
+            )}
           </PopUpFormButton>
 
           {/* Create */}
@@ -646,6 +758,21 @@ const AccountsPanel: React.FC<AccountsPanelProps> = ({ majik, onUpdate }) => {
               },
             }}
           >
+            {/* Security warning */}
+            <SecurityWarning>
+              <SecurityWarningIcon>
+                <WarningDiamondIcon size={15} weight="fill" />
+              </SecurityWarningIcon>
+              <SecurityWarningBody>
+                <SecurityWarningTitle>Keep this private</SecurityWarningTitle>
+                <SecurityWarningText>
+                  Never share your seed phrase or backup JSON file with anyone.
+                  Anyone who has them gains full access to your account. Store
+                  your backup in a safe, offline location.
+                </SecurityWarningText>
+              </SecurityWarningBody>
+            </SecurityWarning>
+
             <CustomInputField
               onChange={(e) => setLabel(e)}
               maxChar={100}

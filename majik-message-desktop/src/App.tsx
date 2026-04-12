@@ -61,6 +61,7 @@ import { NotificationDot } from "./components/functional/Notification/Notificati
 import ConversationSidePanel from "./components/panels/conversations/ConversationSidePanel";
 import { useFirebaseTauriPush } from "./lib/firebase/use-firebase-notifications";
 import { MajikContact } from "@majikah/majik-contact";
+import { useMajikahNotifications } from "./components/majikah-notification-wrapper/use-majikah-notifications";
 
 const RootContainer = styled.div`
   display: flex;
@@ -89,6 +90,8 @@ function App(): JSX.Element {
 
   const { majik, loading, updateInstance } = useMajik();
   const { majikah } = useMajikah();
+  const { unreadChatCount, unreadThreadCount } = useMajikahNotifications();
+
   const [unlockId, setUnlockId] = useState<string | null>(null);
   const [unlockResolver, setUnlockResolver] = useState<
     ((s: string) => void) | null
@@ -596,7 +599,7 @@ function App(): JSX.Element {
       element: (
         <ConversationSidePanel majik={majik} onUpdate={handleRefreshInstance} />
       ),
-      notification: <NotificationDot />,
+      notification: <NotificationDot count={unreadChatCount} />,
     },
     {
       id: "threads",
@@ -604,7 +607,7 @@ function App(): JSX.Element {
       name: "Threads",
       icon: LinkIcon,
       element: <EmailThreads majik={majik} onUpdate={handleRefreshInstance} />,
-      // notification: <NotificationDot />
+      notification: <NotificationDot count={unreadThreadCount} />,
     },
     {
       id: "contacts",

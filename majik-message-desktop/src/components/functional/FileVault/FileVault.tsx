@@ -219,6 +219,7 @@ function inferMimeFromName(name: string): string {
     sketch: "application/x-sketch",
     glb: "model/gltf-binary",
     gltf: "model/gltf+json",
+    mjkb: "application/vnd.majikah.bundle",
   };
   return map[ext] || "application/octet-stream";
 }
@@ -1336,7 +1337,7 @@ const FileVault: React.FC<FileVaultProps> = ({
     if (file.name.toLowerCase().endsWith(".mjkb")) {
       return {
         valid: false,
-        mime: "application/octet-stream",
+        mime: "application/vnd.majikah.bundle",
         msg: "This file is already an encrypted .mjkb — use Decrypt mode instead.",
       };
     }
@@ -1405,7 +1406,7 @@ const FileVault: React.FC<FileVaultProps> = ({
     }
     setInputFile({
       file,
-      mime: "application/octet-stream",
+      mime: "application/vnd.majikah.bundle",
       valid: looksLikeMjkb,
       validationMsg: looksLikeMjkb
         ? undefined
@@ -1640,7 +1641,7 @@ const FileVault: React.FC<FileVaultProps> = ({
 
     if (mode === "encrypt" && encryptResult) {
       filename = `${encryptResult.originalName.replace(/\.[^.]+$/, "")}_${encryptResult.hash.slice(0, 8)}.mjkb`;
-      type = "application/octet-stream";
+      type = "application/vnd.majikah.bundle";
     } else if (mode === "decrypt" && decryptResult) {
       if (scanPhase === "flagged") {
         toast.warning("Downloading flagged file — proceed with caution", {

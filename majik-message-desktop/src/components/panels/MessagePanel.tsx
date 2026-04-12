@@ -398,7 +398,7 @@ const MessagePanel: React.FC<MessagePanelProps> = ({ majik }) => {
             <CustomInputField
               currentValue={inviteKey}
               onChange={(e) => setInviteKey(e)}
-              maxChar={500}
+              maxChar={10000}
               label="Invite Key"
               required
               importProp={{ type: "txt" }}

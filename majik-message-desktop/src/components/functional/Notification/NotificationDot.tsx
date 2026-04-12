@@ -1,5 +1,5 @@
-// components/NotificationDot.tsx
-import { useMajikahNotifications } from "@/components/majikah-notification-wrapper/use-majikah-notifications";
+"use client";
+
 import theme from "@/globals/theme";
 import React from "react";
 import styled, { keyframes } from "styled-components";
@@ -36,6 +36,7 @@ const DotWrapper = styled.div<{ color: string; size: number }>`
 `;
 
 interface NotificationDotProps {
+  count: number;
   color?: string;
   size?: number;
 }
@@ -43,14 +44,13 @@ interface NotificationDotProps {
 export const NotificationDot: React.FC<NotificationDotProps> = ({
   color = theme.colors.error,
   size = 16,
+  count = 0,
 }) => {
-  const { unreadCount } = useMajikahNotifications();
-
-  if (unreadCount === 0) return null;
+  if (count === 0) return null;
 
   return (
     <DotWrapper color={color} size={size}>
-      {unreadCount}
+      {count}
     </DotWrapper>
   );
 };
