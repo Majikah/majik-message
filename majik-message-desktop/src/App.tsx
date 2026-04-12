@@ -648,7 +648,7 @@ function App(): JSX.Element {
         majik={majik}
         onUpdate={handleRefreshInstance}
         onLaunchTour={() => launchTutorialOnboarding(tour)}
-        bypass={true}
+        // bypass={true}
       >
         <TabRouter tabs={tabs} key={refreshKey} />
         <UnlockModal
