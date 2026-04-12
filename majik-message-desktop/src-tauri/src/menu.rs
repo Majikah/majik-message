@@ -106,6 +106,7 @@ pub fn build_menu<R: Runtime>(app: &AppHandle<R>, is_signed_in: bool) -> tauri::
 
     // ── Help ───────────────────────────────────────────────────────────────
     let docs = MenuItem::with_id(app, "docs", "Docs", true, None::<&str>)?;
+    let start_tutorial = MenuItem::with_id(app, "tutorial", "Start Tutorial", true, None::<&str>)?;
     let product_info = MenuItem::with_id(
         app,
         "product-info",
@@ -125,6 +126,7 @@ pub fn build_menu<R: Runtime>(app: &AppHandle<R>, is_signed_in: bool) -> tauri::
         true,
         &[
             &docs,
+            &start_tutorial,
             &product_info,
             &developer,
             &PredefinedMenuItem::separator(app)?,
@@ -201,6 +203,10 @@ pub fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, event_id: &str) {
         "docs" => {
             open_url(app, "https://majikah.solutions/products/majik-message/docs");
         }
+        "tutorial" => {
+            let _ = app.emit("trigger-start-tutorial", ());
+        }
+
         "product-info" => {
             open_url(app, "https://majikah.solutions/products/majik-message");
         }

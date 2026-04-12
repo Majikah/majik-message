@@ -62,6 +62,7 @@ import ConversationSidePanel from "./components/panels/conversations/Conversatio
 import { useFirebaseTauriPush } from "./lib/firebase/use-firebase-notifications";
 import { MajikContact } from "@majikah/majik-contact";
 import { useMajikahNotifications } from "./components/majikah-notification-wrapper/use-majikah-notifications";
+import { useMajikTutorials } from "./hooks/use-majik-tutorials";
 
 const RootContainer = styled.div`
   display: flex;
@@ -85,6 +86,7 @@ const firebaseConfig = {
 
 function App(): JSX.Element {
   const tour = useShepherd();
+  const { add: addTutorial } = useMajikTutorials();
   const navigate = useNavigate();
   const dispatch = useDispatch();
 
@@ -252,6 +254,10 @@ function App(): JSX.Element {
         }),
         listen("trigger-toggle-dark-mode", () => {
           dispatch(toggleTheme());
+        }),
+
+        listen("trigger-start-tutorial", () => {
+          launchTutorialOnboarding(tour);
         }),
         listen("trigger-create-account", async () => {
           if (userAccounts.length >= MAX_ACCOUNT_LIMIT) {
@@ -647,8 +653,11 @@ function App(): JSX.Element {
         majikah={majikah}
         majik={majik}
         onUpdate={handleRefreshInstance}
-        onLaunchTour={() => launchTutorialOnboarding(tour)}
-        // bypass={true}
+        onLaunchTour={() =>
+          launchTutorialOnboarding(tour, () => {
+            addTutorial("tutorial-majik-message-onboarding:v:0.0.1");
+          })
+        }
       >
         <TabRouter tabs={tabs} key={refreshKey} />
         <UnlockModal
