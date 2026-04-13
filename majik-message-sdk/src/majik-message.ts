@@ -2,12 +2,13 @@
 
 import {
   MajikContact,
+  MajikContactGroup,
+  MajikContactGroupMeta,
   type MajikContactCard,
   type MajikContactMeta,
   type SerializedMajikContact,
 } from "@majikah/majik-contact";
 import { KEY_ALGO } from "./core/crypto/constants";
-import { ScannerEngine } from "./core/scanner/scanner-engine";
 import { MessageEnvelope } from "./core/messages/message-envelope";
 import {
   EnvelopeCache,
@@ -15,10 +16,6 @@ import {
   type EnvelopeCacheJSON,
 } from "./core/messages/envelope-cache";
 import { MajikKeyStore } from "./core/crypto/keystore";
-import {
-  MajikContactDirectory,
-  type MajikContactDirectoryData,
-} from "./core/contacts/majik-contact-directory";
 import {
   arrayBufferToBase64,
   arrayToBase64,
@@ -73,6 +70,9 @@ import {
 } from "@majikah/majik-signature";
 
 import { gzipSync, gunzipSync } from "fflate";
+import { MajikContactManager } from "./core/contacts/majik-contact-manager";
+import { MajikContactManagerJSON } from "./core/contacts/types";
+import { migrateMajikMessageJSON } from "./core/contacts/majik-contact-migration";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -83,8 +83,11 @@ type MajikMessageEvents =
   | "error"
   | "new-account"
   | "new-contact"
+  | "new-contact-group"
   | "removed-account"
   | "removed-contact"
+  | "removed-contact-group"
+  | "contact-group-change"
   | "active-account-change";
 
 interface MajikMessageStatic<T extends MajikMessage> {
@@ -94,13 +97,18 @@ interface MajikMessageStatic<T extends MajikMessage> {
 
 export interface MajikMessageConfig {
   keyStore?: typeof MajikKeyStore; // optional — MajikKeyStore is static
-  contactDirectory?: MajikContactDirectory;
+  /**
+   * Optional pre-constructed MajikContactManager.
+   * When omitted, MajikMessage creates a fresh one internally.
+   * Pass one when restoring state from fromJSON() or loadState().
+   */
+  contactManager?: MajikContactManager;
   envelopeCache?: EnvelopeCache;
 }
 
 export interface MajikMessageJSON {
   id: string;
-  contacts: MajikContactDirectoryData;
+  contacts: MajikContactManagerJSON;
   envelopeCache: EnvelopeCacheJSON;
   ownAccounts?: {
     accounts: SerializedMajikContact[];
@@ -114,11 +122,9 @@ type EventCallback = (...args: any[]) => void;
 
 export class MajikMessage {
   private userProfile: string = "default";
-  private pinHash?: string | null = null;
   private id: string;
-  private contactDirectory: MajikContactDirectory;
+  private contacts: MajikContactManager;
   private envelopeCache: EnvelopeCache;
-  private scanner: ScannerEngine;
   private listeners: Map<MajikMessageEvents, EventCallback[]> = new Map();
   private ownAccounts: Map<string, MajikContact> = new Map();
   private ownAccountsOrder: string[] = [];
@@ -134,17 +140,9 @@ export class MajikMessage {
   ) {
     this.userProfile = userProfile || "default";
     this.id = id || arrayToBase64(randomBytes(32));
-    this.contactDirectory =
-      config.contactDirectory || new MajikContactDirectory();
+    this.contacts = config.contactManager ?? new MajikContactManager();
     this.envelopeCache =
       config.envelopeCache || new EnvelopeCache(undefined, userProfile);
-
-    this.scanner = new ScannerEngine({
-      contactDirectory: this.contactDirectory,
-      onEnvelopeFound: (env) => this.handleEnvelope(env),
-      onUntrusted: (raw) => this.emit("untrusted", raw),
-      onError: (err, ctx) => this.emit("error", err, ctx),
-    });
 
     const events: MajikMessageEvents[] = [
       "message",
@@ -162,37 +160,6 @@ export class MajikMessage {
     this.attachAutosaveHandlers();
   }
 
-  // ── Private: Envelope helpers ────────────────────────────────────────────
-
-  // /**
-  //  * Resolve a list of account/contact IDs into MajikRecipient objects.
-  //  * Each recipient needs their ML-KEM public key from MajikKeyStore.
-  //  */
-  // private async _resolveRecipients(ids: string[]): Promise<MajikRecipient[]> {
-  //   return Promise.all(
-  //     ids.map(async (id) => {
-  //       const contact = this.contactDirectory.getContact(id);
-  //       if (!contact) throw new Error(`No contact found for id "${id}"`);
-
-  //       // const key = await MajikKeyStore.load(id);
-
-  //       const mlPubKey = base64ToUint8Array(contact.mlKey);
-
-  //       if (!mlPubKey) {
-  //         throw new Error(
-  //           `Contact "${id}" has no ML-KEM public key. ` +
-  //             `They may need to upgrade their account via importFromMnemonicBackup().`,
-  //         );
-  //       }
-
-  //       return {
-  //         fingerprint: contact.fingerprint,
-  //         mlKemPublicKey: mlPubKey,
-  //       } satisfies MajikRecipient;
-  //     }),
-  //   );
-  // }
-
   /**
    * Resolve a list of account/contact IDs into MajikRecipient objects.
    * Each recipient needs their ML-KEM public key from MajikKeyStore.
@@ -202,8 +169,7 @@ export class MajikMessage {
   ): Promise<MajikRecipient[]> {
     return Promise.all(
       publicKeys.map(async (pkey) => {
-        const contact =
-          await this.contactDirectory.getContactByPublicKeyBase64(pkey);
+        const contact = await this.contacts.getContactByPublicKeyBase64(pkey);
         if (!contact)
           throw new Error(`No contact found for public key "${pkey}"`);
 
@@ -294,8 +260,7 @@ export class MajikMessage {
   ): Promise<MajikFileRecipient[]> {
     return Promise.all(
       publicKeys.map(async (pkey) => {
-        const contact =
-          await this.contactDirectory.getContactByPublicKeyBase64(pkey);
+        const contact = await this.contacts.getContactByPublicKeyBase64(pkey);
         if (!contact)
           throw new Error(`No contact found for public key "${pkey}"`);
 
@@ -385,8 +350,8 @@ export class MajikMessage {
       this.ownAccountsOrder.push(account.id);
     }
     try {
-      if (!this.contactDirectory.hasContact(account.id)) {
-        this.contactDirectory.addContact(account);
+      if (!this.contacts.hasContact(account.id)) {
+        this.contacts.addContact(account);
       }
       if (!this.getActiveAccount()) {
         this.setActiveAccount(account.id);
@@ -484,19 +449,19 @@ export class MajikMessage {
 
   getContactByID(id: string): MajikContact | null {
     if (!id?.trim()) throw new Error("Invalid contact ID");
-    return this.contactDirectory.getContact(id) ?? null;
+    return this.contacts.getContact(id) ?? null;
   }
 
   hasContact(id: string): boolean {
     if (!id?.trim()) throw new Error("Invalid contact ID");
-    return this.contactDirectory.hasContact(id);
+    return this.contacts.hasContact(id);
   }
 
   async hasContactByPublicKeyBase64(
     publicKey: MajikMessagePublicKey,
   ): Promise<boolean> {
     if (!publicKey?.trim()) throw new Error("Invalid contact public key");
-    return await this.contactDirectory.hasContactByPublicKeyBase64(publicKey);
+    return await this.contacts.hasContactByPublicKeyBase64(publicKey);
   }
 
   async getContactByPublicKey(
@@ -504,14 +469,12 @@ export class MajikMessage {
   ): Promise<MajikContact | null> {
     if (!publicKeyBase64?.trim()) throw new Error("Invalid public key");
     return (
-      (await this.contactDirectory.getContactByPublicKeyBase64(
-        publicKeyBase64,
-      )) ?? null
+      (await this.contacts.getContactByPublicKeyBase64(publicKeyBase64)) ?? null
     );
   }
 
-  async exportContactAsJSON(contactId: string): Promise<string | null> {
-    const contact = this.contactDirectory.getContact(contactId);
+  async exportContactAsJSON(contactID: string): Promise<string | null> {
+    const contact = this.contacts.getContact(contactID);
     if (!contact) return null;
 
     let publicKeyBase64: string;
@@ -541,8 +504,8 @@ export class MajikMessage {
     );
   }
 
-  async exportContactAsString(contactId: string): Promise<string | null> {
-    const contact = this.contactDirectory.getContact(contactId);
+  async exportContactAsString(contactID: string): Promise<string | null> {
+    const contact = this.contacts.getContact(contactID);
     if (!contact) return null;
 
     const compressedString = this.exportContactCompressed(contact);
@@ -688,50 +651,352 @@ export class MajikMessage {
       throw new Error("Invalid contact JSON");
     }
 
-    this.contactDirectory.addContact(contact);
+    this.contacts.addContact(contact);
     this.emit("new-contact", contact);
     this.scheduleAutosave();
   }
 
   removeContact(id: string): void {
-    const result = this.contactDirectory.removeContact(id);
+    const result = this.contacts.removeContact(id);
     if (!result.success) throw new Error(result.message);
     this.emit("removed-contact", id);
     this.scheduleAutosave();
   }
 
   updateContactMeta(id: string, meta: Partial<MajikContactMeta>): void {
-    this.contactDirectory.updateContactMeta(id, meta);
+    this.contacts.updateContactMeta(id, meta);
     this.scheduleAutosave();
   }
 
   blockContact(id: string): void {
-    this.contactDirectory.blockContact(id);
+    this.contacts.blockContact(id);
     this.scheduleAutosave();
   }
   unblockContact(id: string): void {
-    this.contactDirectory.unblockContact(id);
+    this.contacts.unblockContact(id);
     this.scheduleAutosave();
   }
 
   listContacts(all = true, majikahOnly = false): MajikContact[] {
-    const contacts = this.contactDirectory.listContacts(true, majikahOnly);
+    const contacts = this.contacts.listContacts(true, majikahOnly);
     if (all) return contacts;
     const ownIds = new Set(this.listOwnAccounts(majikahOnly).map((a) => a.id));
     return contacts.filter((c) => !ownIds.has(c.id));
   }
 
   isContactMajikahRegistered(id: string): boolean {
-    return this.contactDirectory.isMajikahRegistered(id);
+    return this.contacts.isMajikahRegistered(id);
   }
 
   isContactMajikahIdentityChecked(id: string): boolean {
-    return this.contactDirectory.isMajikahIdentityChecked(id);
+    return this.contacts.isMajikahIdentityChecked(id);
   }
 
   setContactMajikahStatus(id: string, status: boolean): void {
-    this.contactDirectory.setMajikahStatus(id, status);
+    this.contacts.setMajikahStatus(id, status);
     this.scheduleAutosave();
+  }
+
+  /* ================================
+   * Group CRUD Pass-throughs
+   * ================================ */
+
+  /**
+   * Creates and registers a new user-defined group.
+   * Throws if a group with the same ID already exists.
+   */
+  createGroup(
+    id: string,
+    name: string,
+    meta?: Partial<Omit<MajikContactGroupMeta, "name">>,
+    initialMemberIds?: string[],
+  ): this {
+    const newGroup = this.contacts.createGroup(
+      id,
+      name,
+      meta,
+      initialMemberIds,
+    );
+
+    this.emit("new-contact-group", newGroup);
+    this.scheduleAutosave();
+    return this;
+  }
+
+  /**
+   * Registers an already-constructed MajikContactGroup instance.
+   * Throws if a group with the same ID already exists.
+   */
+  addGroup(group: MajikContactGroup): this {
+    this.contacts.addGroup(group);
+
+    this.emit("new-contact-group", group);
+    this.scheduleAutosave();
+    return this;
+  }
+
+  /**
+   * Removes a user group by ID.
+   * System groups (Favorites, Blocked) cannot be deleted.
+   */
+  removeGroup(id: string): MAJIK_API_RESPONSE {
+    const response = this.contacts.removeGroup(id);
+
+    this.emit("removed-contact-group", response.data as MajikContactGroup);
+    this.scheduleAutosave();
+    return response;
+  }
+
+  /**
+   * Returns a group by ID, or undefined if not found.
+   */
+  getContactGroup(id: string): MajikContactGroup | undefined {
+    return this.contacts.getGroup(id);
+  }
+
+  /**
+   * Returns a group by ID. Throws if not found.
+   */
+  getGroupOrThrow(id: string): MajikContactGroup {
+    return this.contacts.getGroupOrThrow(id);
+  }
+
+  /**
+   * Returns true if a group with the given ID exists.
+   */
+  hasGroup(id: string): boolean {
+    return this.contacts.hasGroup(id);
+  }
+
+  /**
+   * Returns all groups.
+   *
+   * @param includeSystem  Include system groups (Favorites, Blocked). Default: true.
+   * @param sortedByName   Sort results alphabetically by group name. Default: false.
+   */
+  listContactGroups(
+    includeSystem = true,
+    sortedByName = false,
+  ): MajikContactGroup[] {
+    return this.contacts.listGroups(includeSystem, sortedByName);
+  }
+
+  /**
+   * Returns only user-created groups (excludes Favorites and Blocked).
+   * Sorted alphabetically by name.
+   */
+  listUserGroups(sortedByName = true): MajikContactGroup[] {
+    return this.contacts.listGroups(false, sortedByName);
+  }
+
+  /**
+   * Returns only system groups (Favorites and Blocked).
+   */
+  listSystemGroups(): MajikContactGroup[] {
+    return this.contacts.listGroups(true).filter((g) => g.isSystem);
+  }
+
+  /**
+   * Updates mutable metadata on a group (name, description).
+   * Name is locked on system groups — will throw if attempted.
+   */
+  updateGroupMeta(
+    id: string,
+    meta: Partial<Pick<MajikContactGroupMeta, "name" | "description">>,
+  ): this {
+    const updatedGroup = this.contacts.updateGroupMeta(id, meta);
+    this.emit("contact-group-change", updatedGroup);
+    this.scheduleAutosave();
+    return this;
+  }
+
+  /* ================================
+   * Group Membership Pass-throughs
+   * ================================ */
+
+  /**
+   * Adds a contact to a group.
+   * Validates the contact exists in the directory.
+   * If the group is the system Blocked group, also calls contact.block().
+   * Throws if the contact is already a member — use addContactToGroupIfAbsent for idempotent.
+   */
+  addContactToGroup(groupID: string, contactID: string): this {
+    const updatedGroup = this.contacts.addContactToGroup(groupID, contactID);
+
+    this.emit("contact-group-change", updatedGroup);
+    this.scheduleAutosave();
+    return this;
+  }
+
+  /**
+   * Adds multiple contacts to a group in one call (all-or-nothing).
+   */
+  addContactsToGroup(groupID: string, contactIds: string[]): this {
+    const updatedGroup = this.contacts.addContactsToGroup(groupID, contactIds);
+    this.emit("contact-group-change", updatedGroup);
+    this.scheduleAutosave();
+    return this;
+  }
+
+  /**
+   * Removes a contact from a group.
+   * If the group is the system Blocked group, also calls contact.unblock().
+   * Throws if the contact is not a member — use removeContactFromGroupIfPresent for idempotent.
+   */
+  removeContactFromGroup(groupID: string, contactID: string): this {
+    const updatedGroup = this.contacts.removeContactFromGroup(
+      groupID,
+      contactID,
+    );
+
+    this.emit("contact-group-change", updatedGroup);
+    this.scheduleAutosave();
+    return this;
+  }
+
+  /**
+   * Moves a contact from one group to another atomically.
+   * Throws if the contact is not a member of the source group.
+   */
+  moveContactBetweenGroups(
+    contactID: string,
+    fromGroupId: string,
+    toGroupId: string,
+  ): this {
+    const updatedGroup = this.contacts.moveContactBetweenGroups(
+      contactID,
+      fromGroupId,
+      toGroupId,
+    );
+
+    this.emit("contact-group-change", updatedGroup);
+    this.scheduleAutosave();
+    return this;
+  }
+
+  /* ================================
+   * Group Query Pass-throughs
+   * ================================ */
+
+  /**
+   * Returns all hydrated MajikContact instances in the given group.
+   * Contacts removed from the directory since last save are silently skipped.
+   */
+  getContactsInGroup(groupID: string): MajikContact[] {
+    return this.contacts.getContactsInGroup(groupID);
+  }
+
+  /**
+   * Returns hydrated contacts in the group, sorted by label (or ID if no label).
+   */
+  getContactsInGroupSorted(groupID: string): MajikContact[] {
+    return this.contacts.getContactsInGroupSorted(groupID);
+  }
+
+  /**
+   * Returns true if the contact is a member of the given group.
+   */
+  isContactInGroup(groupID: string, contactID: string): boolean {
+    return this.contacts.isContactInGroup(groupID, contactID);
+  }
+
+  /**
+   * Returns all groups the contact belongs to.
+   */
+  getGroupsForContact(contactID: string): MajikContactGroup[] {
+    return this.contacts.getGroupsForContact(contactID);
+  }
+
+  /**
+   * Returns all group IDs the contact belongs to.
+   */
+  getGroupIdsForContact(contactID: string): string[] {
+    return this.contacts.getGroupIdsForContact(contactID);
+  }
+
+  /* ================================
+   * System Group Convenience Pass-throughs
+   * ================================ */
+
+  /**
+   * Adds the contact to the Favorites group (idempotent).
+   */
+  addContactToFavorites(contactID: string): this {
+    const updatedGroup = this.contacts.addToFavorites(contactID);
+
+    this.emit("contact-group-change", updatedGroup);
+    this.scheduleAutosave();
+    return this;
+  }
+
+  /**
+   * Removes the contact from the Favorites group (idempotent).
+   */
+  removeContactFromFavorites(contactID: string): this {
+    const updatedGroup = this.contacts.removeFromFavorites(contactID);
+
+    this.emit("contact-group-change", updatedGroup);
+    this.scheduleAutosave();
+    return this;
+  }
+
+  /**
+   * Returns true if the contact is in the Favorites group.
+   */
+  isContactFavorite(contactID: string): boolean {
+    return this.contacts.isFavorite(contactID);
+  }
+
+  /**
+   * Returns true if the contact is in the Blocked group.
+   */
+  isContactBlocked(contactID: string): boolean {
+    return this.contacts.isContactBlocked(contactID);
+  }
+
+  /**
+   * Returns the Favorites system group instance.
+   */
+  getFavoritesGroup(): MajikContactGroup {
+    return this.contacts.getFavoritesGroup();
+  }
+
+  /**
+   * Returns the Blocked system group instance.
+   */
+  getBlockedGroup(): MajikContactGroup {
+    return this.contacts.getBlockedGroup();
+  }
+
+  /**
+   * Returns all contacts in the Favorites group as hydrated MajikContact instances.
+   */
+  getFavoriteContacts(): MajikContact[] {
+    return this.contacts.getContactsInGroup(
+      this.contacts.getFavoritesGroup().id,
+    );
+  }
+
+  /**
+   * Returns all contacts in the Blocked group as hydrated MajikContact instances.
+   */
+  getBlockedContacts(): MajikContact[] {
+    return this.contacts.getContactsInGroup(this.contacts.getBlockedGroup().id);
+  }
+
+  /* ================================
+   * Directory Clear
+   * ================================ */
+
+  /**
+   * Clears both the directory and all group memberships.
+   * System groups are preserved (re-bootstrapped by the group manager).
+   */
+  clearDirectory(): this {
+    this.contacts.clear();
+    this.scheduleAutosave();
+
+    return this;
   }
 
   // ── Encryption / Decryption ───────────────────────────────────────────────
@@ -1088,7 +1353,7 @@ export class MajikMessage {
    *   metadata: row,
    * });
    * if (signature) {
-   *   const result = await majik.verifyMajikFile(file, { contactId: row.user_id });
+   *   const result = await majik.verifyMajikFile(file, { contactID: row.user_id });
    * }
    * ```
    */
@@ -1212,7 +1477,7 @@ export class MajikMessage {
    * if the instance was restored from a metadata-only Supabase row.
    *
    * Signer resolution:
-   *   - contactId: looked up in the contact directory (own accounts included)
+   *   - contactID: looked up in the contact directory (own accounts included)
    *   - publicKeyBase64: looked up via contact directory
    *   - key: used directly (skips directory lookup)
    *   - none provided: falls back to public keys embedded in the signature
@@ -1223,14 +1488,14 @@ export class MajikMessage {
    * @example — verify against the file's owner contact
    *   file.attachBinary(await r2.get(row.r2_key).arrayBuffer());
    *   const result = await majik.verifyMajikFile(file, {
-   *     contactId: ownerContactId,
+   *     contactID: ownerContactId,
    *   });
    *   if (result?.valid) console.log("Verified, signed by", result.signerId);
    */
   async verifyMajikFile(
     file: MajikFile,
     options?: {
-      contactId?: string;
+      contactID?: string;
       publicKeyBase64?: string;
       key?: MajikKey;
     },
@@ -1272,14 +1537,14 @@ export class MajikMessage {
    *
    * @example
    *   const result = await majik.verifyMajikFileBinary(file, {
-   *     contactId: "contact_abc",
+   *     contactID: "contact_abc",
    *   });
    *   if (result.valid) console.log("Plaintext verified");
    */
   async verifyMajikFileBinary(
     file: MajikFile,
     options?: {
-      contactId?: string;
+      contactID?: string;
       publicKeyBase64?: string;
       key?: MajikKey;
       decryptAccountId?: string;
@@ -1544,7 +1809,7 @@ export class MajikMessage {
    *
    * @example
    *   const result = await majik.verifyText("Hello world", sig, {
-   *     contactId: "contact_abc",
+   *     contactID: "contact_abc",
    *   });
    *   if (result.valid) console.log("Authentic");
    */
@@ -1552,7 +1817,7 @@ export class MajikMessage {
     text: string,
     signature: MajikSignature | MajikSignatureJSON | string,
     options?: {
-      contactId?: string;
+      contactID?: string;
       publicKeyBase64?: string;
       key?: MajikKey;
       expectedSignerId?: string;
@@ -1583,7 +1848,7 @@ export class MajikMessage {
    * @example
    *   const row = await db.findOne({ doc_id });
    *   const result = await majik.verifyDetached(docBytes, row.signature, {
-   *     contactId: row.signer_contact_id,
+   *     contactID: row.signer_contact_id,
    *   });
    *   if (result.valid) console.log("Signed by", result.signerId);
    */
@@ -1591,7 +1856,7 @@ export class MajikMessage {
     content: Uint8Array | string,
     serializedSignature: string,
     options?: {
-      contactId?: string;
+      contactID?: string;
       publicKeyBase64?: string;
       key?: MajikKey;
       expectedSignerId?: string;
@@ -1748,18 +2013,6 @@ export class MajikMessage {
     const target = id ? this.getOwnAccountById(id) : this.getActiveAccount();
     if (!target) return false;
     return MajikKeyStore.isPassphraseValid(target.id, passphrase);
-  }
-
-  // ── DOM Scanning ──────────────────────────────────────────────────────────
-
-  scanDOM(rootNode: Node): void {
-    this.scanner.scanDOM(rootNode);
-  }
-  startDOMObserver(rootNode: Node): void {
-    this.scanner.startDOMObserver(rootNode);
-  }
-  stopDOMObserver(): void {
-    this.scanner.stopDOMObserver();
   }
 
   // ── Events ────────────────────────────────────────────────────────────────
@@ -2037,7 +2290,7 @@ export class MajikMessage {
    * > against a known contact fingerprint before trusting the result.
    *
    * @example — verify against a known contact
-   *   const result = await majik.verifyContent(docBytes, sig, { contactId: "contact_abc" });
+   *   const result = await majik.verifyContent(docBytes, sig, { contactID: "contact_abc" });
    *   if (result.valid) console.log("Authentic, signed by:", result.signerId);
    *
    * @example — verify using embedded keys (self-reported)
@@ -2048,7 +2301,7 @@ export class MajikMessage {
     content: Uint8Array | string,
     signature: MajikSignature | MajikSignatureJSON,
     options?: {
-      contactId?: string;
+      contactID?: string;
       publicKeyBase64?: string;
       key?: MajikKey;
       expectedSignerId?: string;
@@ -2086,18 +2339,18 @@ export class MajikMessage {
    * envelope are used (self-reported — see security note on verifyContent).
    *
    * @example — verify a signed PDF against a known contact
-   *   const result = await majik.verifyFile(signedPdf, { contactId: "contact_abc" });
+   *   const result = await majik.verifyFile(signedPdf, { contactID: "contact_abc" });
    *   if (result.valid) console.log("Verified:", result.signerId, result.timestamp);
    *
    * @example — check own signed file using active account
    *   const result = await majik.verifyFile(signedWav, {
-   *     contactId: majik.getActiveAccount()?.id,
+   *     contactID: majik.getActiveAccount()?.id,
    *   });
    */
   async verifyFile(
     file: Blob,
     options?: {
-      contactId?: string;
+      contactID?: string;
       publicKeyBase64?: string;
       key?: MajikKey;
       expectedSignerId?: string;
@@ -2121,7 +2374,7 @@ export class MajikMessage {
       }
 
       // No signer provided — extract and use self-reported keys from first signature.
-      // For full multi-sig verification, pass a contactId or publicKeyBase64.
+      // For full multi-sig verification, pass a contactID or publicKeyBase64.
       const extracted = await MajikSignature.extractFrom(file, {
         mimeType: options?.mimeType,
       });
@@ -2162,7 +2415,7 @@ export class MajikMessage {
    * @example
    *   const results = await majik.batchVerifyFiles(
    *     [pdfBlob, wavBlob, mp4Blob],
-   *     { contactId: "contact_abc" },
+   *     { contactID: "contact_abc" },
    *   );
    *   const allValid = results.every(r => r.valid);
    */
@@ -2171,7 +2424,7 @@ export class MajikMessage {
       Blob | { file: Blob; mimeType?: string; expectedSignerId?: string }
     >,
     options?: {
-      contactId?: string;
+      contactID?: string;
       publicKeyBase64?: string;
       key?: MajikKey;
       expectedSignerId?: string;
@@ -2313,7 +2566,7 @@ export class MajikMessage {
    *
    * @example
    *   if (await majik.isFileSigned(file)) {
-   *     const result = await majik.verifyFile(file, { contactId });
+   *     const result = await majik.verifyFile(file, { contactID });
    *   }
    */
   async isFileSigned(
@@ -2727,7 +2980,7 @@ export class MajikMessage {
    * throughout MajikMessage — consistent account/contact resolution in one place.
    */
   private async _resolveSignerPublicKeys(options?: {
-    contactId?: string;
+    contactID?: string;
     publicKeyBase64?: string;
     key?: MajikKey;
     expectedSignerId?: string;
@@ -2740,16 +2993,16 @@ export class MajikMessage {
     }
 
     // Option B: contact ID looked up from the contact directory
-    if (options.contactId) {
-      const contact = this.contactDirectory.getContact(options.contactId);
+    if (options.contactID) {
+      const contact = this.contacts.getContact(options.contactID);
       if (!contact) {
-        throw new Error(`No contact found for id "${options.contactId}"`);
+        throw new Error(`No contact found for id "${options.contactID}"`);
       }
 
       // Own accounts are in the keystore — get their signing keys directly
-      const ownAccount = this.getOwnAccountById(options.contactId);
+      const ownAccount = this.getOwnAccountById(options.contactID);
       if (ownAccount) {
-        const key = MajikKeyStore.get(options.contactId);
+        const key = MajikKeyStore.get(options.contactID);
         if (key?.hasSigningKeys) {
           return MajikSignature.publicKeysFromMajikKey(key);
         }
@@ -2758,7 +3011,7 @@ export class MajikMessage {
       // External contact — resolve from their contact card fields
       if (!contact.edPublicKeyBase64 || !contact.mlDsaPublicKeyBase64) {
         throw new Error(
-          `Contact "${options.contactId}" has no signing public keys. ` +
+          `Contact "${options.contactID}" has no signing public keys. ` +
             `They may need to share an updated contact card.`,
         );
       }
@@ -2772,7 +3025,7 @@ export class MajikMessage {
 
     // Option C: raw base64 public key — look up via contact directory
     if (options.publicKeyBase64) {
-      const contact = await this.contactDirectory.getContactByPublicKeyBase64(
+      const contact = await this.contacts.getContactByPublicKeyBase64(
         options.publicKeyBase64,
       );
       if (!contact) {
@@ -2797,42 +3050,12 @@ export class MajikMessage {
     return null;
   }
 
-  // ── PIN ───────────────────────────────────────────────────────────────────
-
-  async setPIN(pin: string): Promise<void> {
-    if (!pin) throw new Error("PIN must be a non-empty string");
-    this.pinHash = await MajikMessage._hashPIN(pin);
-    this.scheduleAutosave();
-  }
-
-  async clearPIN(): Promise<void> {
-    this.pinHash = null;
-    this.scheduleAutosave();
-  }
-
-  async isValidPIN(pin: string): Promise<boolean> {
-    if (!this.pinHash) return true;
-    return (await MajikMessage._hashPIN(pin)) === this.pinHash;
-  }
-
-  getPinHash(): string | null {
-    return this.pinHash ?? null;
-  }
-
-  private static async _hashPIN(pin: string): Promise<string> {
-    const digest = await crypto.subtle.digest(
-      "SHA-256",
-      new TextEncoder().encode(pin),
-    );
-    return arrayBufferToBase64(digest as ArrayBuffer);
-  }
-
   // ── Serialization ─────────────────────────────────────────────────────────
 
   async toJSON(): Promise<MajikMessageJSON> {
     const json: MajikMessageJSON = {
       id: this.id,
-      contacts: await this.contactDirectory.toJSON(),
+      contacts: await this.contacts.toJSON(),
       envelopeCache: this.envelopeCache.toJSON(),
     };
 
@@ -2847,7 +3070,6 @@ export class MajikMessage {
       console.warn("Failed to serialize ownAccounts:", e);
     }
 
-    (json as any).pinHash = this.pinHash ?? null;
     return json;
   }
 
@@ -2855,13 +3077,21 @@ export class MajikMessage {
     this: new (config: MajikMessageConfig, id?: string) => T,
     json: MajikMessageJSON,
   ): Promise<T> {
-    const directory = new MajikContactDirectory();
-    const contacts = await directory.fromJSON(json.contacts);
-    const envelopeCache = EnvelopeCache.fromJSON(json.envelopeCache);
+    const migratedJSON = migrateMajikMessageJSON(json);
+
+    // ── Step 2: restore MajikContactManager (directory + groups together) ─
+    const contactManager = await MajikContactManager.fromJSON(
+      migratedJSON.contacts,
+      KEY_ALGO,
+    );
+
+    const envelopeCache = EnvelopeCache.fromJSON(
+      migratedJSON.envelopeCache as EnvelopeCacheJSON,
+    );
 
     const instance = new this(
-      { contactDirectory: contacts, envelopeCache },
-      json.id,
+      { contactManager, envelopeCache },
+      migratedJSON.id,
     );
 
     try {
@@ -2896,28 +3126,25 @@ export class MajikMessage {
           instance.ownAccountsOrder = [...json.ownAccounts.order];
         }
 
-        // Fallback: populate from contactDirectory if accounts array failed
+        // Fallback: populate from contacts if accounts array failed
         if (instance.ownAccounts.size === 0) {
           for (const id of instance.ownAccountsOrder) {
-            const c = instance.contactDirectory.getContact(id);
+            const c = instance.contacts.getContact(id);
             if (c) instance.ownAccounts.set(id, c);
           }
         }
 
-        // Ensure own accounts are in contactDirectory
+        // Ensure own accounts are in contacts
         instance.ownAccountsOrder.forEach((id) => {
           const c = instance.ownAccounts.get(id);
-          if (c && !instance.contactDirectory.hasContact(c.id)) {
-            instance.contactDirectory.addContact(c);
+          if (c && !instance.contacts.hasContact(c.id)) {
+            instance.contacts.addContact(c);
           }
         });
       }
     } catch (e) {
       console.warn("Error restoring ownAccounts:", e);
     }
-
-    const anyJson: any = json;
-    if (anyJson.pinHash) instance.pinHash = anyJson.pinHash;
 
     return instance;
   }
@@ -2979,7 +3206,7 @@ export class MajikMessage {
         loaded.j as MajikMessageJSON,
       );
       this.id = restored.id;
-      this.contactDirectory = restored.contactDirectory;
+      this.contacts = restored.contacts;
       this.envelopeCache = restored.envelopeCache;
       this.ownAccounts = restored.ownAccounts;
       this.ownAccountsOrder = [...restored.ownAccountsOrder];
@@ -3025,7 +3252,7 @@ export class MajikMessage {
       this.ownAccountsOrder = [];
 
       try {
-        this.contactDirectory.clear();
+        this.contacts.clear();
       } catch {
         /* ignore */
       }
@@ -3036,7 +3263,6 @@ export class MajikMessage {
         /* ignore */
       }
 
-      this.pinHash = null;
       this.id = arrayToBase64(randomBytes(32));
 
       try {

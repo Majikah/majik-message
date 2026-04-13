@@ -7,27 +7,8 @@ import {
   MajikContactData,
   SerializedMajikContact,
 } from "@majikah/majik-contact";
-
-/* -------------------------------
- * Types
- * ------------------------------- */
-
-export interface MajikContactDirectoryData {
-  contacts: SerializedMajikContact[];
-}
-
-/* -------------------------------
- * Errors
- * ------------------------------- */
-
-export class MajikContactDirectoryError extends Error {
-  cause?: unknown;
-  constructor(message: string, cause?: unknown) {
-    super(message);
-    this.name = "MajikContactDirectoryError";
-    this.cause = cause;
-  }
-}
+import { MajikContactDirectoryError } from "./errors";
+import { MajikContactDirectoryData } from "./types";
 
 /* -------------------------------
  * MajikContactDirectory Class
