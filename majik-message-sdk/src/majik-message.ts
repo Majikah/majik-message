@@ -72,7 +72,6 @@ import {
 import { gzipSync, gunzipSync } from "fflate";
 import { MajikContactManager } from "./core/contacts/majik-contact-manager";
 import { MajikContactManagerJSON } from "./core/contacts/types";
-import { migrateMajikMessageJSON } from "./core/contacts/majik-contact-migration";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -151,8 +150,11 @@ export class MajikMessage {
       "error",
       "new-account",
       "new-contact",
+      "new-contact-group",
       "removed-account",
       "removed-contact",
+      "removed-contact-group",
+      "contact-group-change",
       "active-account-change",
     ];
     events.forEach((e) => this.listeners.set(e, []));
@@ -802,7 +804,9 @@ export class MajikMessage {
    */
   updateGroupMeta(
     id: string,
-    meta: Partial<Pick<MajikContactGroupMeta, "name" | "description">>,
+    meta: Partial<
+      Pick<MajikContactGroupMeta, "name" | "description" | "color">
+    >,
   ): this {
     const updatedGroup = this.contacts.updateGroupMeta(id, meta);
     this.emit("contact-group-change", updatedGroup);
@@ -2036,56 +2040,6 @@ export class MajikMessage {
     this.listeners.get(event)?.forEach((cb) => cb(...args));
   }
 
-  // ── Private: Envelope Handler (Scanner) ───────────────────────────────────
-
-  private async handleEnvelope(envelope: MessageEnvelope): Promise<void> {
-    const cached = await this.envelopeCache.get(envelope);
-    if (cached) return;
-
-    let majikEnvelope: MajikEnvelope;
-    try {
-      majikEnvelope = MajikEnvelope.fromBinary(envelope.raw);
-    } catch {
-      this.emit("untrusted", envelope);
-      return;
-    }
-
-    if (majikEnvelope.isGroup) {
-      for (const account of this.listOwnAccounts()) {
-        try {
-          const identity = await this._resolveIdentity(account.id);
-          const plaintext = await majikEnvelope.decrypt(identity);
-          await this.envelopeCache.set(envelope, this._source);
-          this.scheduleAutosave();
-          this.emit("message", plaintext, envelope, account);
-          return;
-        } catch {
-          continue;
-        }
-      }
-      this.emit("untrusted", envelope);
-    } else {
-      const fingerprint = envelope.extractFingerprint();
-      const account = this.listOwnAccounts().find(
-        (a) => a.fingerprint === fingerprint,
-      );
-      if (!account) {
-        this.emit("untrusted", envelope);
-        return;
-      }
-
-      try {
-        const identity = await this._resolveIdentity(account.id);
-        const plaintext = await majikEnvelope.decrypt(identity);
-        await this.envelopeCache.set(envelope, this._source);
-        this.scheduleAutosave();
-        this.emit("message", plaintext, envelope, account);
-      } catch (err) {
-        this.emit("error", err, { envelope });
-      }
-    }
-  }
-
   // ── Content & File Signing ────────────────────────────────────────────────
 
   /**
@@ -3077,22 +3031,16 @@ export class MajikMessage {
     this: new (config: MajikMessageConfig, id?: string) => T,
     json: MajikMessageJSON,
   ): Promise<T> {
-    const migratedJSON = migrateMajikMessageJSON(json);
+    // const migratedJSON = migrateMajikMessageJSON(json);
 
     // ── Step 2: restore MajikContactManager (directory + groups together) ─
-    const contactManager = await MajikContactManager.fromJSON(
-      migratedJSON.contacts,
-      KEY_ALGO,
-    );
+    const contactManager = await MajikContactManager.fromJSON(json.contacts);
 
     const envelopeCache = EnvelopeCache.fromJSON(
-      migratedJSON.envelopeCache as EnvelopeCacheJSON,
+      json.envelopeCache as EnvelopeCacheJSON,
     );
 
-    const instance = new this(
-      { contactManager, envelopeCache },
-      migratedJSON.id,
-    );
+    const instance = new this({ contactManager, envelopeCache }, json.id);
 
     try {
       if (json.ownAccounts && Array.isArray(json.ownAccounts.accounts)) {
@@ -3202,6 +3150,7 @@ export class MajikMessage {
       const saved = await idbLoadBlob("majik-message-state", this.userProfile);
       if (!saved?.data) return;
       const loaded = await loadSavedMajikFileData(saved.data);
+      // Pass raw parsed object — fromJSON handles migration internally
       const restored = await MajikMessage.fromJSON(
         loaded.j as MajikMessageJSON,
       );

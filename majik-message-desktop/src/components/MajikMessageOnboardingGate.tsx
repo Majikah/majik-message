@@ -1,9 +1,4 @@
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import styled, { keyframes } from "styled-components";
 import * as AlertDialog from "@radix-ui/react-alert-dialog";
 import { toast } from "sonner";
@@ -489,7 +484,11 @@ const MajikMessageOnboardingGate: React.FC<MajikMessageOnboardingGateProps> = ({
   // ── Shared form state ──────────────────────────────────────────────────────
   const [label, setLabel] = useState("");
   const [passphrase, setPassphrase] = useState("");
-  const [mnemonicJSON, setMnemonicJSON] = useState<MnemonicJSON | undefined>();
+  const [mnemonicJSON, setMnemonicJSON] = useState<MnemonicJSON>({
+    id: "",
+    seed: Array(12).fill(""),
+    phrase: "",
+  });
   const [mnemonic, setMnemonic] = useState("");
 
   // ── Account step sub-state ─────────────────────────────────────────────────
@@ -555,14 +554,19 @@ const MajikMessageOnboardingGate: React.FC<MajikMessageOnboardingGateProps> = ({
   // ── Helpers ────────────────────────────────────────────────────────────────
 
   const resetForm = useCallback((): void => {
+    setImportMode("drop");
     setLabel("");
     setPassphrase("");
     setMnemonic("");
-    setMnemonicJSON(undefined);
+    setMnemonicJSON({
+      id: "",
+      seed: Array(12).fill(""),
+      phrase: "",
+    });
   }, []);
 
   const handleSeedKeyChange = (input: MnemonicJSON): void => {
-    if (!input || input.seed.length <= 0) return;
+    if (!input) return;
     setMnemonicJSON(input);
     setMnemonic(jsonToSeed(input));
   };
@@ -701,7 +705,11 @@ const MajikMessageOnboardingGate: React.FC<MajikMessageOnboardingGateProps> = ({
   };
 
   const handleDropClear = (): void => {
-    setMnemonicJSON(undefined);
+    setMnemonicJSON({
+      id: "",
+      seed: Array(12).fill(""),
+      phrase: "",
+    });
     setMnemonic("");
     setPassphrase("");
   };
@@ -868,6 +876,8 @@ const MajikMessageOnboardingGate: React.FC<MajikMessageOnboardingGateProps> = ({
                         importProp={{ type: "json" }}
                         onUpdatePassphrase={handleUpdatePassphrase}
                         onChange={handleSeedKeyChange}
+                        readonly
+                        currentValue={{ ...mnemonicJSON, phrase: passphrase }}
                       />
                     </>
                   )}
@@ -939,7 +949,8 @@ const MajikMessageOnboardingGate: React.FC<MajikMessageOnboardingGateProps> = ({
                           importProp={{ type: "json" }}
                           onUpdatePassphrase={handleUpdatePassphrase}
                           onChange={handleSeedKeyChange}
-                          currentValue={mnemonicJSON}
+                          readonly={false}
+                          currentValue={{ ...mnemonicJSON, phrase: passphrase }}
                         />
                       )}
                     </>

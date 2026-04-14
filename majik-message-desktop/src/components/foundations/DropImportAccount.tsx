@@ -6,6 +6,7 @@ import {
 } from "@phosphor-icons/react";
 import { useRef, useState } from "react";
 import styled, { keyframes } from "styled-components";
+import CustomInputField from "./CustomInputField";
 
 // ─── Animations ───────────────────────────────────────────────────────────────
 const fadeIn = keyframes`
@@ -45,6 +46,7 @@ const DropZone = styled.div<{ $isDragging: boolean; $hasFile: boolean }>`
   text-align: center;
   user-select: none;
   overflow: hidden;
+  margin-bottom: 1.5em;
 
   &:hover {
     border-color: ${({ theme }) => theme.colors.primary};
@@ -118,44 +120,6 @@ const HiddenFileInput = styled.input`
   display: none;
 `;
 
-const DropZonePassphraseRow = styled.div`
-  margin-top: 2em;
-  width: 100%;
-  animation: ${fadeIn} 0.2s ease;
-`;
-
-// ─── Passphrase helper ────────────────────────────────────────────────────────
-// Thin wrapper so we can render a passphrase field without SeedKeyInput
-// You can swap this for your real CustomInputField + password logic.
-const PassphraseInputShim = styled.input`
-  width: 100%;
-  padding: 8px 10px;
-  border-radius: 6px;
-  border: 1px solid ${({ theme }) => theme.colors.secondaryBackground};
-  background: ${({ theme }) => theme.colors.secondaryBackground};
-  color: ${({ theme }) => theme.colors.textPrimary};
-  font-size: 12px;
-  outline: none;
-  box-sizing: border-box;
-  transition: border-color 0.15s;
-
-  &::placeholder {
-    opacity: 0.4;
-  }
-  &:focus {
-    border-color: ${({ theme }) => theme.colors.primary};
-  }
-`;
-
-const PassphraseLabel = styled.label`
-  font-size: 11px;
-  font-weight: 600;
-  color: ${({ theme }) => theme.colors.textSecondary};
-  display: block;
-  margin-bottom: 5px;
-  letter-spacing: 0.03em;
-`;
-
 // ─── Drag-and-drop import sub-component ──────────────────────────────────────
 interface DropImportProps {
   passphrase: string;
@@ -216,7 +180,12 @@ export const DropImportAccount: React.FC<DropImportProps> = ({
     onClear();
   };
 
-  const hasFile = !!mnemonicJSON;
+  const hasFile =
+    !!mnemonicJSON &&
+    !!mnemonicJSON?.seed &&
+    !!mnemonicJSON?.id &&
+    mnemonicJSON.seed.length === 12 &&
+    !!mnemonicJSON?.seed[11]?.trim();
 
   return (
     <DropZoneWrapper>
@@ -278,17 +247,19 @@ export const DropImportAccount: React.FC<DropImportProps> = ({
       />
 
       {hasFile && (
-        <DropZonePassphraseRow>
-          <PassphraseLabel htmlFor="dz-passphrase">New Password</PassphraseLabel>
-          <PassphraseInputShim
-            id="dz-passphrase"
-            type="password"
-            placeholder="Enter a new account passphrase…"
-            value={passphrase}
-            onChange={(e) => onPassphraseChange(e.target.value)}
-            autoComplete="off"
-          />
-        </DropZonePassphraseRow>
+        <CustomInputField
+          onChange={(e) => onPassphraseChange(e)}
+          maxChar={500}
+          regex="alphanumeric"
+          label="New Password"
+          currentValue={passphrase}
+          importProp={{
+            type: "txt",
+          }}
+          key="seed-passphrase"
+          required
+          sensitive={true}
+        />
       )}
     </DropZoneWrapper>
   );

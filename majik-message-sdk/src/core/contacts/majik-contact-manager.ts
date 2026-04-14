@@ -276,7 +276,9 @@ export class MajikContactManager {
    */
   updateGroupMeta(
     id: string,
-    meta: Partial<Pick<MajikContactGroupMeta, "name" | "description">>,
+    meta: Partial<
+      Pick<MajikContactGroupMeta, "name" | "description" | "color">
+    >,
   ): MajikContactGroup {
     return this.groupManager.updateGroupMeta(id, meta);
   }
@@ -499,12 +501,9 @@ export class MajikContactManager {
    *     between directory and group state across serialization rounds
    *
    * @param data   The payload produced by toJSON().
-   * @param KEY_ALGO  The WebCrypto algorithm descriptor used to import
-   *                  public keys — passed through to the directory's fromJSON.
    */
   static async fromJSON(
-    data: MajikContactManagerJSON,
-    KEY_ALGO: KeyAlgorithm | EcKeyImportParams | { name: string },
+    data: MajikContactManagerJSON
   ): Promise<MajikContactManager> {
     if (!data || typeof data !== "object") {
       throw new MajikContactManagerError(

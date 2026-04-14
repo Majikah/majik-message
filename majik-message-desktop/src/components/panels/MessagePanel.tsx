@@ -357,6 +357,12 @@ const MessagePanel: React.FC<MessagePanelProps> = ({ majik }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [majik, refreshKey]);
 
+  const groups = useMemo(() => {
+    if (!majik) return [];
+    return majik.listContactGroups(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [majik, refreshKey]);
+
   const isDecryptMode = mode === "decrypt";
   const selectorContacts = isDecryptMode ? [] : contacts;
   const selectorValue = isDecryptMode ? detectedContacts : recipients;
@@ -456,6 +462,8 @@ const MessagePanel: React.FC<MessagePanelProps> = ({ majik }) => {
               onClearAll={isDecryptMode ? undefined : handleRecipientsClear}
               allowEmpty={false}
               disabled={isDecryptMode}
+              groups={groups}
+              maxContacts={25}
             />
           </div>
 

@@ -196,15 +196,11 @@ const ModeToggleButton = styled.button<{ $active: boolean }>`
   border-radius: 6px;
   border: 1px solid
     ${({ theme, $active }) =>
-      $active
-        ? (theme.colors.primary)
-        : theme.colors.secondaryBackground};
+      $active ? theme.colors.primary : theme.colors.secondaryBackground};
   background: ${({ theme, $active }) =>
-    $active
-      ? `${theme.colors.primary}18`
-      : theme.colors.secondaryBackground};
+    $active ? `${theme.colors.primary}18` : theme.colors.secondaryBackground};
   color: ${({ theme, $active }) =>
-    $active ? (theme.colors.primary) : theme.colors.textSecondary};
+    $active ? theme.colors.primary : theme.colors.textSecondary};
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
@@ -277,9 +273,11 @@ const AccountsPanel: React.FC<AccountsPanelProps> = ({ majik, onUpdate }) => {
   const [passphrase, setPassphrase] = useState<string>("");
   const [mnemonic, setMnemonic] = useState<string>("");
   const [refreshKey, setRefreshKey] = useState<number>(0);
-  const [mnemonicJSON, setMnemonicJSON] = useState<MnemonicJSON | undefined>(
-    undefined,
-  );
+  const [mnemonicJSON, setMnemonicJSON] = useState<MnemonicJSON>({
+    id: "",
+    seed: Array(12).fill(""),
+    phrase: "",
+  });
 
   // ── Import mode: "drop" | "manual" ────────────────────────────────────────
   const [importMode, setImportMode] = useState<"drop" | "manual">("drop");
@@ -465,8 +463,7 @@ const AccountsPanel: React.FC<AccountsPanelProps> = ({ majik, onUpdate }) => {
       } catch (e) {
         /* ignore */
       }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      if ((majik as any).removeOwnAccount) (majik as any).removeOwnAccount(id);
+      majik.removeOwnAccount(id);
       onUpdate?.(majik);
       setRefreshKey((prev) => prev + 1);
     } catch (err) {
@@ -586,10 +583,15 @@ const AccountsPanel: React.FC<AccountsPanelProps> = ({ majik, onUpdate }) => {
 
   // ── Form helpers ───────────────────────────────────────────────────────────
   const resetForm = (): void => {
+    setImportMode("drop");
     setLabel("");
     setPassphrase("");
     setMnemonic("");
-    setMnemonicJSON(undefined);
+    setMnemonicJSON({
+      id: "",
+      seed: Array(12).fill(""),
+      phrase: "",
+    });
   };
 
   const handleUpdatePassphrase = (value: string): void => {
@@ -597,7 +599,7 @@ const AccountsPanel: React.FC<AccountsPanelProps> = ({ majik, onUpdate }) => {
   };
 
   const handleSeedKeyChange = (input: MnemonicJSON): void => {
-    if (!input || input.seed.length <= 0) return;
+    if (!input) return;
     setMnemonicJSON(input);
     setMnemonic(jsonToSeed(input));
   };
@@ -609,7 +611,11 @@ const AccountsPanel: React.FC<AccountsPanelProps> = ({ majik, onUpdate }) => {
   };
 
   const handleDropClear = (): void => {
-    setMnemonicJSON(undefined);
+    setMnemonicJSON({
+      id: "",
+      seed: Array(12).fill(""),
+      phrase: "",
+    });
     setMnemonic("");
     setPassphrase("");
   };
@@ -724,11 +730,8 @@ const AccountsPanel: React.FC<AccountsPanelProps> = ({ majik, onUpdate }) => {
                 requireBackupKey
                 onUpdatePassphrase={handleUpdatePassphrase}
                 onChange={handleSeedKeyChange}
-                currentValue={
-                  mnemonicJSON
-                    ? { ...mnemonicJSON, phrase: passphrase }
-                    : undefined
-                }
+                readonly={false}
+                currentValue={{ ...mnemonicJSON, phrase: passphrase }}
               />
             )}
           </PopUpFormButton>
@@ -788,6 +791,8 @@ const AccountsPanel: React.FC<AccountsPanelProps> = ({ majik, onUpdate }) => {
               allowGenerate
               onUpdatePassphrase={handleUpdatePassphrase}
               onChange={handleSeedKeyChange}
+              readonly
+              currentValue={{ ...mnemonicJSON, phrase: passphrase }}
             />
           </PopUpFormButton>
         </HeaderActions>

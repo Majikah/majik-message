@@ -7,7 +7,6 @@ import {
   MajikContact,
   MajikContactGroup,
   MajikContactGroupMeta,
-  SerializedMajikContactGroup,
   SYSTEM_GROUP_IDS,
 } from "@majikah/majik-contact";
 import { MajikContactDirectory } from "./majik-contact-directory";
@@ -205,13 +204,17 @@ export class MajikContactGroupManager {
    */
   updateGroupMeta(
     id: string,
-    meta: Partial<Pick<MajikContactGroupMeta, "name" | "description">>,
+    meta: Partial<
+      Pick<MajikContactGroupMeta, "name" | "description" | "color">
+    >,
   ): MajikContactGroup {
     const group = this.getGroupOrThrow(id);
 
     if (meta.name !== undefined) group.updateName(meta.name);
     if (meta.description !== undefined)
       group.updateDescription(meta.description);
+
+    group.setColor(meta?.color || group.meta?.color);
 
     return group;
   }

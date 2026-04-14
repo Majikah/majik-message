@@ -4,27 +4,35 @@ import PopUpFormButton from "@/components/foundations/PopUpFormButton";
 import {
   HandshakeIcon,
   ListIcon,
+  PencilIcon,
+  PlusIcon,
   SquaresFourIcon,
+  StarIcon,
   UserIcon,
   UserPlusIcon,
+  UsersThreeIcon,
+  XIcon,
 } from "@phosphor-icons/react";
 import CustomInputField from "@/components/foundations/CustomInputField";
-
 import { toast } from "sonner";
 import CBaseUserAccount from "../base/CBaseUserAccount";
-
 import { MajikMessageDatabase } from "@/components/majik-context-wrapper/majik-message-database";
-
 import GuideHelper from "@/components/functional/GuideHelper";
 import { useShepherd } from "@/lib/shepherd-js/use-shepherd";
 import { launchTutorialContacts } from "@/lib/shepherd-js/tutorials/tutorial-contacts";
 import ContactRow from "../base/ContactRow";
 import UserContactInvitations from "../functional/UserContactInvitations";
+import { MajikContactGroup } from "@majikah/majik-contact";
+import GroupManagerDrawer from "../functional/GroupManagerDrawer";
+import DynamicSlidingDialogue from "../functional/DynamicSlidingDialogue";
+import CustomColorPicker from "@/components/foundations/CustomColorPicker";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const MAX_CONTACTS_LIMIT = 1000;
+const MAX_GROUPS_LIMIT = 100;
 const LIST_DEFAULT_THRESHOLD = 10;
 const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ#".split("");
+const DEFAULT_GROUP_COLOR = "#ea7f05";
 
 type ViewMode = "grid" | "list";
 
@@ -114,7 +122,6 @@ const ToggleBtn = styled.button<{ $active: boolean }>`
   }
 `;
 
-// ─── Account limit badge ──────────────────────────────────────────────────────
 const LimitBadge = styled.span`
   font-family: "Fira Mono", "JetBrains Mono", monospace;
   font-size: 9px;
@@ -126,6 +133,192 @@ const LimitBadge = styled.span`
   color: ${({ theme }) => theme.colors.textSecondary};
   opacity: 0.7;
   white-space: nowrap;
+`;
+
+// ─── Groups strip ─────────────────────────────────────────────────────────────
+const GroupsStrip = styled.div`
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 18px 10px;
+  border-bottom: 1px solid ${({ theme }) => theme.colors.secondaryBackground};
+  overflow-x: auto;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+`;
+
+/**
+ * Each chip now has two visually distinct zones:
+ *   - left side (label + dot + count): clicking this FILTERS
+ *   - right side (pencil button): clicking this MANAGES
+ *
+ * The pencil zone has a subtle background on hover so users
+ * immediately learn the affordance.
+ */
+const GroupChip = styled.button<{
+  $color: string;
+  $active: boolean;
+  $isSystem: boolean;
+}>`
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  padding: 0;
+  border-radius: 100px;
+  border: 1px solid
+    ${({ $active, $color }) => ($active ? $color : "rgba(255,255,255,0.08)")};
+  background: ${({ $active, $color }) =>
+    $active ? `${$color}22` : "transparent"};
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 150ms ease;
+  flex-shrink: 0;
+  overflow: hidden;
+
+  &:hover {
+    border-color: ${({ $color }) => $color};
+    background: ${({ $color }) => `${$color}14`};
+  }
+`;
+
+// Left clickable zone — filter toggle
+const ChipFilterZone = styled.div`
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px 5px 8px;
+`;
+
+const ChipDot = styled.span<{ $color: string }>`
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: ${({ $color }) => $color};
+  flex-shrink: 0;
+`;
+
+const ChipLabel = styled.span<{ $active: boolean; $color: string }>`
+  font-family: "Fira Mono", "JetBrains Mono", monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: ${({ $active, $color, theme }) =>
+    $active ? $color : theme.colors.textSecondary};
+  transition: color 150ms ease;
+`;
+
+const ChipCount = styled.span<{ $color: string }>`
+  font-family: "Fira Mono", "JetBrains Mono", monospace;
+  font-size: 9px;
+  font-weight: 700;
+  color: ${({ $color }) => $color};
+  opacity: 0.7;
+`;
+
+/**
+ * Right-side manage zone — visually separated with a divider line.
+ * This makes it unmistakably a separate action from the filter tap.
+ */
+const ChipManageZone = styled.div<{ $color: string }>`
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 5px 8px;
+  border-left: 1px solid ${({ $color }) => `${$color}33`};
+  transition: background 150ms ease;
+
+  &:hover {
+    background: ${({ $color }) => `${$color}25`};
+
+    svg {
+      opacity: 1;
+    }
+  }
+
+  svg {
+    opacity: 0.45;
+    transition: opacity 150ms ease;
+  }
+`;
+
+const ChipManageLabel = styled.span<{ $color: string }>`
+  font-family: "Fira Mono", "JetBrains Mono", monospace;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: ${({ $color }) => $color};
+  opacity: 0.6;
+  margin-left: 3px;
+  transition: opacity 150ms ease;
+
+  ${ChipManageZone}:hover & {
+    opacity: 1;
+  }
+`;
+
+// Active group filter banner
+const FilterBanner = styled.div<{ $color: string }>`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 18px;
+  background: ${({ $color }) => `${$color}12`};
+  border-bottom: 1px solid ${({ $color }) => `${$color}25`};
+  flex-shrink: 0;
+`;
+
+const FilterLabel = styled.span<{ $color: string }>`
+  font-family: "Fira Mono", "JetBrains Mono", monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: ${({ $color }) => $color};
+  flex: 1;
+`;
+
+const FilterClearBtn = styled.button`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  opacity: 0.5;
+  border-radius: 4px;
+  transition: opacity 150ms ease;
+  padding: 0;
+
+  &:hover {
+    opacity: 1;
+  }
+`;
+
+// ─── Group creation form ──────────────────────────────────────────────────────
+const CreateGroupForm = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+`;
+
+const CreateGroupLabel = styled.label`
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-family: "Fira Mono", "JetBrains Mono", monospace;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  opacity: 0.7;
 `;
 
 // ─── Scrollable body ──────────────────────────────────────────────────────────
@@ -154,7 +347,6 @@ const Body = styled.div<{ $isListView: boolean }>`
   }
 `;
 
-// ─── Grid layout ──────────────────────────────────────────────────────────────
 const Grid = styled.div`
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
@@ -165,7 +357,6 @@ const Grid = styled.div`
   }
 `;
 
-// ─── List layout ──────────────────────────────────────────────────────────────
 const AlphaSection = styled.div`
   display: flex;
   flex-direction: column;
@@ -202,7 +393,6 @@ const AlphaCount = styled.span`
   letter-spacing: 0.04em;
 `;
 
-// ─── iOS-style alphabetical scrollbar ────────────────────────────────────────
 const AlphaScrollbar = styled.div`
   position: absolute;
   right: 0;
@@ -238,17 +428,14 @@ const AlphaScrollBtn = styled.button<{ $active: boolean; $hasItems: boolean }>`
   letter-spacing: 0;
   border-radius: 4px;
   transition: all 100ms ease;
-
   color: ${({ $active, $hasItems, theme }) =>
     $active
       ? theme.colors.primary
       : $hasItems
         ? theme.colors.textSecondary
         : theme.colors.textSecondary};
-
   opacity: ${({ $hasItems, $active }) =>
     $active ? 1 : $hasItems ? 0.55 : 0.18};
-
   background: ${({ $active, theme }) =>
     $active ? `${theme.colors.primary}22` : "transparent"};
 
@@ -261,7 +448,6 @@ const AlphaScrollBtn = styled.button<{ $active: boolean; $hasItems: boolean }>`
   }
 `;
 
-// ─── "Touch" floating bubble for the active letter (iOS style) ───────────────
 const AlphaBubble = styled.div<{ $visible: boolean }>`
   position: absolute;
   right: 22px;
@@ -285,7 +471,6 @@ const AlphaBubble = styled.div<{ $visible: boolean }>`
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
 `;
 
-// ─── Empty state ──────────────────────────────────────────────────────────────
 const EmptyState = styled.div`
   display: flex;
   flex-direction: column;
@@ -330,7 +515,6 @@ interface ContactsPanelProps {
   onUpdate?: (updatedInstance: MajikMessageDatabase) => void;
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 function getContactLetter(label: string): string {
   const first = (label || "?").trim()[0]?.toUpperCase();
   return /[A-Z]/.test(first ?? "") ? (first ?? "#") : "#";
@@ -347,6 +531,17 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({ majik, onUpdate }) => {
   const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const bubbleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // ── Groups state ───────────────────────────────────────────────────────────
+  const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
+  const [managingGroup, setManagingGroup] = useState<MajikContactGroup | null>(
+    null,
+  );
+  const [newGroupName, setNewGroupName] = useState<string>("");
+  const [newGroupColor, setNewGroupColor] = useState<string[]>([
+    DEFAULT_GROUP_COLOR,
+  ]);
+  const [isGroupDrawerOpen, setIsGroupDrawerOpen] = useState(false);
+
   // ── Contacts ───────────────────────────────────────────────────────────────
   const contacts = useMemo(() => {
     if (!majik) return [];
@@ -354,24 +549,43 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({ majik, onUpdate }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [majik, refreshKey]);
 
-  // ── View mode: default based on count + mobile override ───────────────────
+  // ── Groups ─────────────────────────────────────────────────────────────────
+  const groups = useMemo(() => {
+    if (!majik) return [];
+    const favorites = majik.getFavoritesGroup();
+    const user = majik.listUserGroups(true);
+    return [favorites, ...user];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [majik, refreshKey]);
+
+  const activeGroup = useMemo(
+    () =>
+      activeGroupId
+        ? (groups.find((g) => g.id === activeGroupId) ?? null)
+        : null,
+    [groups, activeGroupId],
+  );
+
+  const displayedContacts = useMemo(() => {
+    if (!activeGroupId || !activeGroup) return contacts;
+    const memberIds = new Set(activeGroup.listMemberIds());
+    return contacts.filter((c) => memberIds.has(c.id));
+  }, [contacts, activeGroupId, activeGroup]);
+
   const defaultView: ViewMode =
     contacts.length > LIST_DEFAULT_THRESHOLD ? "list" : "grid";
   const [viewMode, setViewMode] = useState<ViewMode>(defaultView);
 
-  // Update view mode when contact count crosses threshold (initial load)
   useEffect(() => {
     setViewMode(contacts.length > LIST_DEFAULT_THRESHOLD ? "list" : "grid");
   }, [contacts.length]);
 
-  // ── Alphabetical grouping ─────────────────────────────────────────────────
   const grouped = useMemo(() => {
-    const sorted = [...contacts].sort((a, b) => {
-      const nameA = (a.meta?.label || "").toLowerCase();
-      const nameB = (b.meta?.label || "").toLowerCase();
-      return nameA.localeCompare(nameB);
-    });
-
+    const sorted = [...displayedContacts].sort((a, b) =>
+      (a.meta?.label || "")
+        .toLowerCase()
+        .localeCompare((b.meta?.label || "").toLowerCase()),
+    );
     const map: Record<string, typeof contacts> = {};
     for (const c of sorted) {
       const letter = getContactLetter(c.meta?.label || "");
@@ -379,21 +593,70 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({ majik, onUpdate }) => {
       map[letter].push(c);
     }
     return map;
-  }, [contacts]);
+  }, [displayedContacts]);
 
   const presentLetters = useMemo(() => Object.keys(grouped).sort(), [grouped]);
 
-  // ── Event listeners ────────────────────────────────────────────────────────
   useEffect(() => {
     if (!majik) return;
-    const handler = (): void => setRefreshKey((prev) => prev + 1);
+    const handler = (): void => {
+      setRefreshKey((prev) => prev + 1);
+      onUpdate?.(majik);
+    };
     majik.on("new-contact", handler);
+    majik.on("removed-contact", handler);
+    majik.on("new-contact-group", handler);
+    majik.on("removed-contact-group", handler);
+    majik.on("contact-group-change", handler);
     return () => {
       majik.off("new-contact", handler);
+      majik.off("removed-contact", handler);
+      majik.off("new-contact-group", handler);
+      majik.off("removed-contact-group", handler);
+      majik.off("contact-group-change", handler);
     };
   }, [majik]);
 
-  // ── Handlers ───────────────────────────────────────────────────────────────
+  // ── Group handlers ─────────────────────────────────────────────────────────
+  const handleGroupChipClick = (groupId: string): void => {
+    setActiveGroupId((prev) => (prev === groupId ? null : groupId));
+  };
+
+  const handleOpenGroupManager = (
+    e: React.MouseEvent,
+    group: MajikContactGroup,
+  ): void => {
+    e.stopPropagation();
+    setManagingGroup(group);
+    setIsGroupDrawerOpen(true);
+  };
+
+  const handleCreateGroup = async (): Promise<void> => {
+    const trimmed = newGroupName.trim();
+    if (!trimmed) {
+      toast.error("Group name required");
+      return;
+    }
+    try {
+      const id = `group_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      const color = newGroupColor[0] ?? DEFAULT_GROUP_COLOR;
+      // Store color in description using our encoding scheme
+      majik.createGroup(id, trimmed, {
+        color: color,
+      });
+      setNewGroupName("");
+      setNewGroupColor([DEFAULT_GROUP_COLOR]);
+      setRefreshKey((prev) => prev + 1);
+      toast.success(`Group "${trimmed}" created`);
+    } catch (err) {
+      toast.error("Failed to create group", {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        description: (err as any)?.message || String(err),
+      });
+    }
+  };
+
+  // ── Contact handlers ───────────────────────────────────────────────────────
   const handleAddContact = async (): Promise<void> => {
     if (!inviteKey?.trim()) {
       toast.error("Invalid Invite Key", {
@@ -404,7 +667,6 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({ majik, onUpdate }) => {
     }
     try {
       const importResponse = await majik.importContactFromString(inviteKey);
-
       if (!importResponse.success) {
         toast.error("Failed to Add New Contact", {
           description: importResponse.message,
@@ -412,9 +674,8 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({ majik, onUpdate }) => {
         });
         return;
       }
-
       setRefreshKey((prev) => prev + 1);
-      toast.success("New Contact Added Succesfully", {
+      toast.success("New Contact Added Successfully", {
         description: inviteKey,
         id: `toast-success-add-${inviteKey}`,
       });
@@ -464,7 +725,6 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({ majik, onUpdate }) => {
     }
   };
 
-  // ── Alpha scrollbar scroll-to ──────────────────────────────────────────────
   const scrollToLetter = useCallback(
     (letter: string) => {
       if (!grouped[letter]) return;
@@ -483,10 +743,11 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({ majik, onUpdate }) => {
     [grouped],
   );
 
-  const atLimit = contacts.length >= MAX_CONTACTS_LIMIT;
+  const atLimitContact = contacts.length >= MAX_CONTACTS_LIMIT;
+  const atLimitGroup = groups.length >= MAX_GROUPS_LIMIT;
   const isListView = viewMode === "list";
+  const activeGroupColor = activeGroup?.meta?.color || "#ea7f05";
 
-  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <Root id="section-contacts">
       <GuideHelper
@@ -494,6 +755,7 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({ majik, onUpdate }) => {
         startTour={() => launchTutorialContacts(tour)}
       />
 
+      {/* ── Header ── */}
       <PanelHeader>
         <HeaderLeft>
           <PanelTitle>Contacts</PanelTitle>
@@ -503,9 +765,8 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({ majik, onUpdate }) => {
         </HeaderLeft>
 
         <HeaderActions>
-          {atLimit && <LimitBadge>Limit reached</LimitBadge>}
+          {atLimitContact && <LimitBadge>Limit reached</LimitBadge>}
 
-          {/* View toggle — hidden on mobile (always list) */}
           {contacts.length > 0 && (
             <ViewToggle>
               <ToggleBtn
@@ -525,7 +786,6 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({ majik, onUpdate }) => {
             </ViewToggle>
           )}
 
-          {/* Invites */}
           <PopUpFormButton
             scrollable
             id="button-popup-contacts-invites"
@@ -537,16 +797,12 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({ majik, onUpdate }) => {
             }}
             buttons={{
               cancel: { text: "Go Back" },
-              confirm: {
-                text: "Save Changes",
-                hide: true,
-              },
+              confirm: { text: "Save Changes", hide: true },
             }}
           >
             <UserContactInvitations majik={majik} />
           </PopUpFormButton>
 
-          {/* Import */}
           <PopUpFormButton
             id="button-popup-contacts-add"
             icon={UserPlusIcon}
@@ -557,10 +813,7 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({ majik, onUpdate }) => {
             }}
             buttons={{
               cancel: { text: "Cancel" },
-              confirm: {
-                text: "Save Changes",
-                onClick: handleAddContact,
-              },
+              confirm: { text: "Save Changes", onClick: handleAddContact },
             }}
           >
             <CustomInputField
@@ -576,19 +829,133 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({ majik, onUpdate }) => {
         </HeaderActions>
       </PanelHeader>
 
+      {/* ── Groups strip ── */}
+      <GroupsStrip id="section-contact-groups">
+        {groups.map((group, index) => {
+          const color = group.meta?.color || DEFAULT_GROUP_COLOR;
+          const isActive = activeGroupId === group.id;
+          const memberCount = group.memberCount();
+          return (
+            <GroupChip
+              key={group.id}
+              $color={color}
+              $active={isActive}
+              $isSystem={group.isSystem}
+              // Chip itself has no onClick — zones handle interaction
+              onClick={undefined}
+              id={`button-contact-groups-item-${index}`}
+            >
+              {/* Filter zone */}
+              <ChipFilterZone onClick={() => handleGroupChipClick(group.id)}>
+                {group.isFavorites() ? (
+                  <StarIcon size={9} weight="fill" color={color} />
+                ) : (
+                  <ChipDot $color={color} />
+                )}
+                <ChipLabel $active={isActive} $color={color}>
+                  {group.meta.name}
+                </ChipLabel>
+                <ChipCount $color={color}>{memberCount}</ChipCount>
+              </ChipFilterZone>
+
+              {/* Manage zone — always visible, labeled, never ambiguous */}
+              <ChipManageZone
+                $color={color}
+                onClick={(e) => handleOpenGroupManager(e, group)}
+                title={`Manage ${group.meta.name}`}
+                id={`button-contact-groups-manage-${index}`}
+              >
+                <PencilIcon size={9} weight="bold" color={color} />
+                <ChipManageLabel $color={color}>EDIT</ChipManageLabel>
+              </ChipManageZone>
+            </GroupChip>
+          );
+        })}
+
+        {/* Create new group */}
+        <PopUpFormButton
+          id="button-popup-contacts-create-group"
+          scrollable={false}
+          icon={PlusIcon}
+          text="New Group"
+          modal={{
+            title: "Create Group",
+            description: atLimitGroup
+              ? "Limit reached. Only 100 groups are allowed."
+              : "Create a new contact group.",
+          }}
+          buttons={{
+            cancel: { text: "Cancel" },
+            confirm: {
+              text: "Create",
+              onClick: handleCreateGroup,
+              isDisabled: !newGroupName.trim(),
+            },
+          }}
+          disabled={atLimitGroup}
+        >
+          <CreateGroupForm>
+            <CustomInputField
+              currentValue={newGroupName}
+              onChange={(e) => setNewGroupName(e)}
+              maxChar={64}
+              label="Group Name"
+              required
+            />
+            <CreateGroupLabel>
+              Group Color
+              <CustomColorPicker
+                currentValue={newGroupColor}
+                max={1}
+                defaultColor={DEFAULT_GROUP_COLOR}
+                onUpdate={(colors) => setNewGroupColor(colors)}
+              />
+            </CreateGroupLabel>
+          </CreateGroupForm>
+        </PopUpFormButton>
+      </GroupsStrip>
+
+      {/* ── Active group filter banner ── */}
+      {activeGroup && (
+        <FilterBanner $color={activeGroupColor}>
+          <UsersThreeIcon size={12} color={activeGroupColor} />
+          <FilterLabel $color={activeGroupColor}>
+            {activeGroup.meta.name} · {displayedContacts.length} member
+            {displayedContacts.length !== 1 ? "s" : ""}
+          </FilterLabel>
+          <FilterClearBtn
+            onClick={() => setActiveGroupId(null)}
+            title="Clear filter"
+          >
+            <XIcon size={12} weight="bold" />
+          </FilterClearBtn>
+        </FilterBanner>
+      )}
+
       {/* ── Body ── */}
       <BodyWrapper>
         <Body $isListView={isListView} ref={bodyRef}>
-          {contacts.length === 0 ? (
+          {displayedContacts.length === 0 ? (
             <EmptyState>
               <EmptyIcon>
-                <UserIcon size={22} />
+                {activeGroup ? (
+                  <UsersThreeIcon size={22} />
+                ) : (
+                  <UserIcon size={22} />
+                )}
               </EmptyIcon>
-              <EmptyTitle>No contacts yet</EmptyTitle>
-              <EmptyHint>You haven&apos;t added any contacts yet.</EmptyHint>
+              <EmptyTitle>
+                {activeGroup
+                  ? `No members in ${activeGroup.meta.name}`
+                  : "No contacts yet"}
+              </EmptyTitle>
+              <EmptyHint>
+                {activeGroup
+                  ? "Open the group manager to add contacts."
+                  : "You haven't added any contacts yet."}
+              </EmptyHint>
             </EmptyState>
           ) : isListView ? (
-            /* ── List view: alphabetical sections ── */
             <>
               {presentLetters.map((letter) => {
                 const items = grouped[letter] ?? [];
@@ -617,9 +984,8 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({ majik, onUpdate }) => {
               })}
             </>
           ) : (
-            /* ── Grid view ── */
             <Grid>
-              {contacts.map((c) => (
+              {displayedContacts.map((c) => (
                 <CBaseUserAccount
                   key={c.id}
                   itemData={c}
@@ -631,8 +997,7 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({ majik, onUpdate }) => {
           )}
         </Body>
 
-        {/* ── iOS-style alphabetical fast-scroll — only in list view ── */}
-        {isListView && contacts.length > 0 && (
+        {isListView && displayedContacts.length > 0 && (
           <AlphaScrollbar>
             {ALPHABET.map((letter) => {
               const hasItems = !!grouped[letter];
@@ -651,13 +1016,32 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({ majik, onUpdate }) => {
           </AlphaScrollbar>
         )}
 
-        {/* ── Floating bubble overlay ── */}
-        {isListView && (
-          <AlphaBubble $visible={bubbleVisible}>
-            {activeLetter ?? ""}
-          </AlphaBubble>
-        )}
+        <AlphaBubble $visible={bubbleVisible}>{activeLetter ?? ""}</AlphaBubble>
       </BodyWrapper>
+
+      <DynamicSlidingDialogue
+        isOpen={isGroupDrawerOpen && !!managingGroup}
+        onOpenChange={(e) => {
+          setIsGroupDrawerOpen(e);
+        }}
+        scrollable={true}
+        buttons={{
+          cancel: { text: "Cancel", hide: true },
+          confirm: { text: "Save Changes", hide: true },
+        }}
+        modal={{
+          title: `Manage ${managingGroup?.meta?.name || "Group"}`,
+          description: "",
+        }}
+        width={700}
+      >
+        <GroupManagerDrawer
+          group={managingGroup!}
+          majik={majik}
+          allContacts={contacts}
+          onUpdate={() => setRefreshKey((prev) => prev + 1)}
+        />
+      </DynamicSlidingDialogue>
     </Root>
   );
 };

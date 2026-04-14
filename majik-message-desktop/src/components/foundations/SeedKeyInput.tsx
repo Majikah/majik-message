@@ -10,7 +10,7 @@ import React, { type JSX, useEffect, useId, useState } from "react";
 import styled from "styled-components";
 import { Tooltip } from "react-tooltip";
 import CustomInputField from "./CustomInputField";
-import { MajikKeyStore } from "@majikah/majik-message";
+import { MajikKeyStore, MnemonicJSON } from "@majikah/majik-message";
 
 /* -------------------------------
  * Styled Components
@@ -105,7 +105,7 @@ const EMPTY_SEED = Array(12).fill("");
 
 interface SeedKeyInputProps {
   /** Either a space-separated seed string or MnemonicJSON */
-  currentValue?: MnemonicJSON;
+  currentValue: MnemonicJSON;
 
   /** Always returns MnemonicJSON */
   onChange?: (value: MnemonicJSON) => void;
@@ -117,6 +117,8 @@ interface SeedKeyInputProps {
   allowGenerate?: boolean;
   requireBackupKey?: boolean;
   onUpdatePassphrase?: (value: string) => void;
+
+  readonly?: boolean;
 }
 
 /* -------------------------------
@@ -130,6 +132,7 @@ export const SeedKeyInput: React.FC<SeedKeyInputProps> = ({
   importProp,
   allowGenerate = false,
   requireBackupKey = false,
+  readonly = false,
 }) => {
   const tooltipId = useId();
   const [words, setWords] = useState<string[]>(
@@ -139,15 +142,6 @@ export const SeedKeyInput: React.FC<SeedKeyInputProps> = ({
   const [hasError, setHasError] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string>("");
 
-  const [mnemonicJSON, setMnemonicJSON] = useState<MnemonicJSON>({
-    id: currentValue?.id || "",
-    seed:
-      currentValue?.seed || !!allowGenerate
-        ? seedStringToArray(MajikKeyStore.generateMnemonic())
-        : [...EMPTY_SEED],
-    phrase: currentValue?.phrase,
-  });
-
   const [jsonID, setJSONID] = useState<string>("");
   const [passphrase, setPassphrase] = useState<string>("");
 
@@ -155,7 +149,6 @@ export const SeedKeyInput: React.FC<SeedKeyInputProps> = ({
   useEffect(() => {
     if (!currentValue) return;
     setWords(currentValue?.seed || [...EMPTY_SEED]);
-    setMnemonicJSON(currentValue);
     setJSONID(currentValue.id);
     setPassphrase(currentValue?.phrase || "");
   }, [currentValue]);
@@ -177,9 +170,8 @@ export const SeedKeyInput: React.FC<SeedKeyInputProps> = ({
     next[index] = sanitized;
 
     setWords(next);
-    setMnemonicJSON((prev) => ({ ...prev, seed: next }));
 
-    onChange?.(mnemonicJSON);
+    onChange?.({ ...currentValue, seed: next });
   };
 
   const handleClear = (): void => {
@@ -189,6 +181,7 @@ export const SeedKeyInput: React.FC<SeedKeyInputProps> = ({
     onChange?.({
       id: "",
       seed: [...EMPTY_SEED],
+      phrase: "",
     });
   };
 
@@ -210,9 +203,7 @@ export const SeedKeyInput: React.FC<SeedKeyInputProps> = ({
 
     setWords(parsed);
 
-    setMnemonicJSON((prev) => ({ ...prev, seed: parsed }));
-
-    onChange?.(mnemonicJSON);
+    onChange?.({ ...currentValue, seed: parsed });
 
     setHasError(false);
     setErrorMessage("");
@@ -278,8 +269,7 @@ export const SeedKeyInput: React.FC<SeedKeyInputProps> = ({
   const applyValue = (value: string): void => {
     const arraySeed = seedStringToArray(value);
     setWords(arraySeed);
-    setMnemonicJSON((prev) => ({ ...prev, seed: arraySeed }));
-    onChange?.(mnemonicJSON);
+    onChange?.({ ...currentValue, seed: arraySeed });
     setHasError(false);
     setErrorMessage("");
   };
@@ -300,22 +290,20 @@ export const SeedKeyInput: React.FC<SeedKeyInputProps> = ({
   const handleUpdateJSONID = (value: string): void => {
     if (!value?.trim()) return;
     setJSONID(value);
-    setMnemonicJSON((prev) => ({ ...prev, id: value }));
 
-    onChange?.(mnemonicJSON);
+    onChange?.({ ...currentValue, id: value });
     setHasError(false);
   };
 
   const handleUpdatePassphrase = (value: string): void => {
     if (!value?.trim()) {
       setPassphrase("");
-      setMnemonicJSON((prev) => ({ ...prev, phrase: undefined }));
+      onChange?.({ ...currentValue, phrase: undefined });
       return;
     }
 
-    setMnemonicJSON((prev) => ({ ...prev, phrase: value }));
     setPassphrase(value);
-    onChange?.(mnemonicJSON);
+    onChange?.({ ...currentValue, phrase: value });
     onUpdatePassphrase?.(value);
     setHasError(false);
   };
@@ -325,7 +313,7 @@ export const SeedKeyInput: React.FC<SeedKeyInputProps> = ({
 
     const seedArray = seedStringToArray(m);
     setWords(seedArray);
-    setMnemonicJSON((prev) => ({ ...prev, seed: seedArray }));
+    onChange?.({ ...currentValue, seed: seedArray });
   };
 
   const renderImportIcons = (): JSX.Element | null => {
@@ -396,12 +384,13 @@ export const SeedKeyInput: React.FC<SeedKeyInputProps> = ({
     }
 
     pushIcon("Clear", <ClockClockwiseIcon width={16} />, handleClear);
-    allowGenerate &&
+    if (allowGenerate) {
       pushIcon(
         "Generate Seed",
         <DiceFiveIcon width={16} />,
         handleGenerateMnemonic,
       );
+    }
     return (
       <div
         style={{
@@ -469,6 +458,7 @@ export const SeedKeyInput: React.FC<SeedKeyInputProps> = ({
             $haserror={hasError}
             onPaste={(e) => handlePaste(index, e)}
             data-private
+            readOnly={readonly}
           />
         ))}
       </GridText>
@@ -476,11 +466,6 @@ export const SeedKeyInput: React.FC<SeedKeyInputProps> = ({
   );
 };
 
-interface MnemonicJSON {
-  seed: string[];
-  id: string;
-  phrase?: string;
-}
 
 function seedStringToArray(seed: string): string[] {
   return seed

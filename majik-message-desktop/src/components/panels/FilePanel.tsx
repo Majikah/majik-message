@@ -14,10 +14,7 @@ import DynamicPlaceholder from "../foundations/DynamicPlaceholder";
 import { ChoiceButton } from "@/globals/buttons";
 import { useLocation, useNavigate } from "react-router-dom";
 import FileVault from "../functional/FileVault/FileVault";
-import {
-  MajikKeyStore,
-  type CompressionLevel,
-} from "@majikah/majik-message";
+import { MajikKeyStore, type CompressionLevel } from "@majikah/majik-message";
 import MajikContactListSelector from "../MajikContactListSelector";
 import PopUpFormButton from "../foundations/PopUpFormButton";
 import CustomInputField from "../foundations/CustomInputField";
@@ -540,6 +537,12 @@ const FilePanel: React.FC<FilePanelProps> = ({ majik }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [majik, refreshKey]);
 
+  const groups = useMemo(() => {
+    if (!majik) return [];
+    return majik.listContactGroups(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [majik, refreshKey]);
+
   const isDecryptMode = mode === "decrypt";
   const selectorContacts = isDecryptMode ? [] : contacts;
   const selectorValue = isDecryptMode ? detectedContacts : recipients;
@@ -658,6 +661,8 @@ const FilePanel: React.FC<FilePanelProps> = ({ majik }) => {
               onClearAll={isDecryptMode ? undefined : handleRecipientsClear}
               allowEmpty={false}
               disabled={isDecryptMode}
+              groups={groups}
+              maxContacts={100}
             />
           </div>
           <FileVault

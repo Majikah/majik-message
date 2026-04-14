@@ -6,9 +6,7 @@ import { toast } from "sonner";
 import { ButtonPrimaryConfirm } from "@/globals/buttons";
 import { downloadBlob, isDevEnvironment } from "@/utils/utils";
 import type { MajikMessageDatabase } from "./majik-context-wrapper/majik-message-database";
-import type {
-  MajikMessagePublicKey,
-} from "@majikah/majik-message";
+import type { MajikMessagePublicKey } from "@majikah/majik-message";
 import { MajikContactListSelector } from "./MajikContactListSelector";
 import { ChatInputBox } from "./functional/ChatInputBox";
 import type { MajikahSession } from "./majikah-session-wrapper/majikah-session";
@@ -263,6 +261,11 @@ const NewMessageForm: React.FC<NewMessageFormProps> = ({
     return majik.listContacts(false, true);
   }, [majik]);
 
+  const groups = useMemo(() => {
+    if (!majik) return [];
+    return majik.listContactGroups(true);
+  }, [majik]);
+
   return (
     <Root>
       <MajikContactListSelector
@@ -272,6 +275,8 @@ const NewMessageForm: React.FC<NewMessageFormProps> = ({
         onUpdate={handleRecipientsUpdate}
         onClearAll={handleRecipientsClear}
         allowEmpty={false}
+        groups={groups}
+        maxContacts={25}
       />
 
       <Body>
@@ -281,6 +286,9 @@ const NewMessageForm: React.FC<NewMessageFormProps> = ({
             onSend={handleSend}
             onUpdate={handleEncryptMessage}
             disabled={!recipients || recipients.length <= 1}
+            enableEmoji
+            enableGIF
+            enableImageUpload
           />
           <PreviewActions>
             <ExportButton onClick={handleCopy}>Copy</ExportButton>

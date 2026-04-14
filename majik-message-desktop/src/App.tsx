@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type JSX } from "react";
 
 import { toast } from "sonner";
 
-import styled from "styled-components";
+import styled, { keyframes } from "styled-components";
 
 import {
   AddressBookIcon,
@@ -12,6 +12,7 @@ import {
   LinkIcon,
   StarFourIcon,
   UserIcon,
+  WarningDiamondIcon,
 } from "@phosphor-icons/react";
 import { useMajik } from "./components/majik-context-wrapper/use-majik";
 import {
@@ -74,6 +75,53 @@ const RootContainer = styled.div`
   width: 100vw;
 `;
 
+// ─── Animations ───────────────────────────────────────────────────────────────
+const fadeIn = keyframes`
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+`;
+
+// ─── Security warning ─────────────────────────────────────────────────────────
+const SecurityWarning = styled.div`
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(220, 60, 60, 0.07);
+  border: 1px solid rgba(220, 60, 60, 0.22);
+  margin-bottom: 2em;
+  animation: ${fadeIn} 0.2s ease;
+`;
+
+const SecurityWarningIcon = styled.div`
+  flex-shrink: 0;
+  color: #e05050;
+  margin-top: 1px;
+`;
+
+const SecurityWarningBody = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+`;
+
+const SecurityWarningTitle = styled.p`
+  font-size: 11px;
+  font-weight: 700;
+  color: #e05050;
+  margin: 0;
+  letter-spacing: 0.02em;
+`;
+
+const SecurityWarningText = styled.p`
+  font-size: 11px;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  margin: 0;
+  line-height: 1.5;
+  opacity: 0.8;
+`;
+
 const MAX_ACCOUNT_LIMIT = 25;
 
 const firebaseConfig = {
@@ -111,9 +159,11 @@ function App(): JSX.Element {
   const [passphrase, setPassphrase] = useState<string>("");
   const [mnemonic, setMnemonic] = useState<string>("");
 
-  const [mnemonicJSON, setMnemonicJSON] = useState<MnemonicJSON | undefined>(
-    undefined,
-  );
+  const [mnemonicJSON, setMnemonicJSON] = useState<MnemonicJSON>({
+    id: "",
+    seed: Array(12).fill(""),
+    phrase: "",
+  });
 
   const [inviteKey, setInviteKey] = useState<string>("");
 
@@ -519,21 +569,22 @@ function App(): JSX.Element {
   };
 
   const handleSeedKeyChange = (input: MnemonicJSON): void => {
-    if (!input || input.seed.length <= 0) return;
+    if (!input) return;
 
     const stringSeed = jsonToSeed(input);
     setMnemonicJSON(input);
     setMnemonic(stringSeed);
-    // if (!!input.phrase?.trim()) {
-    //   setPassphrase(input.phrase);
-    // }
   };
 
   const resetForm = (): void => {
     setLabel("");
     setPassphrase("");
     setMnemonic("");
-    setMnemonicJSON(undefined);
+    setMnemonicJSON({
+      id: "",
+      seed: Array(12).fill(""),
+      phrase: "",
+    });
   };
 
   // ── Import mnemonic ────────────────────────────────────────────────────────
@@ -623,7 +674,7 @@ function App(): JSX.Element {
       element: <ContactsPanel majik={majik} onUpdate={handleRefreshInstance} />,
     },
     {
-      id: "messsage",
+      id: "message",
       route: "/message",
       name: "Message",
       icon: EnvelopeIcon,
@@ -694,6 +745,20 @@ function App(): JSX.Element {
             },
           }}
         >
+          {/* Security warning */}
+          <SecurityWarning>
+            <SecurityWarningIcon>
+              <WarningDiamondIcon size={15} weight="fill" />
+            </SecurityWarningIcon>
+            <SecurityWarningBody>
+              <SecurityWarningTitle>Keep this private</SecurityWarningTitle>
+              <SecurityWarningText>
+                Never share your seed phrase or backup JSON file with anyone.
+                Anyone who has them gains full access to your account. Store
+                your backup in a safe, offline location.
+              </SecurityWarningText>
+            </SecurityWarningBody>
+          </SecurityWarning>
           <CustomInputField
             onChange={(e) => setLabel(e)}
             maxChar={100}
@@ -712,6 +777,8 @@ function App(): JSX.Element {
             allowGenerate={true}
             onUpdatePassphrase={handleUpdatePassphrase}
             onChange={handleSeedKeyChange}
+            readonly
+            currentValue={{ ...mnemonicJSON, phrase: passphrase }}
           />
         </DynamicPopUp>
 
@@ -751,14 +818,8 @@ function App(): JSX.Element {
             requireBackupKey
             onUpdatePassphrase={handleUpdatePassphrase}
             onChange={handleSeedKeyChange}
-            currentValue={
-              mnemonicJSON
-                ? {
-                    ...mnemonicJSON,
-                    phrase: passphrase,
-                  }
-                : undefined
-            }
+            readonly={false}
+            currentValue={{ ...mnemonicJSON, phrase: passphrase }}
           />
         </DynamicPopUp>
 
