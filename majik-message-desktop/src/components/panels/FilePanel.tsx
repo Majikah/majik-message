@@ -696,6 +696,7 @@ const FilePanel: React.FC<FilePanelProps> = ({ majik }) => {
             majik={majik}
             uploadContext="user_upload"
             contacts={contacts}
+            groups={groups}
             defaultRecipients={recipients}
           />
         </DialogueBody>

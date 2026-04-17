@@ -1,4 +1,4 @@
-import styled, { keyframes } from "styled-components";
+import styled from "styled-components";
 import { useEffect, useMemo, useState } from "react";
 
 import { toast } from "sonner";
@@ -16,7 +16,6 @@ import {
   PlusIcon,
   UploadSimpleIcon,
   UserIcon,
-  WarningDiamondIcon,
 } from "@phosphor-icons/react";
 
 import {
@@ -34,12 +33,10 @@ import { sendNotification } from "@tauri-apps/plugin-notification";
 import { MajikMessageDatabase } from "../majik-context-wrapper/majik-message-database";
 import { MajikContact } from "@majikah/majik-contact";
 import DropImportAccount from "../foundations/DropImportAccount";
+import DynamicAlertBanner from "../foundations/DynamicAlertBanner";
+import { MajikBytes } from "@majikah/majik-bytes";
 
-// ─── Animations ───────────────────────────────────────────────────────────────
-const fadeIn = keyframes`
-  from { opacity: 0; transform: translateY(4px); }
-  to   { opacity: 1; transform: translateY(0); }
-`;
+import JSZip from "jszip";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const MAX_ACCOUNT_LIMIT = 25;
@@ -213,47 +210,6 @@ const ModeToggleButton = styled.button<{ $active: boolean }>`
   }
 `;
 
-// ─── Security warning ─────────────────────────────────────────────────────────
-const SecurityWarning = styled.div`
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: rgba(220, 60, 60, 0.07);
-  border: 1px solid rgba(220, 60, 60, 0.22);
-  margin-bottom: 2em;
-  animation: ${fadeIn} 0.2s ease;
-`;
-
-const SecurityWarningIcon = styled.div`
-  flex-shrink: 0;
-  color: #e05050;
-  margin-top: 1px;
-`;
-
-const SecurityWarningBody = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-`;
-
-const SecurityWarningTitle = styled.p`
-  font-size: 11px;
-  font-weight: 700;
-  color: #e05050;
-  margin: 0;
-  letter-spacing: 0.02em;
-`;
-
-const SecurityWarningText = styled.p`
-  font-size: 11px;
-  color: ${({ theme }) => theme.colors.textSecondary};
-  margin: 0;
-  line-height: 1.5;
-  opacity: 0.8;
-`;
-
 // ─── Props ────────────────────────────────────────────────────────────────────
 interface PassphraseUpdateParams {
   id: string;
@@ -312,28 +268,83 @@ const AccountsPanel: React.FC<AccountsPanelProps> = ({ majik, onUpdate }) => {
       phrase: passphrase?.trim() ? passphrase.trim() : undefined,
     };
 
-    setMnemonicJSON(jsonData);
-    const blob = new Blob([JSON.stringify(jsonData)], {
+    const base64String = btoa(JSON.stringify(jsonData));
+
+    const seedJSONBlob = new Blob([JSON.stringify(jsonData)], {
       type: "application/json;charset=utf-8",
+    });
+
+    setMnemonicJSON(jsonData);
+
+    const majikByte = await MajikBytes.create(base64String);
+
+    const mbyteFile = await majikByte.toPNG();
+
+    const pngBuffer = await mbyteFile.arrayBuffer();
+
+    // Placeholder for your 3rd item (a string for the txt file)
+    const readmeContent = `
+Majik Key Backup\n
+IMPORTANT: Keep this file secure and private at all times. If lost or compromised, your account access may be permanently at risk.\n\n
+
+Overview\n
+This backup ZIP file contains your raw JSON data and a Backup PNG. These files are essential for recovering your account.\n\n
+
+Usage Instructions\n
+• Storage: You may delete the JSON file and keep only the PNG file if preferred.\n
+• Customization: You can rename the PNG file for added discretion.\n
+• Recovery: This PNG allows you to securely re-import your account without exposing raw JSON data.\n\n
+
+Critical Handling Requirements\n
+To prevent data corruption and ensure the backup remains functional, please follow these rules:\n
+
+• No Modifications: Do not edit, crop, or apply filters to the PNG image.\n
+• No Processing: Avoid running the image through compression tools or "optimization" software.\n
+• Storage Only: Store the image as is. Do not upload it to social media, messaging apps, or cloud platforms that automatically compress or manipulate images, as this will destroy the embedded data.\n\n
+
+Backup created on: ${new Date().toLocaleString()}\n
+IMPORTANT: Keep this file secure and private at all times. If lost or compromised, your account access may be permanently at risk.\n\n
+    `;
+
+    // 2. Initialize JSZip and add all 3 items
+    const zip = new JSZip();
+
+    const defaultFileName = `${label} - ${createdAccount.id} - SEED KEY`;
+
+    // Item 1: The JSON (from a string)
+    zip.file("backup.json", seedJSONBlob);
+
+    // Item 2: The second Blob
+    // JSZip handles Blobs directly
+    zip.file("backup.png", pngBuffer, { binary: true });
+
+    // Item 3: The README (from a string)
+    zip.file("IMPORTANT README.txt", readmeContent);
+
+    // 3. Generate the final ZIP blob
+    const zipBlob = await zip.generateAsync({
+      type: "blob",
+      compression: "DEFLATE",
+      compressionOptions: { level: 9 },
     });
 
     // Open the native save dialog
     const filePath = await save({
-      defaultPath: `${label} | ${createdAccount.id} | SEED KEY`,
+      defaultPath: defaultFileName,
       filters: [
         {
-          name: "Backup JSON",
-          extensions: ["json"],
+          name: "Backup ZIP",
+          extensions: ["zip"],
         },
       ],
     });
 
     // User cancelled the dialog
     if (!filePath) {
-      downloadBlob(blob, "json", `${label} | ${createdAccount.id} | SEED KEY`);
+      downloadBlob(zipBlob, "zip", defaultFileName);
     } else {
       // Convert blob → Uint8Array and write to the chosen path
-      const arrayBuffer = await blob.arrayBuffer();
+      const arrayBuffer = await zipBlob.arrayBuffer();
       await writeFile(filePath, new Uint8Array(arrayBuffer));
     }
 
@@ -581,6 +592,57 @@ const AccountsPanel: React.FC<AccountsPanelProps> = ({ majik, onUpdate }) => {
     }
   };
 
+  const handleDownloadCard = async (input: MajikContact): Promise<void> => {
+    const s = await majik.exportContactAsString(input.id);
+    if (!s) {
+      toast.error("Failed to download", {
+        id: `toast-error-download-${input.id}`,
+      });
+      return;
+    }
+
+    try {
+      const majikByte = await MajikBytes.create(s);
+
+      const mbyteFile = await majikByte.toPNG();
+
+      const defaultName = `${input?.meta?.label || input.id} - Contact Card PNG`;
+
+      // Open the native save dialog
+      const filePath = await save({
+        defaultPath: defaultName,
+        filters: [
+          {
+            name: "Contact Card PNG",
+            extensions: ["png"],
+          },
+        ],
+      });
+
+      // User cancelled the dialog
+      if (!filePath) {
+        toast.info("Contact Card export cancelled", {
+          id: `toast-info-download-${input.id}`,
+        });
+        return;
+      } else {
+        // Convert blob → Uint8Array and write to the chosen path
+        const arrayBuffer = await mbyteFile.arrayBuffer();
+        await writeFile(filePath, new Uint8Array(arrayBuffer));
+      }
+
+      toast.success("Contact Card exported successfully", {
+        id: `toast-success-download-${input.id}`,
+      });
+    } catch (err) {
+      toast.error("Failed to copy", {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        description: (err as any)?.message || err,
+        id: `toast-error-share-${input.id}`,
+      });
+    }
+  };
+
   // ── Form helpers ───────────────────────────────────────────────────────────
   const resetForm = (): void => {
     setImportMode("drop");
@@ -762,19 +824,15 @@ const AccountsPanel: React.FC<AccountsPanelProps> = ({ majik, onUpdate }) => {
             }}
           >
             {/* Security warning */}
-            <SecurityWarning>
-              <SecurityWarningIcon>
-                <WarningDiamondIcon size={15} weight="fill" />
-              </SecurityWarningIcon>
-              <SecurityWarningBody>
-                <SecurityWarningTitle>Keep this private</SecurityWarningTitle>
-                <SecurityWarningText>
-                  Never share your seed phrase or backup JSON file with anyone.
-                  Anyone who has them gains full access to your account. Store
-                  your backup in a safe, offline location.
-                </SecurityWarningText>
-              </SecurityWarningBody>
-            </SecurityWarning>
+            <DynamicAlertBanner
+              title="Keep this private"
+              description={`
+                Never share your seed phrase or backup JSON file with anyone.
+                Anyone who has them gains full access to your account. Store
+                your backup in a safe, offline location.
+          `}
+              level="danger"
+            />
 
             <CustomInputField
               onChange={(e) => setLabel(e)}
@@ -817,6 +875,7 @@ const AccountsPanel: React.FC<AccountsPanelProps> = ({ majik, onUpdate }) => {
                 }
                 onUpdatePassphrase={handleEditPassphrase}
                 // onRegister={handleRegisterOnline}
+                onDownload={handleDownloadCard}
               />
             ))}
           </Grid>

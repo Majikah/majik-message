@@ -6,6 +6,7 @@ import DeleteButton from "../foundations/DeleteButton";
 import StyledIconButton from "../foundations/StyledIconButton";
 import {
   CheckCircleIcon,
+  DownloadIcon,
   GearIcon,
   KeyIcon,
   LinkIcon,
@@ -342,6 +343,7 @@ interface CBaseUserAccountProps {
   onUpdatePassphrase?: (params: PassphraseUpdateParams) => void;
   onUpdateName?: (name: string) => void;
   onRegister?: (data: MajikContact) => void;
+  onDownload?: (data: MajikContact) => void;
   canEdit?: boolean;
   canDelete?: boolean;
   index?: number;
@@ -361,6 +363,7 @@ const CBaseUserAccount: React.FC<CBaseUserAccountProps> = ({
   onUpdatePassphrase,
   onUpdateName,
   onRegister,
+  onDownload,
   canEdit = true,
   canDelete = true,
   index,
@@ -685,6 +688,19 @@ const CBaseUserAccount: React.FC<CBaseUserAccountProps> = ({
                 onClick={(e) => {
                   e.stopPropagation();
                   onShare(itemData);
+                }}
+                size={22}
+              />
+            )}
+
+            {/* Share */}
+            {!!onDownload && (
+              <StyledIconButton
+                icon={DownloadIcon}
+                title="Download Contact Card"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDownload(itemData);
                 }}
                 size={22}
               />

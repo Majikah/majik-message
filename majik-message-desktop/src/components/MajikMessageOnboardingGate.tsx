@@ -13,7 +13,6 @@ import {
   MagicWandIcon,
   ShieldCheckIcon,
   UploadSimpleIcon,
-  WarningDiamondIcon,
   WifiHighIcon,
   WifiSlashIcon,
 } from "@phosphor-icons/react";
@@ -40,6 +39,7 @@ import { useNavigate } from "react-router-dom";
 import DropImportAccount from "./foundations/DropImportAccount";
 import { useMajikPreferences } from "@/hooks/use-majik-preferences";
 import { useMajikTutorials } from "@/hooks/use-majik-tutorials";
+import DynamicAlertBanner from "./foundations/DynamicAlertBanner";
 
 // ─── Animations ───────────────────────────────────────────────────────────────
 
@@ -383,47 +383,6 @@ const ModeToggleButton = styled.button<{ $active: boolean }>`
     border-color: ${({ theme }) => theme.colors.primary};
     color: ${({ theme }) => theme.colors.primary};
   }
-`;
-
-// ─── Security warning ─────────────────────────────────────────────────────────
-const SecurityWarning = styled.div`
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: rgba(220, 60, 60, 0.07);
-  border: 1px solid rgba(220, 60, 60, 0.22);
-  margin-bottom: 2em;
-  animation: ${fadeIn} 0.2s ease;
-`;
-
-const SecurityWarningIcon = styled.div`
-  flex-shrink: 0;
-  color: #e05050;
-  margin-top: 1px;
-`;
-
-const SecurityWarningBody = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-`;
-
-const SecurityWarningTitle = styled.p`
-  font-size: 11px;
-  font-weight: 700;
-  color: #e05050;
-  margin: 0;
-  letter-spacing: 0.02em;
-`;
-
-const SecurityWarningText = styled.p`
-  font-size: 11px;
-  color: ${({ theme }) => theme.colors.textSecondary};
-  margin: 0;
-  line-height: 1.5;
-  opacity: 0.8;
 `;
 
 // ─── Loading shimmer ──────────────────────────────────────────────────────────
@@ -845,22 +804,15 @@ const MajikMessageOnboardingGate: React.FC<MajikMessageOnboardingGateProps> = ({
                       </StepHeader>
 
                       {/* Security warning */}
-                      <SecurityWarning>
-                        <SecurityWarningIcon>
-                          <WarningDiamondIcon size={15} weight="fill" />
-                        </SecurityWarningIcon>
-                        <SecurityWarningBody>
-                          <SecurityWarningTitle>
-                            Keep this private
-                          </SecurityWarningTitle>
-                          <SecurityWarningText>
-                            Never share your seed phrase or backup JSON file
-                            with anyone. Anyone who has them gains full access
-                            to your account. Store your backup in a safe,
-                            offline location.
-                          </SecurityWarningText>
-                        </SecurityWarningBody>
-                      </SecurityWarning>
+                      <DynamicAlertBanner
+                        title="Keep this private"
+                        description={`
+                Never share your seed phrase or backup JSON file with anyone.
+                Anyone who has them gains full access to your account. Store
+                your backup in a safe, offline location.
+          `}
+                        level="danger"
+                      />
 
                       <CustomInputField
                         onChange={setLabel}

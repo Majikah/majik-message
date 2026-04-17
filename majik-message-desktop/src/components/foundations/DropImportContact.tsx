@@ -1,4 +1,5 @@
-import { MnemonicJSON } from "@majikah/majik-key";
+import { MajikBytes } from "@majikah/majik-bytes";
+
 import {
   CheckCircleIcon,
   UploadSimpleIcon,
@@ -6,8 +7,6 @@ import {
 } from "@phosphor-icons/react";
 import { useRef, useState } from "react";
 import styled, { keyframes } from "styled-components";
-import CustomInputField from "./CustomInputField";
-import { MajikBytes } from "@majikah/majik-bytes";
 
 // ─── Animations ───────────────────────────────────────────────────────────────
 const fadeIn = keyframes`
@@ -123,17 +122,13 @@ const HiddenFileInput = styled.input`
 
 // ─── Drag-and-drop import sub-component ──────────────────────────────────────
 interface DropImportProps {
-  passphrase: string;
-  onPassphraseChange: (v: string) => void;
-  mnemonicJSON: MnemonicJSON | undefined;
-  onFileLoaded: (json: MnemonicJSON, filename: string) => void;
+  onFileLoaded: (inviteKey: string, filename: string) => void;
+  inviteKey?: string;
   onClear: () => void;
 }
 
-export const DropImportAccount: React.FC<DropImportProps> = ({
-  passphrase,
-  onPassphraseChange,
-  mnemonicJSON,
+export const DropImportContact: React.FC<DropImportProps> = ({
+  inviteKey,
   onFileLoaded,
   onClear,
 }) => {
@@ -144,42 +139,23 @@ export const DropImportAccount: React.FC<DropImportProps> = ({
 
   const parseFile = async (file: File): Promise<void> => {
     setParseError("");
-
     try {
-      const isMajikByte = await MajikBytes.isValidPNG(file);
-      console.log("isMajikByte: ", isMajikByte);
+      const loadedMbyte = await MajikBytes.fromPNG(file);
+      const rawBytes = loadedMbyte.bytes;
 
-      if (isMajikByte.isValid) {
-        const loadedMbyte = await MajikBytes.fromPNG(file);
-        const parsedString = loadedMbyte.toStringValue();
-        const decodedString = atob(parsedString);
-        const parsedData = JSON.parse(decodedString) as MnemonicJSON;
-        if (
-          !parsedData.id ||
-          !parsedData.seed ||
-          parsedData.seed.length === 0
-        ) {
-          setParseError("Invalid backup file — missing id or seed.");
-          return;
-        }
+      // Convert the raw bytes back into a string
+      const decodedString = new TextDecoder().decode(rawBytes);
 
-        setFileName(file.name);
-        onFileLoaded(parsedData, file.name);
-      } else {
-        const text = await file.text();
-        const json = JSON.parse(text) as MnemonicJSON;
-        if (!json.id || !json.seed || json.seed.length === 0) {
-          setParseError("Invalid backup file — missing id or seed.");
-          return;
-        }
-
-        setFileName(file.name);
-        onFileLoaded(json, file.name);
+      if (!decodedString?.trim()) {
+        setParseError("Invalid contact card.");
+        return;
       }
+      setFileName(file.name);
+      onFileLoaded(decodedString, file.name);
     } catch (e) {
-      console.log("Error: ", e);
+      console.error("Error: ", e);
       setParseError(
-        "Could not parse file. Make sure it's a valid backup JSON.",
+        "Could not parse file. Make sure it's a valid contact card.",
       );
     }
   };
@@ -205,12 +181,7 @@ export const DropImportAccount: React.FC<DropImportProps> = ({
     onClear();
   };
 
-  const hasFile =
-    !!mnemonicJSON &&
-    !!mnemonicJSON?.seed &&
-    !!mnemonicJSON?.id &&
-    mnemonicJSON.seed.length === 12 &&
-    !!mnemonicJSON?.seed[11]?.trim();
+  const hasFile = !!inviteKey?.trim();
 
   return (
     <DropZoneWrapper>
@@ -229,7 +200,7 @@ export const DropImportAccount: React.FC<DropImportProps> = ({
         onKeyDown={(e) =>
           e.key === "Enter" && !hasFile && fileInputRef.current?.click()
         }
-        aria-label="Drop backup PNG/JSON file here or click to browse"
+        aria-label="Drop Contact Card PNG file here or click to browse"
       >
         {hasFile && (
           <DropZoneClearButton onClick={handleClear} aria-label="Clear file">
@@ -247,12 +218,12 @@ export const DropImportAccount: React.FC<DropImportProps> = ({
 
         {hasFile ? (
           <>
-            <DropZoneTitle>Backup file loaded</DropZoneTitle>
+            <DropZoneTitle>Contact Card loaded</DropZoneTitle>
             <DropZoneFileName data-private>{fileName}</DropZoneFileName>
           </>
         ) : (
           <>
-            <DropZoneTitle>Drop your backup PNG/JSON here</DropZoneTitle>
+            <DropZoneTitle>Drop your Contact Card PNG here</DropZoneTitle>
             <DropZoneHint>or click to browse your files</DropZoneHint>
           </>
         )}
@@ -270,24 +241,8 @@ export const DropImportAccount: React.FC<DropImportProps> = ({
         accept=".json,application/json"
         onChange={handleBrowse}
       />
-
-      {hasFile && (
-        <CustomInputField
-          onChange={(e) => onPassphraseChange(e)}
-          maxChar={500}
-          regex="alphanumeric"
-          label="New Password"
-          currentValue={passphrase}
-          importProp={{
-            type: "txt",
-          }}
-          key="seed-passphrase"
-          required
-          sensitive={true}
-        />
-      )}
     </DropZoneWrapper>
   );
 };
 
-export default DropImportAccount;
+export default DropImportContact;

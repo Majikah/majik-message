@@ -159,6 +159,17 @@ const BannerActions = styled.div`
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  min-height: 2.5em;
+`;
+
+const ConversationHeaderRow = styled.div`
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-height: 2.5em;
+  width: 100%;
 `;
 
 const bannerBtnBase = css`
@@ -856,7 +867,7 @@ export const ConversationMessages = forwardRef<
       {!hasMissingContacts &&
         fetchedMessages[0]?.getParticipants().length <= 2 && (
           <Banner>
-            <BannerActions>
+            <ConversationHeaderRow>
               <BannerBtnPrimary
                 type="button"
                 onClick={handleStartCall}
@@ -865,7 +876,14 @@ export const ConversationMessages = forwardRef<
                 <PhoneCallIcon size={11} weight="bold" />
                 Start Call
               </BannerBtnPrimary>
-            </BannerActions>
+
+              {isAnyoneTyping && (
+                <TypingIndicator
+                  typingPublicKeys={typingUsers.map((u) => u.publicKey)}
+                  majik={majik}
+                />
+              )}
+            </ConversationHeaderRow>
           </Banner>
         )}
 
@@ -915,12 +933,6 @@ export const ConversationMessages = forwardRef<
               );
             })}
           </>
-        )}
-        {isAnyoneTyping && (
-          <TypingIndicator
-            typingPublicKeys={typingUsers.map((u) => u.publicKey)}
-            majik={majik}
-          />
         )}
 
         <div ref={bottomRef} />

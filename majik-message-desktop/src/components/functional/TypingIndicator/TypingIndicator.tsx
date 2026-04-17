@@ -27,7 +27,6 @@ const Root = styled.div`
   display: flex;
   align-items: center;
   gap: 7px;
-  padding: 2px 0;
   animation: ${fadeIn} 180ms ease both;
 `;
 

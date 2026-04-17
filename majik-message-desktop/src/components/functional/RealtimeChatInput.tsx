@@ -1,7 +1,11 @@
 import { useCallback, useRef, useState } from "react";
 import styled from "styled-components";
 import { toast } from "sonner";
-import { ChatInputBox, type SelectedImageState } from "./ChatInputBox";
+import {
+  ChatInputBox,
+  type SelectedImageState,
+  type SelectedAttachmentState,
+} from "./ChatInputBox";
 import type { MajikMessagePublicKey } from "@majikah/majik-message";
 import { useMajikMessageRealtime } from "../majikah-session-wrapper/messages/use-majik-message-realtime";
 import { isDevEnvironment } from "@/utils/utils";
@@ -12,25 +16,27 @@ import {
   type FileScanResult,
 } from "@/SDK/majik-file-scanner/majik-file-scanner";
 import type { UploadIntentBody } from "../majikah-session-wrapper/types/files-api";
+import { MajikFile } from "@majikah/majik-file";
 
 /* ======================================================
- * Image upload constants
+ * Upload constants
  * ====================================================== */
 
 /** Minimum YARA score to allow upload (mirrors UserFiles) */
 const IMAGE_SCAN_PASS_THRESHOLD = 70;
+const ATTACHMENT_SCAN_PASS_THRESHOLD = 70;
 
 /* ======================================================
- * Scanner singleton (shared with UserFiles to avoid double-init)
+ * Scanner singleton (shared across image + attachment paths)
  * ====================================================== */
 
-const imageScanner = new MajikFileScanner();
-let imageScannerReady = false;
+const fileScanner = new MajikFileScanner();
+let fileScannerReady = false;
 
-async function ensureImageScanner(): Promise<void> {
-  if (!imageScannerReady) {
-    await imageScanner.initialize();
-    imageScannerReady = true;
+async function ensureFileScanner(): Promise<void> {
+  if (!fileScannerReady) {
+    await fileScanner.initialize();
+    fileScannerReady = true;
   }
 }
 
@@ -46,6 +52,15 @@ const InputWrapper = styled.div`
   position: relative;
   flex: 1;
 `;
+
+/* ======================================================
+ * Types
+ * ====================================================== */
+
+interface UploadedFileRef {
+  file: MajikFile;
+  context: "chat_image" | "chat_attachment";
+}
 
 /* ======================================================
  * Component
@@ -78,15 +93,31 @@ export const RealtimeChatInput: React.FC<RealtimeChatInputProps> = ({
   // ── Image upload state ────────────────────────────────────────────────────
   const [imageUploadState, setImageUploadState] =
     useState<SelectedImageState | null>(null);
+  const uploadedImageRef = useRef<UploadedFileRef | null>(null);
 
-  /**
-   * Holds the uploaded image URL once the upload completes successfully.
-   * This is what gets embedded in the message as [img:${url}].
-   */
-  const uploadedImageUrlRef = useRef<string | null>(null);
+  // ── Attachment upload state ───────────────────────────────────────────────
+  const [attachmentUploadState, setAttachmentUploadState] =
+    useState<SelectedAttachmentState | null>(null);
+  const uploadedAttachmentRef = useRef<UploadedFileRef | null>(null);
 
   /* ====================================================================
-   * Text message send
+   * Shared pipeline helpers
+   * ==================================================================== */
+
+  /** Resolves non-self participant public keys from fingerprints. */
+  const resolveRecipientPubKeys = useCallback(
+    async (selfFp: string): Promise<string[]> => {
+      return (
+        await Promise.all(
+          participants.filter((fp) => fp !== selfFp).map(async (fp) => fp), // extend with pubkey resolution if needed
+        )
+      ).filter(Boolean) as string[];
+    },
+    [participants],
+  );
+
+  /* ====================================================================
+   * Text + file message composition + send
    * ==================================================================== */
 
   const processSend = async (
@@ -94,32 +125,81 @@ export const RealtimeChatInput: React.FC<RealtimeChatInputProps> = ({
     text: string,
   ): Promise<string> => {
     if (isDevEnvironment())
-      console.log("Sending message from: ", senderPublicKey);
+      console.log("Sending message from:", senderPublicKey);
 
-    if (!text?.trim()) {
-      throw new Error("A valid message is required.");
-    }
-
-    if (!senderPublicKey?.trim()) {
+    if (!senderPublicKey?.trim())
       throw new Error("A valid sender public key is required.");
-    }
-
-    if (!majik.currentIdentity) {
+    if (!majik.currentIdentity)
       throw new Error("You must have an active identity set.");
+    if (!conversationID?.trim())
+      throw new Error("Select a conversation first.");
+
+    let composed = text?.trim() ?? "";
+
+    // ── Append image tag if image is ready ──────────────────────────────
+    if (uploadedImageRef.current) {
+      const intentBody: UploadIntentBody = {
+        fileHash: uploadedImageRef.current.file.toJSON().file_hash,
+        sizeOriginal: uploadedImageRef.current.file.toJSON().size_original,
+        mimeType: uploadedImageRef.current.file.toJSON().mime_type,
+        context: uploadedImageRef.current.context,
+        isTemporary: true,
+        expiresAt: uploadedImageRef.current.file.toJSON().expires_at,
+        originalName: uploadedImageRef.current.file.toJSON().original_name,
+        conversationId: conversationID,
+        chatMessageId: null,
+      };
+
+      const confirmedImage = await majik.uploadFile(
+        intentBody,
+        uploadedImageRef.current.file,
+      );
+
+      if (confirmedImage.id) {
+        composed = composed
+          ? `${composed}\n[img:${confirmedImage.id}]`
+          : `[img:${confirmedImage.id}]`;
+      }
     }
 
-    if (!conversationID?.trim()) {
-      throw new Error("Select a conversation first.");
+    // ── Append file tag if attachment is ready ──────────────────────────
+    if (uploadedAttachmentRef.current) {
+      const fileJSON = uploadedAttachmentRef.current.file.toJSON();
+
+      const intentBody: UploadIntentBody = {
+        fileHash: fileJSON.file_hash,
+        sizeOriginal: fileJSON.size_original,
+        mimeType: fileJSON.mime_type,
+        context: uploadedAttachmentRef.current.context,
+        isTemporary: true,
+        expiresAt: fileJSON.expires_at,
+        originalName: fileJSON.original_name,
+        conversationId: conversationID,
+        chatMessageId: null,
+      };
+
+      const confirmedFile = await majik.uploadFile(
+        intentBody,
+        uploadedAttachmentRef.current.file,
+      );
+
+      if (confirmedFile.id) {
+        composed = composed
+          ? `${composed}\n[file:${confirmedFile.id}]`
+          : `[file:${confirmedFile.id}]`;
+      }
     }
+
+    if (!composed?.trim()) throw new Error("A valid message is required.");
 
     const composedChatMessage = await majik.createEncryptedMajikMessageChat(
       majik.currentIdentity,
       participants,
-      text,
+      composed,
     );
 
     client.sendMessage(composedChatMessage.messageChat);
-    return `Message sent!`;
+    return "Message sent!";
   };
 
   const handleSend = async (finalText: string): Promise<void> => {
@@ -133,19 +213,15 @@ export const RealtimeChatInput: React.FC<RealtimeChatInputProps> = ({
       return;
     }
 
-    // ── Compose text + image tag ─────────────────────────────────────────
-    const imgUrl = uploadedImageUrlRef.current;
-    let composed = finalText?.trim() ?? "";
+    const hasContent =
+      finalText?.trim() ||
+      uploadedImageRef.current ||
+      uploadedAttachmentRef.current;
 
-    if (imgUrl) {
-      // Append image tag — mirrors how GIFs are embedded
-      composed = composed ? `${composed}\n[img:${imgUrl}]` : `[img:${imgUrl}]`;
-    }
+    if (!hasContent) return;
 
-    if (!composed) return;
-
-    toast.promise(processSend(currentUserPublicKey, composed), {
-      loading: `Sending message...`,
+    toast.promise(processSend(currentUserPublicKey, finalText), {
+      loading: "Sending message...",
       success: (outputMessage) => {
         setTimeout(() => {
           if (isTypingRef.current) {
@@ -158,14 +234,16 @@ export const RealtimeChatInput: React.FC<RealtimeChatInputProps> = ({
           }
         }, 1000);
 
-        // Clear image state after a successful send
-        if (imgUrl) {
-          if (imageUploadState?.previewUrl) {
-            URL.revokeObjectURL(imageUploadState.previewUrl);
-          }
-          setImageUploadState(null);
-          uploadedImageUrlRef.current = null;
+        // Clear image state
+        if (imageUploadState?.previewUrl) {
+          URL.revokeObjectURL(imageUploadState.previewUrl);
         }
+        setImageUploadState(null);
+        uploadedImageRef.current = null;
+
+        // Clear attachment state
+        setAttachmentUploadState(null);
+        uploadedAttachmentRef.current = null;
 
         return outputMessage;
       },
@@ -210,29 +288,20 @@ export const RealtimeChatInput: React.FC<RealtimeChatInputProps> = ({
   );
 
   /* ====================================================================
-   * Image upload pipeline: validate → scan → encrypt → upload → ready
+   * Image upload pipeline: scan → encrypt → ready
    * ==================================================================== */
 
-  /**
-   * Called by ChatInputBox when the user picks a valid image file.
-   * Runs: YARA scan → MajikFile encrypt → R2 upload → sets uploadedImageUrl.
-   */
   const handleSelectImage = useCallback(
     async (file: File) => {
-      // Build a preview URL immediately for the thumbnail
       const previewUrl = URL.createObjectURL(file);
 
-      setImageUploadState({
-        file,
-        previewUrl,
-        status: "scanning",
-      });
-      uploadedImageUrlRef.current = null;
+      setImageUploadState({ file, previewUrl, status: "scanning" });
+      uploadedImageRef.current = null;
 
       try {
-        // ── Step 1: YARA scan ──────────────────────────────────────────────
-        await ensureImageScanner();
-        const scanResult: FileScanResult = await imageScanner.scan(file);
+        // ── YARA scan ────────────────────────────────────────────────────
+        await ensureFileScanner();
+        const scanResult: FileScanResult = await fileScanner.scan(file);
 
         if (scanResult.score < IMAGE_SCAN_PASS_THRESHOLD) {
           const reason =
@@ -243,7 +312,6 @@ export const RealtimeChatInput: React.FC<RealtimeChatInputProps> = ({
           setImageUploadState((prev) =>
             prev ? { ...prev, status: "error", errorMessage: reason } : null,
           );
-
           toast.error(`Image blocked — ${reason}`, {
             id: "toast-img-scan-blocked",
             duration: 8000,
@@ -251,28 +319,17 @@ export const RealtimeChatInput: React.FC<RealtimeChatInputProps> = ({
           return;
         }
 
-        // ── Step 2: Encrypt with MajikFile ────────────────────────────────
+        // ── Encrypt ──────────────────────────────────────────────────────
         setImageUploadState((prev) =>
           prev ? { ...prev, status: "uploading" } : null,
         );
 
-        if (!majik.currentIdentity) {
+        if (!majik.currentIdentity)
           throw new Error("No active identity — please log in.");
-        }
 
-        // Resolve participant public keys (excluding self)
-        const ownFingerprint = majik.currentIdentity.id;
-        const recipientPubKeys = (
-          await Promise.all(
-            participants
-              .filter((fp) => fp !== ownFingerprint)
-              .map(async (fp) => {
-                // participants is string[] of fingerprints; resolve pubkey via contact lookup
-                // Fall back to the fingerprint itself if resolution isn't available
-                return fp;
-              }),
-          )
-        ).filter(Boolean) as string[];
+        const recipientPubKeys = await resolveRecipientPubKeys(
+          majik.currentIdentity.id,
+        );
 
         const bytes = new Uint8Array(await file.arrayBuffer());
 
@@ -281,42 +338,18 @@ export const RealtimeChatInput: React.FC<RealtimeChatInputProps> = ({
           mimeType: file.type || "image/jpeg",
           originalName: file.name,
           context: "chat_image",
-          isTemporary: true, // chat images are always temporary
+          isTemporary: true,
           userId: majik?.user?.id,
-          expiresAt: 15, // days — R2 lifecycle handles auto-delete
+          expiresAt: 15,
           recipients: recipientPubKeys,
-          compressionLevel: 6, // BALANCED — fast enough for chat
+          compressionLevel: 6,
           conversationId: conversationID,
         });
 
-        const majikFile = encryptedResult.file;
-        const fileJSON = majikFile.toJSON();
-
-        // ── Step 3: Upload intent + PUT to R2 ─────────────────────────────
-        const intentBody: UploadIntentBody = {
-          fileHash: fileJSON.file_hash,
-          sizeOriginal: fileJSON.size_original,
-          mimeType: fileJSON.mime_type,
+        uploadedImageRef.current = {
+          file: encryptedResult.file,
           context: "chat_image",
-          isTemporary: true,
-          expiresAt: fileJSON.expires_at,
-          originalName: fileJSON.original_name,
-          conversationId: conversationID,
-          // chatMessageId is not yet known at this point — pass null;
-          // the server only requires it for chat_attachment context, not chat_image
-          chatMessageId: null,
         };
-        console.log("Intent Body: ", intentBody);
-
-        const confirmedFile = await majik.uploadFile(intentBody, majikFile);
-
-        // ── Step 4: Store file ID for message embedding ───────────────────
-        // The file is private and encrypted — there is no public URL.
-        // We embed the fileId in the message as [img:${fileId}].
-        // Each recipient's message renderer resolves a fresh presigned
-        // download URL at render time via GET /files/:fileId/download,
-        // then decrypts the .mjkb binary with their own identity.
-        uploadedImageUrlRef.current = confirmedFile.id;
 
         setImageUploadState((prev) =>
           prev ? { ...prev, status: "ready" } : null,
@@ -330,11 +363,9 @@ export const RealtimeChatInput: React.FC<RealtimeChatInputProps> = ({
       } catch (err) {
         console.error("[RealtimeChatInput] image upload error:", err);
         const msg = err instanceof Error ? err.message : "Upload failed";
-
         setImageUploadState((prev) =>
           prev ? { ...prev, status: "error", errorMessage: msg } : null,
         );
-
         toast.error("Image upload failed", {
           description: msg,
           id: "toast-img-upload-error",
@@ -342,7 +373,7 @@ export const RealtimeChatInput: React.FC<RealtimeChatInputProps> = ({
         });
       }
     },
-    [majik, conversationID, participants],
+    [majik, conversationID, resolveRecipientPubKeys],
   );
 
   const handleDismissImage = useCallback(() => {
@@ -350,8 +381,100 @@ export const RealtimeChatInput: React.FC<RealtimeChatInputProps> = ({
       URL.revokeObjectURL(imageUploadState.previewUrl);
     }
     setImageUploadState(null);
-    uploadedImageUrlRef.current = null;
+    uploadedImageRef.current = null;
   }, [imageUploadState]);
+
+  /* ====================================================================
+   * Attachment upload pipeline: scan → encrypt → ready
+   * ==================================================================== */
+
+  const handleSelectAttachment = useCallback(
+    async (file: File) => {
+      setAttachmentUploadState({ file, status: "scanning" });
+      uploadedAttachmentRef.current = null;
+
+      try {
+        // ── YARA scan ────────────────────────────────────────────────────
+        await ensureFileScanner();
+        const scanResult: FileScanResult = await fileScanner.scan(file);
+
+        if (scanResult.score < ATTACHMENT_SCAN_PASS_THRESHOLD) {
+          const reason =
+            scanResult.status === "flagged"
+              ? `YARA threat detected (${scanResult.remarks.length} rule(s) matched)`
+              : `Scan score too low (${scanResult.score}/100, minimum ${ATTACHMENT_SCAN_PASS_THRESHOLD})`;
+
+          setAttachmentUploadState((prev) =>
+            prev ? { ...prev, status: "error", errorMessage: reason } : null,
+          );
+          toast.error(`File blocked — ${reason}`, {
+            id: "toast-attachment-scan-blocked",
+            duration: 8000,
+          });
+          return;
+        }
+
+        // ── Encrypt ──────────────────────────────────────────────────────
+        setAttachmentUploadState((prev) =>
+          prev ? { ...prev, status: "uploading" } : null,
+        );
+
+        if (!majik.currentIdentity)
+          throw new Error("No active identity — please log in.");
+
+        const recipientPubKeys = await resolveRecipientPubKeys(
+          majik.currentIdentity.id,
+        );
+
+        const bytes = new Uint8Array(await file.arrayBuffer());
+
+        const encryptedResult = await majik.encryptFile({
+          data: bytes,
+          mimeType: file.type || "application/octet-stream",
+          originalName: file.name,
+          context: "chat_attachment",
+          isTemporary: true,
+          userId: majik?.user?.id,
+          expiresAt: 1,
+          recipients: recipientPubKeys,
+          compressionLevel: 6,
+          conversationId: conversationID,
+        });
+
+        uploadedAttachmentRef.current = {
+          file: encryptedResult.file,
+          context: "chat_attachment",
+        };
+
+        setAttachmentUploadState((prev) =>
+          prev ? { ...prev, status: "ready" } : null,
+        );
+
+        toast.success("File ready", {
+          description: "Press send to attach it to your message.",
+          id: "toast-attachment-ready",
+          duration: 3000,
+        });
+      } catch (err) {
+        console.error("[RealtimeChatInput] attachment upload error:", err);
+        const msg = err instanceof Error ? err.message : "Upload failed";
+        setAttachmentUploadState((prev) =>
+          prev ? { ...prev, status: "error", errorMessage: msg } : null,
+        );
+        toast.error("File upload failed", {
+          description: msg,
+          id: "toast-attachment-upload-error",
+          duration: 6000,
+        });
+      }
+    },
+    [majik, conversationID, resolveRecipientPubKeys],
+  );
+
+  const handleDismissAttachment = useCallback(() => {
+    setAttachmentUploadState(null);
+    uploadedAttachmentRef.current = null;
+  }, []);
 
   /* ====================================================================
    * Render
@@ -366,9 +489,13 @@ export const RealtimeChatInput: React.FC<RealtimeChatInputProps> = ({
         disabled={!participants || participants.length <= 0 || disabled}
         maxHeight={maxHeight}
         enableImageUpload
+        enableFileUpload
         onSelectImage={handleSelectImage}
         imageUploadState={imageUploadState}
         onDismissImage={handleDismissImage}
+        onSelectAttachment={handleSelectAttachment}
+        attachmentUploadState={attachmentUploadState}
+        onDismissAttachment={handleDismissAttachment}
       />
     </InputWrapper>
   );

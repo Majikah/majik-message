@@ -18,6 +18,10 @@ import {
   type ChatImageReadyInfo,
 } from "./ChatImageRenderer";
 import { CallMessageRenderer, CallReadyInfo } from "./CallMessageRenderer";
+import {
+  FileAttachmentReadyInfo,
+  FileAttachmentRenderer,
+} from "./FileAttachmentRenderer";
 
 // ─── Local tokens ─────────────────────────────────────────────────────────────
 const FONT_MONO = "'Fira Mono', 'JetBrains Mono', monospace";
@@ -29,6 +33,8 @@ const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CALL_TAG_RE =
   /\n?\[call:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\]$/i;
+const FILE_TAG_RE =
+  /\n?\[file:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\]$/i;
 
 // ─── GIF message parser ───────────────────────────────────────────────────────
 
@@ -61,7 +67,8 @@ interface ParsedMessage {
   text: string;
   gifUrl: string | null;
   imgFileId: string | null;
-  callId: string | null; // ← new
+  callId: string | null;
+  fileId: string | null;
 }
 
 function parseMessageContent(raw: string): ParsedMessage {
@@ -69,7 +76,13 @@ function parseMessageContent(raw: string): ParsedMessage {
   const callMatch = raw.match(CALL_TAG_RE);
   if (callMatch) {
     const text = raw.slice(0, raw.length - callMatch[0].length);
-    return { text, gifUrl: null, imgFileId: null, callId: callMatch[1] };
+    return {
+      text,
+      gifUrl: null,
+      imgFileId: null,
+      callId: callMatch[1],
+      fileId: null,
+    };
   }
 
   // Encrypted image
@@ -78,8 +91,26 @@ function parseMessageContent(raw: string): ParsedMessage {
     const fileId = imgMatch[1].trim();
     if (UUID_RE.test(fileId)) {
       const text = raw.slice(0, raw.length - imgMatch[0].length);
-      return { text, gifUrl: null, imgFileId: fileId, callId: null };
+      return {
+        text,
+        gifUrl: null,
+        imgFileId: fileId,
+        callId: null,
+        fileId: null,
+      };
     }
+  }
+
+  const fileMatch = raw.match(FILE_TAG_RE);
+  if (fileMatch) {
+    const text = raw.slice(0, raw.length - fileMatch[0].length);
+    return {
+      text,
+      gifUrl: null,
+      imgFileId: null,
+      callId: null,
+      fileId: fileMatch[1],
+    };
   }
 
   // GIF  (existing logic unchanged)
@@ -89,7 +120,13 @@ function parseMessageContent(raw: string): ParsedMessage {
     const text = raw.slice(0, raw.length - gifMatch[0].length);
 
     if (!isAllowedGiphyUrl(extractedUrl)) {
-      return { text: raw, gifUrl: null, imgFileId: null, callId: null };
+      return {
+        text: raw,
+        gifUrl: null,
+        imgFileId: null,
+        callId: null,
+        fileId: null,
+      };
     }
 
     const sanitizedUrl = DOMPurify.sanitize(extractedUrl, {
@@ -99,13 +136,31 @@ function parseMessageContent(raw: string): ParsedMessage {
     }).trim();
 
     if (sanitizedUrl !== extractedUrl) {
-      return { text: raw, gifUrl: null, imgFileId: null, callId: null };
+      return {
+        text: raw,
+        gifUrl: null,
+        imgFileId: null,
+        callId: null,
+        fileId: null,
+      };
     }
 
-    return { text, gifUrl: sanitizedUrl, imgFileId: null, callId: null };
+    return {
+      text,
+      gifUrl: sanitizedUrl,
+      imgFileId: null,
+      callId: null,
+      fileId: null,
+    };
   }
 
-  return { text: raw, gifUrl: null, imgFileId: null, callId: null };
+  return {
+    text: raw,
+    gifUrl: null,
+    imgFileId: null,
+    callId: null,
+    fileId: null,
+  };
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -190,12 +245,13 @@ const Bubble = styled.div<{
   $isOwn: boolean;
   $hasGif: boolean;
   $hasImg: boolean;
-  $hasCall: boolean; // ← new
+  $hasCall: boolean;
+  $hasFile: boolean;
 }>`
-  padding: ${({ $hasGif, $hasImg, $hasCall }) =>
-    $hasGif || $hasImg || $hasCall ? "0" : "10px 14px"};
-  min-height: ${({ $hasGif, $hasImg, $hasCall }) =>
-    $hasGif || $hasImg || $hasCall ? "0" : "42px"};
+  padding: ${({ $hasGif, $hasImg, $hasCall, $hasFile }) =>
+    $hasGif || $hasImg || $hasCall || $hasFile ? "0" : "10px 14px"};
+  min-height: ${({ $hasGif, $hasImg, $hasCall, $hasFile }) =>
+    $hasGif || $hasImg || $hasCall || $hasFile ? "0" : "42px"};
   border-radius: 16px;
   font-size: 13px;
   line-height: 1.6;
@@ -431,18 +487,26 @@ const CBaseChatBubble: React.FC<CBaseChatBubbleProps> = ({
     text: displayText,
     gifUrl,
     imgFileId,
-    callId, // ← new
-  } = useMemo(
+    callId,
+    fileId,
+  }: ParsedMessage = useMemo(
     () =>
       text
         ? parseMessageContent(text)
-        : { text: "", gifUrl: null, imgFileId: null, callId: null },
+        : {
+            text: "",
+            gifUrl: null,
+            imgFileId: null,
+            callId: null,
+            fileId: null,
+          },
     [text],
   );
 
   const hasGif = gifUrl !== null;
   const hasImg = imgFileId !== null;
   const hasCall = callId !== null;
+  const hasFile = fileId !== null;
 
   const imgRef = useRef<HTMLImageElement | null>(null);
   useEffect(() => {
@@ -515,6 +579,10 @@ const CBaseChatBubble: React.FC<CBaseChatBubbleProps> = ({
     const raw = message.getCompressedMessage();
     const blob = new Blob([raw], { type: "application/octet-stream" });
     downloadBlob(blob, "txt", message.getRedisKey() || "Majik Message");
+
+    toast.success("Message Downloaded", {
+      id: `toast-success-msgtxt-${messageId}`,
+    });
     sendNotification({
       title: "Message Downloaded",
       body:
@@ -543,6 +611,10 @@ const CBaseChatBubble: React.FC<CBaseChatBubbleProps> = ({
     a.href = info.objectUrl;
     a.download = filename;
     a.click();
+
+    toast.success("Image Downloaded", {
+      id: `toast-success-imgdl-${messageId}`,
+    });
 
     sendNotification({
       title: "Image Downloaded",
@@ -575,6 +647,17 @@ const CBaseChatBubble: React.FC<CBaseChatBubbleProps> = ({
               <ImageCaption data-private>{displayText}</ImageCaption>
             ) : null}
           </ImageMedia>
+        );
+
+      case hasFile:
+        return (
+          <FileAttachmentRenderer
+            majik={majik}
+            fileId={fileId!}
+            conversationId={message.getConversationID()}
+            isOwn={isOwn}
+            onReady={(_info: FileAttachmentReadyInfo) => {}}
+          />
         );
 
       case hasCall:
@@ -676,6 +759,7 @@ const CBaseChatBubble: React.FC<CBaseChatBubbleProps> = ({
             $hasGif={hasGif}
             $hasImg={hasImg}
             $hasCall={hasCall}
+            $hasFile={hasFile}
             data-private
           >
             {renderBubbleContent()}

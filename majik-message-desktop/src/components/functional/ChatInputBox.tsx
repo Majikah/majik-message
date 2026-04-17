@@ -12,6 +12,7 @@ import {
   SmileyIcon,
   XIcon,
   ImageIcon,
+  PaperclipIcon,
 } from "@phosphor-icons/react";
 import { toast } from "sonner";
 
@@ -38,6 +39,62 @@ const IMAGE_MAX_DIMENSION = 4000; // px
 const IMAGE_ACCEPT = "image/jpeg,image/jpg,image/png,image/webp";
 const IMAGE_ACCEPT_EXTS = ["jpg", "jpeg", "png", "webp"];
 
+// ─── Attachment upload constants ──────────────────────────────────────────────
+const ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024; // 25 MB
+
+/**
+ * MIME types that should be redirected to the image upload path instead of
+ * being treated as a generic file attachment.
+ */
+const ATTACHMENT_IMAGE_MIMES = new Set([
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/webp",
+]);
+
+/**
+ * File extensions that should be redirected to the image upload path.
+ */
+const ATTACHMENT_IMAGE_EXTS = new Set(["jpg", "jpeg", "png", "webp"]);
+
+/**
+ * MIME types that are explicitly blocked regardless of extension.
+ * Add more as policy dictates.
+ */
+const ATTACHMENT_BLOCKED_MIMES = new Set<string>([
+  // e.g. "application/x-msdownload" — leave empty for now; block at infra layer
+]);
+
+/**
+ * Extensions that are explicitly blocked for safety.
+ */
+const ATTACHMENT_BLOCKED_EXTS = new Set([
+  "bat",
+  "cmd",
+  "com",
+  "cpl",
+  "hta",
+  "inf",
+  "ins",
+  "isp",
+  "jse",
+  "lnk",
+  "msc",
+  "msi",
+  "msp",
+  "pif",
+  "scr",
+  "shs",
+  "vb",
+  "vbe",
+  "vbs",
+  "vxd",
+  "wsc",
+  "wsf",
+  "wsh",
+]);
+
 // ─── GIF compositing helper ───────────────────────────────────────────────────
 function composeMessageWithGif(text: string, gifUrl: string | null): string {
   const trimmed = text.trim();
@@ -46,30 +103,23 @@ function composeMessageWithGif(text: string, gifUrl: string | null): string {
   return `${trimmed}\n[gif:${gifUrl}]`;
 }
 
-// ─── Image validation ─────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
-/**
- * Validates a File for chat image upload:
- *   - Must be jpeg/jpg/png/webp
- *   - Must be ≤ 10 MB
- *   - Dimensions must be ≤ 4000 × 4000
- *
- * Returns null on success, or an error message string.
- */
+// ─── Image validation ─────────────────────────────────────────────────────────
 async function validateImageFile(file: File): Promise<string | null> {
-  // ── Extension / MIME check ────────────────────────────────────────────────
   const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
   if (!IMAGE_ACCEPT_EXTS.includes(ext)) {
     return `Unsupported format "${ext}". Allowed: ${IMAGE_ACCEPT_EXTS.join(", ")}`;
   }
-
-  // ── Size check ────────────────────────────────────────────────────────────
   if (file.size > IMAGE_MAX_BYTES) {
     const mb = (file.size / 1024 / 1024).toFixed(1);
     return `Image too large (${mb} MB). Maximum is 10 MB.`;
   }
-
-  // ── Dimension check ───────────────────────────────────────────────────────
   return new Promise((resolve) => {
     const url = URL.createObjectURL(file);
     const img = new Image();
@@ -92,6 +142,54 @@ async function validateImageFile(file: File): Promise<string | null> {
     };
     img.src = url;
   });
+}
+
+// ─── Attachment validation ────────────────────────────────────────────────────
+
+/** Returned when the file is an image and should be handled by the image path */
+export const ATTACHMENT_IS_IMAGE = "IS_IMAGE" as const;
+
+/**
+ * Validates a file for the generic attachment upload path.
+ *
+ * Returns:
+ *  - `ATTACHMENT_IS_IMAGE` — file is an image; caller should redirect to image handler
+ *  - `null`                — valid attachment, proceed
+ *  - `string`              — error message, reject the file
+ */
+export async function validateAttachmentFile(
+  file: File,
+): Promise<typeof ATTACHMENT_IS_IMAGE | string | null> {
+  const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+  const mime = file.type.toLowerCase();
+
+  // ── Image redirect ──────────────────────────────────────────────────────
+  if (ATTACHMENT_IMAGE_MIMES.has(mime) || ATTACHMENT_IMAGE_EXTS.has(ext)) {
+    return ATTACHMENT_IS_IMAGE;
+  }
+
+  // ── Blocked extensions ──────────────────────────────────────────────────
+  if (ATTACHMENT_BLOCKED_EXTS.has(ext)) {
+    return `Files with extension ".${ext}" are not allowed.`;
+  }
+
+  // ── Blocked MIME types ──────────────────────────────────────────────────
+  if (ATTACHMENT_BLOCKED_MIMES.has(mime)) {
+    return `Files of type "${mime}" are not allowed.`;
+  }
+
+  // ── Size check ──────────────────────────────────────────────────────────
+  if (file.size > ATTACHMENT_MAX_BYTES) {
+    const mb = (file.size / 1024 / 1024).toFixed(1);
+    return `File too large (${mb} MB). Maximum is 25 MB.`;
+  }
+
+  // ── Empty file guard ────────────────────────────────────────────────────
+  if (file.size === 0) {
+    return "Cannot attach an empty file.";
+  }
+
+  return null;
 }
 
 // ─── Giphy client fetchers ────────────────────────────────────────────────────
@@ -265,6 +363,106 @@ const ImagePreviewStatus = styled.span<{
   opacity: 0.85;
 `;
 
+// ─── Attachment preview strip ─────────────────────────────────────────────────
+
+const AttachmentPreviewStrip = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px 0;
+`;
+
+const AttachmentPreviewCard = styled.div`
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 32px 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(245, 166, 35, 0.35);
+  background: ${({ theme }) => theme.colors.secondaryBackground};
+  min-width: 0;
+  max-width: 280px;
+`;
+
+const AttachmentPreviewIcon = styled.div`
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: 7px;
+  background: rgba(245, 166, 35, 0.12);
+  border: 1px solid rgba(245, 166, 35, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #f5a623;
+`;
+
+const AttachmentPreviewExtBadge = styled.span`
+  font-family: ${FONT_MONO};
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #f5a623;
+`;
+
+const AttachmentPreviewInfo = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+`;
+
+const AttachmentPreviewName = styled.span`
+  font-size: 11px;
+  color: ${({ theme }) => theme.colors.textPrimary};
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+`;
+
+const AttachmentPreviewSize = styled.span`
+  font-family: ${FONT_MONO};
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  opacity: 0.5;
+`;
+
+const AttachmentPreviewStatus = styled.span<{
+  $uploading?: boolean;
+  $error?: boolean;
+}>`
+  font-family: ${FONT_MONO};
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  color: ${({ $uploading, $error }) =>
+    $error ? "#f06449" : $uploading ? "#f5a623" : "#3ecf8e"};
+  opacity: 0.85;
+`;
+
+const AttachmentPreviewDismiss = styled.button`
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: rgba(255, 255, 255, 0.75);
+  transition: background 100ms;
+  &:hover {
+    background: rgba(0, 0, 0, 0.8);
+  }
+`;
+
 // ─── Reserved input warning banner ───────────────────────────────────────────
 const ReservedWarning = styled.div`
   display: flex;
@@ -361,7 +559,7 @@ const StyledTextarea = styled.textarea<{ $maxHeight: number }>`
   border: none;
   outline: none;
   resize: none;
-  min-height: 90px;
+  min-height: 120px;
   max-height: ${({ $maxHeight }) => $maxHeight}px;
   overflow-y: auto;
   scrollbar-width: thin;
@@ -532,6 +730,16 @@ type PickerMode = "emoji" | "gif" | null;
 export type ImageUploadStatus =
   | "validating"
   | "scanning"
+  | "encrypting"
+  | "uploading"
+  | "ready"
+  | "error";
+
+/** Status of a file attachment being prepared for upload by the parent */
+export type AttachmentUploadStatus =
+  | "validating"
+  | "scanning"
+  | "encrypting"
   | "uploading"
   | "ready"
   | "error";
@@ -541,6 +749,12 @@ export interface SelectedImageState {
   /** Object URL for preview — revoke when done */
   previewUrl: string;
   status: ImageUploadStatus;
+  errorMessage?: string;
+}
+
+export interface SelectedAttachmentState {
+  file: File;
+  status: AttachmentUploadStatus;
   errorMessage?: string;
 }
 
@@ -556,20 +770,29 @@ interface ChatInputBoxProps {
   enableEmoji?: boolean;
   /** Enable the image upload button */
   enableImageUpload?: boolean;
+  /** Enable the file attachment button */
+  enableFileUpload?: boolean;
   /**
-   * Called when the user selects a valid image file.
-   * The parent is responsible for scanning, encrypting, and uploading.
-   * The parent should call back via `imageUploadStatus` to reflect progress.
+   * Called when the user selects a valid image file (or when an attachment
+   * turns out to be an image — the component auto-redirects).
    */
   onSelectImage?: (file: File) => void;
   /**
    * Current image upload state driven by the parent.
-   * When provided and status === "ready", the image is treated as attached
-   * (similar to a selected GIF) and is sent with the next message.
    */
   imageUploadState?: SelectedImageState | null;
   /** Called when the user dismisses the selected/uploading image */
   onDismissImage?: () => void;
+  /**
+   * Called when the user selects a valid non-image file attachment.
+   */
+  onSelectAttachment?: (file: File) => void;
+  /**
+   * Current attachment upload state driven by the parent.
+   */
+  attachmentUploadState?: SelectedAttachmentState | null;
+  /** Called when the user dismisses the selected/uploading attachment */
+  onDismissAttachment?: () => void;
 }
 
 // ─── Reserved warning toast ID (deduplicated) ─────────────────────────────────
@@ -587,9 +810,13 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
   enableGIF = true,
   enableEmoji = true,
   enableImageUpload = false,
+  enableFileUpload = false,
   onSelectImage,
   imageUploadState,
   onDismissImage,
+  onSelectAttachment,
+  attachmentUploadState,
+  onDismissAttachment,
 }) => {
   const [value, setValue] = useState("");
   const [focused, setFocused] = useState(false);
@@ -603,6 +830,7 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
   const popoverRef = useRef<HTMLDivElement | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const attachmentInputRef = useRef<HTMLInputElement | null>(null);
   const onEmojiSelectRef = useRef<(emoji: { native: string }) => void>(
     () => {},
   );
@@ -711,7 +939,6 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
   const handleImageInputChange = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
-      // Reset input so the same file can be re-picked after dismissal
       e.target.value = "";
       if (!file || !onSelectImage) return;
 
@@ -730,6 +957,54 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
     [onSelectImage],
   );
 
+  // ── Attachment file picker ─────────────────────────────────────────────────
+  const handleAttachmentInputChange = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      e.target.value = "";
+      if (!file) return;
+
+      const result = await validateAttachmentFile(file);
+
+      if (result === ATTACHMENT_IS_IMAGE) {
+        // Auto-redirect to image handler
+        if (!onSelectImage) {
+          toast.error("Image uploads are not enabled in this context.", {
+            id: "toast-attachment-img-redirect-disabled",
+          });
+          return;
+        }
+        const imageError = await validateImageFile(file);
+        if (imageError) {
+          toast.error("Image rejected", {
+            description: imageError,
+            id: "toast-img-validation",
+            duration: 6000,
+          });
+          return;
+        }
+        toast.info("Detected image — handling as image upload.", {
+          id: "toast-attachment-img-redirect",
+          duration: 3000,
+        });
+        onSelectImage(file);
+        return;
+      }
+
+      if (result !== null) {
+        toast.error("Attachment rejected", {
+          description: result,
+          id: "toast-attachment-validation",
+          duration: 6000,
+        });
+        return;
+      }
+
+      onSelectAttachment?.(file);
+    },
+    [onSelectImage, onSelectAttachment],
+  );
+
   // ── Reserved system message guard ─────────────────────────────────────────
   const inputIsReserved = isReserved(value);
 
@@ -737,6 +1012,7 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
   const imageIsUploading =
     imageUploadState?.status === "validating" ||
     imageUploadState?.status === "scanning" ||
+    imageUploadState?.status === "encrypting" ||
     imageUploadState?.status === "uploading";
 
   const imageIsReady = imageUploadState?.status === "ready";
@@ -748,6 +1024,8 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
         return "Validating…";
       case "scanning":
         return "Scanning…";
+      case "encrypting":
+        return "Encrypting…";
       case "uploading":
         return "Uploading…";
       case "ready":
@@ -758,6 +1036,38 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
         return "";
     }
   })();
+
+  // ── Derived attachment state ───────────────────────────────────────────────
+  const attachmentIsUploading =
+    attachmentUploadState?.status === "validating" ||
+    attachmentUploadState?.status === "scanning" ||
+    attachmentUploadState?.status === "encrypting" ||
+    attachmentUploadState?.status === "uploading";
+
+  const attachmentIsReady = attachmentUploadState?.status === "ready";
+  const attachmentHasError = attachmentUploadState?.status === "error";
+
+  const attachmentStatusLabel = (() => {
+    switch (attachmentUploadState?.status) {
+      case "validating":
+        return "Validating…";
+      case "scanning":
+        return "Scanning…";
+      case "encrypting":
+        return "Encrypting…";
+      case "uploading":
+        return "Uploading…";
+      case "ready":
+        return "Ready to send";
+      case "error":
+        return attachmentUploadState.errorMessage ?? "Upload failed";
+      default:
+        return "";
+    }
+  })();
+
+  const attachmentExt =
+    attachmentUploadState?.file.name.split(".").pop()?.toUpperCase() ?? "FILE";
 
   // ── Send ───────────────────────────────────────────────────────────────────
   const handleSend = async (): Promise<void> => {
@@ -777,20 +1087,23 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
     const gifUrl = selectedGif?.images?.original?.url ?? null;
     const composed = composeMessageWithGif(value, gifUrl);
 
-    // Block send while image is still processing
     if (imageUploadState && imageIsUploading) {
       toast.info("Please wait — image is still uploading.");
       return;
     }
 
-    if (!composed && !imageIsReady) return;
+    if (attachmentUploadState && attachmentIsUploading) {
+      toast.info("Please wait — file is still uploading.");
+      return;
+    }
+
+    if (!composed && !imageIsReady && !attachmentIsReady) return;
 
     try {
       await onSend(composed);
       setValue("");
       setSelectedGif(null);
       onUpdate?.(composed);
-      // Note: parent clears imageUploadState after onSend resolves
     } catch (err) {
       console.error("Failed to send message", err);
     }
@@ -826,12 +1139,25 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
     !inputIsReserved &&
     !imageIsUploading &&
     !imageHasError &&
-    (value.trim().length > 0 || selectedGif !== null || imageIsReady);
+    !attachmentIsUploading &&
+    !attachmentHasError &&
+    (value.trim().length > 0 ||
+      selectedGif !== null ||
+      imageIsReady ||
+      attachmentIsReady);
 
   const gifPreviewUrl =
     selectedGif?.images?.fixed_height_small?.url ??
     selectedGif?.images?.fixed_height?.url ??
     null;
+
+  // ── Placeholder ────────────────────────────────────────────────────────────
+  const derivedPlaceholder = (() => {
+    if (imageUploadState) return "Add a caption for your image…";
+    if (attachmentUploadState) return "Add a message to go with your file…";
+    if (selectedGif) return "Add a message to go with your GIF…";
+    return placeholder ?? "Message… (Shift+Enter for new line)";
+  })();
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
@@ -844,6 +1170,17 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
           accept={IMAGE_ACCEPT}
           hidden
           onChange={handleImageInputChange}
+        />
+      )}
+
+      {/* Hidden attachment file input — accepts everything; validator decides */}
+      {enableFileUpload && (
+        <input
+          ref={attachmentInputRef}
+          type="file"
+          accept="*/*"
+          hidden
+          onChange={handleAttachmentInputChange}
         />
       )}
 
@@ -944,6 +1281,40 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
         </ImagePreviewStrip>
       )}
 
+      {/* Attachment preview strip */}
+      {enableFileUpload && attachmentUploadState && (
+        <AttachmentPreviewStrip>
+          <AttachmentPreviewCard>
+            <AttachmentPreviewIcon>
+              <AttachmentPreviewExtBadge>
+                {attachmentExt}
+              </AttachmentPreviewExtBadge>
+            </AttachmentPreviewIcon>
+            <AttachmentPreviewInfo>
+              <AttachmentPreviewName title={attachmentUploadState.file.name}>
+                {attachmentUploadState.file.name}
+              </AttachmentPreviewName>
+              <AttachmentPreviewSize>
+                {formatBytes(attachmentUploadState.file.size)}
+              </AttachmentPreviewSize>
+              <AttachmentPreviewStatus
+                $uploading={attachmentIsUploading}
+                $error={attachmentHasError}
+              >
+                {attachmentStatusLabel}
+              </AttachmentPreviewStatus>
+            </AttachmentPreviewInfo>
+            <AttachmentPreviewDismiss
+              onClick={onDismissAttachment}
+              title="Remove attachment"
+              type="button"
+            >
+              <XIcon size={10} weight="bold" />
+            </AttachmentPreviewDismiss>
+          </AttachmentPreviewCard>
+        </AttachmentPreviewStrip>
+      )}
+
       {/* Reserved system tag warning banner */}
       {inputIsReserved && (
         <ReservedWarning>
@@ -991,6 +1362,20 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
               />
             </ToolBtn>
           )}
+          {enableFileUpload && (
+            <ToolBtn
+              $active={!!attachmentUploadState}
+              title="Attach file"
+              onClick={() => attachmentInputRef.current?.click()}
+              type="button"
+              disabled={!!attachmentUploadState}
+            >
+              <PaperclipIcon
+                size={15}
+                weight={attachmentUploadState ? "fill" : "regular"}
+              />
+            </ToolBtn>
+          )}
         </Toolbar>
 
         <TextareaWrap $focused={focused} $reserved={inputIsReserved}>
@@ -1001,13 +1386,7 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
             onKeyDown={handleKeyDown}
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}
-            placeholder={
-              imageUploadState
-                ? "Add a caption for your image…"
-                : selectedGif
-                  ? "Add a message to go with your GIF…"
-                  : (placeholder ?? "Message… (Shift+Enter for new line)")
-            }
+            placeholder={derivedPlaceholder}
             rows={1}
             $maxHeight={maxHeight}
             maxLength={MAX_CHARS}
@@ -1029,7 +1408,9 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
               ? "Message contains a reserved system tag"
               : imageIsUploading
                 ? "Image is still uploading…"
-                : "Send message"
+                : attachmentIsUploading
+                  ? "File is still uploading…"
+                  : "Send message"
           }
           type="button"
         >

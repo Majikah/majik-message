@@ -54,7 +54,7 @@ import {
 import { useShepherd } from "@/lib/shepherd-js/use-shepherd";
 import GuideHelper from "./GuideHelper";
 import { launchTutorialCloudStorage } from "@/lib/shepherd-js/tutorials/tutorial-cloud-storage";
-import { MajikContact } from "@majikah/majik-contact";
+import { MajikContact, MajikContactGroup } from "@majikah/majik-contact";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const FONT_MONO = "'Fira Mono', 'JetBrains Mono', monospace";
@@ -1456,6 +1456,7 @@ interface InlineRecipientPickerProps {
   pendingId: string;
   recipients: MajikContact[];
   contacts: MajikContact[];
+  groups: MajikContactGroup[];
   onUpdate: (id: string, updated: MajikContact[]) => void;
   isReEncrypting: boolean;
 }
@@ -1464,6 +1465,7 @@ const InlineRecipientPicker: React.FC<InlineRecipientPickerProps> = ({
   pendingId,
   recipients,
   contacts,
+  groups,
   onUpdate,
   isReEncrypting,
 }) => {
@@ -1480,6 +1482,7 @@ const InlineRecipientPicker: React.FC<InlineRecipientPickerProps> = ({
       <MajikContactListSelector
         id={`recipients-${pendingId}`}
         contacts={contacts}
+        groups={groups}
         value={recipients}
         onUpdate={(updated) => onUpdate(pendingId, updated)}
         allowEmpty={false}
@@ -1516,6 +1519,7 @@ export interface UserFilesProps {
   majik: MajikMessageDatabase;
   uploadContext?: FileContext;
   contacts?: MajikContact[];
+  groups?: MajikContactGroup[];
   defaultRecipients?: MajikContact[];
 }
 
@@ -1525,6 +1529,7 @@ const UserFiles: React.FC<UserFilesProps> = ({
   majik,
   uploadContext = "user_upload",
   contacts = [],
+  groups = [],
   defaultRecipients = [],
 }) => {
   const tour = useShepherd();
@@ -2656,6 +2661,7 @@ const UserFiles: React.FC<UserFilesProps> = ({
                         pendingId={pf.id}
                         recipients={pf.recipients}
                         contacts={contacts}
+                        groups={groups}
                         onUpdate={setPendingRecipients}
                         isReEncrypting={
                           pf.majikFile === undefined && pf.recipients.length > 0

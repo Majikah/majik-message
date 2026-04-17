@@ -3,11 +3,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PopUpFormButton from "@/components/foundations/PopUpFormButton";
 import {
   HandshakeIcon,
+  KeyboardIcon,
   ListIcon,
   PencilIcon,
   PlusIcon,
   SquaresFourIcon,
   StarIcon,
+  UploadSimpleIcon,
   UserIcon,
   UserPlusIcon,
   UsersThreeIcon,
@@ -22,10 +24,14 @@ import { useShepherd } from "@/lib/shepherd-js/use-shepherd";
 import { launchTutorialContacts } from "@/lib/shepherd-js/tutorials/tutorial-contacts";
 import ContactRow from "../base/ContactRow";
 import UserContactInvitations from "../functional/UserContactInvitations";
-import { MajikContactGroup } from "@majikah/majik-contact";
+import { MajikContact, MajikContactGroup } from "@majikah/majik-contact";
 import GroupManagerDrawer from "../functional/GroupManagerDrawer";
 import DynamicSlidingDialogue from "../functional/DynamicSlidingDialogue";
 import CustomColorPicker from "@/components/foundations/CustomColorPicker";
+import DropImportContact from "../foundations/DropImportContact";
+import { MajikBytes } from "@majikah/majik-bytes";
+import { save } from "@tauri-apps/plugin-dialog";
+import { writeFile } from "@tauri-apps/plugin-fs";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const MAX_CONTACTS_LIMIT = 1000;
@@ -509,6 +515,39 @@ const EmptyHint = styled.p`
   opacity: 0.6;
 `;
 
+// ─── Import mode toggle ───────────────────────────────────────────────────────
+const ImportModeToggle = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+`;
+
+const ModeToggleButton = styled.button<{ $active: boolean }>`
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid
+    ${({ theme, $active }) =>
+      $active ? theme.colors.primary : theme.colors.secondaryBackground};
+  background: ${({ theme, $active }) =>
+    $active ? `${theme.colors.primary}18` : theme.colors.secondaryBackground};
+  color: ${({ theme, $active }) =>
+    $active ? theme.colors.primary : theme.colors.textSecondary};
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  letter-spacing: 0.02em;
+
+  &:hover {
+    border-color: ${({ theme }) => theme.colors.primary};
+    color: ${({ theme }) => theme.colors.primary};
+  }
+`;
+
 // ─── Props ────────────────────────────────────────────────────────────────────
 interface ContactsPanelProps {
   majik: MajikMessageDatabase;
@@ -541,6 +580,9 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({ majik, onUpdate }) => {
     DEFAULT_GROUP_COLOR,
   ]);
   const [isGroupDrawerOpen, setIsGroupDrawerOpen] = useState(false);
+
+  // ── Import mode: "drop" | "manual" ────────────────────────────────────────
+  const [importMode, setImportMode] = useState<"drop" | "manual">("drop");
 
   // ── Contacts ───────────────────────────────────────────────────────────────
   const contacts = useMemo(() => {
@@ -725,6 +767,57 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({ majik, onUpdate }) => {
     }
   };
 
+  const handleDownloadCard = async (input: MajikContact): Promise<void> => {
+    const s = await majik.exportContactAsString(input.id);
+    if (!s) {
+      toast.error("Failed to download", {
+        id: `toast-error-download-${input.id}`,
+      });
+      return;
+    }
+
+    try {
+      const majikByte = await MajikBytes.create(s);
+
+      const mbyteFile = await majikByte.toPNG();
+
+      const defaultName = `${input?.meta?.label || input.id} - Contact Card PNG`;
+
+      // Open the native save dialog
+      const filePath = await save({
+        defaultPath: defaultName,
+        filters: [
+          {
+            name: "Contact Card PNG",
+            extensions: ["png"],
+          },
+        ],
+      });
+
+      // User cancelled the dialog
+      if (!filePath) {
+        toast.info("Contact Card export cancelled", {
+          id: `toast-info-download-${input.id}`,
+        });
+        return;
+      } else {
+        // Convert blob → Uint8Array and write to the chosen path
+        const arrayBuffer = await mbyteFile.arrayBuffer();
+        await writeFile(filePath, new Uint8Array(arrayBuffer));
+      }
+
+      toast.success("Contact Card exported successfully", {
+        id: `toast-success-download-${input.id}`,
+      });
+    } catch (err) {
+      toast.error("Failed to copy", {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        description: (err as any)?.message || err,
+        id: `toast-error-share-${input.id}`,
+      });
+    }
+  };
+
   const scrollToLetter = useCallback(
     (letter: string) => {
       if (!grouped[letter]) return;
@@ -742,6 +835,15 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({ majik, onUpdate }) => {
     },
     [grouped],
   );
+
+  // ── Drop import handlers ───────────────────────────────────────────────────
+  const handleDropFileLoaded = (input: string): void => {
+    setInviteKey(input);
+  };
+
+  const handleDropClear = (): void => {
+    setInviteKey("");
+  };
 
   const atLimitContact = contacts.length >= MAX_CONTACTS_LIMIT;
   const atLimitGroup = groups.length >= MAX_GROUPS_LIMIT;
@@ -816,15 +918,53 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({ majik, onUpdate }) => {
               confirm: { text: "Save Changes", onClick: handleAddContact },
             }}
           >
-            <CustomInputField
-              currentValue={inviteKey}
-              onChange={(e) => setInviteKey(e)}
-              maxChar={10000}
-              label="Invite Key"
-              required
-              importProp={{ type: "txt" }}
-              sensitive={true}
-            />
+            {/* Mode toggle */}
+            <ImportModeToggle>
+              <ModeToggleButton
+                $active={importMode === "drop"}
+                onClick={() => {
+                  setImportMode("drop");
+                  handleDropClear();
+                }}
+                type="button"
+              >
+                <UploadSimpleIcon size={12} />
+                Backup file
+              </ModeToggleButton>
+              <ModeToggleButton
+                $active={importMode === "manual"}
+                onClick={() => {
+                  setImportMode("manual");
+                  handleDropClear();
+                }}
+                type="button"
+              >
+                <KeyboardIcon size={12} />
+                Enter manually
+              </ModeToggleButton>
+            </ImportModeToggle>
+
+            {/* Drop zone */}
+            {importMode === "drop" && (
+              <DropImportContact
+                inviteKey={inviteKey}
+                onFileLoaded={handleDropFileLoaded}
+                onClear={handleDropClear}
+              />
+            )}
+
+            {/* Manual input (existing flow) */}
+            {importMode === "manual" && (
+              <CustomInputField
+                currentValue={inviteKey}
+                onChange={(e) => setInviteKey(e)}
+                maxChar={10000}
+                label="Invite Key"
+                required
+                importProp={{ type: "txt" }}
+                sensitive={true}
+              />
+            )}
           </PopUpFormButton>
         </HeaderActions>
       </PanelHeader>
@@ -991,6 +1131,7 @@ const ContactsPanel: React.FC<ContactsPanelProps> = ({ majik, onUpdate }) => {
                   itemData={c}
                   onDelete={() => handleDelete(c.id)}
                   onUpdateName={(name) => handleEditLabel(c.id, name)}
+                  onDownload={() => handleDownloadCard(c)}
                 />
               ))}
             </Grid>

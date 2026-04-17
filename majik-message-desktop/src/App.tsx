@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type JSX } from "react";
 
 import { toast } from "sonner";
 
-import styled, { keyframes } from "styled-components";
+import styled from "styled-components";
 
 import {
   AddressBookIcon,
@@ -12,7 +12,6 @@ import {
   LinkIcon,
   StarFourIcon,
   UserIcon,
-  WarningDiamondIcon,
 } from "@phosphor-icons/react";
 import { useMajik } from "./components/majik-context-wrapper/use-majik";
 import {
@@ -64,6 +63,7 @@ import { useFirebaseTauriPush } from "./lib/firebase/use-firebase-notifications"
 import { MajikContact } from "@majikah/majik-contact";
 import { useMajikahNotifications } from "./components/majikah-notification-wrapper/use-majikah-notifications";
 import { useMajikTutorials } from "./hooks/use-majik-tutorials";
+import DynamicAlertBanner from "./components/foundations/DynamicAlertBanner";
 
 const RootContainer = styled.div`
   display: flex;
@@ -73,53 +73,6 @@ const RootContainer = styled.div`
   background-color: ${({ theme }) => theme.colors.primaryBackground};
   height: 100vh;
   width: 100vw;
-`;
-
-// ─── Animations ───────────────────────────────────────────────────────────────
-const fadeIn = keyframes`
-  from { opacity: 0; transform: translateY(4px); }
-  to   { opacity: 1; transform: translateY(0); }
-`;
-
-// ─── Security warning ─────────────────────────────────────────────────────────
-const SecurityWarning = styled.div`
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: rgba(220, 60, 60, 0.07);
-  border: 1px solid rgba(220, 60, 60, 0.22);
-  margin-bottom: 2em;
-  animation: ${fadeIn} 0.2s ease;
-`;
-
-const SecurityWarningIcon = styled.div`
-  flex-shrink: 0;
-  color: #e05050;
-  margin-top: 1px;
-`;
-
-const SecurityWarningBody = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-`;
-
-const SecurityWarningTitle = styled.p`
-  font-size: 11px;
-  font-weight: 700;
-  color: #e05050;
-  margin: 0;
-  letter-spacing: 0.02em;
-`;
-
-const SecurityWarningText = styled.p`
-  font-size: 11px;
-  color: ${({ theme }) => theme.colors.textSecondary};
-  margin: 0;
-  line-height: 1.5;
-  opacity: 0.8;
 `;
 
 const MAX_ACCOUNT_LIMIT = 25;
@@ -746,19 +699,15 @@ function App(): JSX.Element {
           }}
         >
           {/* Security warning */}
-          <SecurityWarning>
-            <SecurityWarningIcon>
-              <WarningDiamondIcon size={15} weight="fill" />
-            </SecurityWarningIcon>
-            <SecurityWarningBody>
-              <SecurityWarningTitle>Keep this private</SecurityWarningTitle>
-              <SecurityWarningText>
+          <DynamicAlertBanner
+            title="Keep this private"
+            description={`
                 Never share your seed phrase or backup JSON file with anyone.
                 Anyone who has them gains full access to your account. Store
                 your backup in a safe, offline location.
-              </SecurityWarningText>
-            </SecurityWarningBody>
-          </SecurityWarning>
+          `}
+            level="danger"
+          />
           <CustomInputField
             onChange={(e) => setLabel(e)}
             maxChar={100}
