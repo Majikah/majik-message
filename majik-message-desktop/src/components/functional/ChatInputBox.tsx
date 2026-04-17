@@ -13,6 +13,8 @@ import {
   XIcon,
   ImageIcon,
   PaperclipIcon,
+  MicrophoneIcon,
+  ArrowLeftIcon,
 } from "@phosphor-icons/react";
 import { toast } from "sonner";
 
@@ -28,47 +30,29 @@ import Picker from "@emoji-mart/react";
 import { Grid } from "@giphy/react-components";
 import type { MajikahSession } from "../majikah-session-wrapper/majikah-session";
 import { isReserved } from "../base/_message_parsers";
+import { VoiceMessageRecorder } from "./VoiceMessageRecorder";
 
 // ─── Local tokens ─────────────────────────────────────────────────────────────
 const FONT_MONO = "'Fira Mono', 'JetBrains Mono', monospace";
 const MAX_CHARS = 10000;
 
 // ─── Image upload constants ───────────────────────────────────────────────────
-const IMAGE_MAX_BYTES = 10 * 1024 * 1024; // 10 MB
-const IMAGE_MAX_DIMENSION = 4000; // px
+const IMAGE_MAX_BYTES = 10 * 1024 * 1024;
+const IMAGE_MAX_DIMENSION = 4000;
 const IMAGE_ACCEPT = "image/jpeg,image/jpg,image/png,image/webp";
 const IMAGE_ACCEPT_EXTS = ["jpg", "jpeg", "png", "webp"];
 
 // ─── Attachment upload constants ──────────────────────────────────────────────
-const ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024; // 25 MB
+const ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024;
 
-/**
- * MIME types that should be redirected to the image upload path instead of
- * being treated as a generic file attachment.
- */
 const ATTACHMENT_IMAGE_MIMES = new Set([
   "image/jpeg",
   "image/jpg",
   "image/png",
   "image/webp",
 ]);
-
-/**
- * File extensions that should be redirected to the image upload path.
- */
 const ATTACHMENT_IMAGE_EXTS = new Set(["jpg", "jpeg", "png", "webp"]);
-
-/**
- * MIME types that are explicitly blocked regardless of extension.
- * Add more as policy dictates.
- */
-const ATTACHMENT_BLOCKED_MIMES = new Set<string>([
-  // e.g. "application/x-msdownload" — leave empty for now; block at infra layer
-]);
-
-/**
- * Extensions that are explicitly blocked for safety.
- */
+const ATTACHMENT_BLOCKED_MIMES = new Set<string>([]);
 const ATTACHMENT_BLOCKED_EXTS = new Set([
   "bat",
   "cmd",
@@ -110,31 +94,24 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-// ─── Image validation ─────────────────────────────────────────────────────────
+// ─── Validation ───────────────────────────────────────────────────────────────
 async function validateImageFile(file: File): Promise<string | null> {
   const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
-  if (!IMAGE_ACCEPT_EXTS.includes(ext)) {
+  if (!IMAGE_ACCEPT_EXTS.includes(ext))
     return `Unsupported format "${ext}". Allowed: ${IMAGE_ACCEPT_EXTS.join(", ")}`;
-  }
-  if (file.size > IMAGE_MAX_BYTES) {
-    const mb = (file.size / 1024 / 1024).toFixed(1);
-    return `Image too large (${mb} MB). Maximum is 10 MB.`;
-  }
+  if (file.size > IMAGE_MAX_BYTES)
+    return `Image too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Max 10 MB.`;
   return new Promise((resolve) => {
     const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => {
       URL.revokeObjectURL(url);
-      if (
+      resolve(
         img.naturalWidth > IMAGE_MAX_DIMENSION ||
-        img.naturalHeight > IMAGE_MAX_DIMENSION
-      ) {
-        resolve(
-          `Image too large (${img.naturalWidth}×${img.naturalHeight}px). Maximum is ${IMAGE_MAX_DIMENSION}×${IMAGE_MAX_DIMENSION}px.`,
-        );
-      } else {
-        resolve(null);
-      }
+          img.naturalHeight > IMAGE_MAX_DIMENSION
+          ? `Image dimensions too large. Max ${IMAGE_MAX_DIMENSION}×${IMAGE_MAX_DIMENSION}px.`
+          : null,
+      );
     };
     img.onerror = () => {
       URL.revokeObjectURL(url);
@@ -144,80 +121,825 @@ async function validateImageFile(file: File): Promise<string | null> {
   });
 }
 
-// ─── Attachment validation ────────────────────────────────────────────────────
-
-/** Returned when the file is an image and should be handled by the image path */
 export const ATTACHMENT_IS_IMAGE = "IS_IMAGE" as const;
 
-/**
- * Validates a file for the generic attachment upload path.
- *
- * Returns:
- *  - `ATTACHMENT_IS_IMAGE` — file is an image; caller should redirect to image handler
- *  - `null`                — valid attachment, proceed
- *  - `string`              — error message, reject the file
- */
 export async function validateAttachmentFile(
   file: File,
 ): Promise<typeof ATTACHMENT_IS_IMAGE | string | null> {
   const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
   const mime = file.type.toLowerCase();
-
-  // ── Image redirect ──────────────────────────────────────────────────────
-  if (ATTACHMENT_IMAGE_MIMES.has(mime) || ATTACHMENT_IMAGE_EXTS.has(ext)) {
+  if (ATTACHMENT_IMAGE_MIMES.has(mime) || ATTACHMENT_IMAGE_EXTS.has(ext))
     return ATTACHMENT_IS_IMAGE;
-  }
-
-  // ── Blocked extensions ──────────────────────────────────────────────────
-  if (ATTACHMENT_BLOCKED_EXTS.has(ext)) {
+  if (ATTACHMENT_BLOCKED_EXTS.has(ext))
     return `Files with extension ".${ext}" are not allowed.`;
-  }
-
-  // ── Blocked MIME types ──────────────────────────────────────────────────
-  if (ATTACHMENT_BLOCKED_MIMES.has(mime)) {
+  if (ATTACHMENT_BLOCKED_MIMES.has(mime))
     return `Files of type "${mime}" are not allowed.`;
-  }
-
-  // ── Size check ──────────────────────────────────────────────────────────
-  if (file.size > ATTACHMENT_MAX_BYTES) {
-    const mb = (file.size / 1024 / 1024).toFixed(1);
-    return `File too large (${mb} MB). Maximum is 25 MB.`;
-  }
-
-  // ── Empty file guard ────────────────────────────────────────────────────
-  if (file.size === 0) {
-    return "Cannot attach an empty file.";
-  }
-
+  if (file.size > ATTACHMENT_MAX_BYTES)
+    return `File too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Max 25 MB.`;
+  if (file.size === 0) return "Cannot attach an empty file.";
   return null;
 }
 
 // ─── Giphy client fetchers ────────────────────────────────────────────────────
-
 const buildTrendingFetcher =
   () => async (offset: number, majikah: MajikahSession) => {
-    const queryKey = `__TRENDING__:${offset}:20`;
-    const cached = await loadQueryResult(queryKey);
+    const key = `__TRENDING__:${offset}:20`;
+    const cached = await loadQueryResult(key);
     if (cached) return cached;
     const result = await majikah.apiClient.get<API_RESPONSE_GIPHY_RESULT>(
       `/giphy/trending?offset=${offset}&limit=20`,
     );
-    await saveQueryResult(queryKey, result.data);
+    await saveQueryResult(key, result.data);
     return result.data;
   };
 
 const buildSearchFetcher =
   (query: string) => async (offset: number, majikah: MajikahSession) => {
-    const normalized = query.trim().toLowerCase();
-    const queryKey = `${normalized}:${offset}:20`;
-    const cached = await loadQueryResult(queryKey);
+    const norm = query.trim().toLowerCase();
+    const key = `${norm}:${offset}:20`;
+    const cached = await loadQueryResult(key);
     if (cached) return cached;
     const result = await majikah.apiClient.get<API_RESPONSE_GIPHY_RESULT>(
-      `/giphy/search?q=${encodeURIComponent(normalized)}&offset=${offset}&limit=20`,
+      `/giphy/search?q=${encodeURIComponent(norm)}&offset=${offset}&limit=20`,
     );
-    await saveQueryResult(queryKey, result.data);
+    await saveQueryResult(key, result.data);
     return result.data;
   };
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+type PickerMode = "emoji" | "gif" | null;
+
+export type ImageUploadStatus =
+  | "validating"
+  | "scanning"
+  | "encrypting"
+  | "uploading"
+  | "ready"
+  | "error";
+
+export type AttachmentUploadStatus =
+  | "validating"
+  | "scanning"
+  | "encrypting"
+  | "uploading"
+  | "ready"
+  | "error";
+
+export type VoiceUploadStatus =
+  | "pending"
+  | "encrypting"
+  | "uploading"
+  | "ready"
+  | "error";
+
+export interface SelectedImageState {
+  file: File;
+  previewUrl: string;
+  status: ImageUploadStatus;
+  errorMessage?: string;
+}
+
+export interface SelectedAttachmentState {
+  file: File;
+  status: AttachmentUploadStatus;
+  errorMessage?: string;
+}
+
+export interface SelectedVoiceState {
+  blob: Blob;
+  status: VoiceUploadStatus;
+  errorMessage?: string;
+  durationSeconds?: number;
+}
+
+interface ChatInputBoxProps {
+  majikah: MajikahSession;
+  onSend: (text: string) => Promise<void> | void;
+  onUpdate?: (text: string) => void;
+  placeholder?: string;
+  maxHeight?: number;
+  disabled?: boolean;
+  sendOnEnter?: boolean;
+  enableGIF?: boolean;
+  enableEmoji?: boolean;
+  enableImageUpload?: boolean;
+  enableFileUpload?: boolean;
+  enableVoiceMessage?: boolean;
+  onSelectImage?: (file: File) => void;
+  imageUploadState?: SelectedImageState | null;
+  onDismissImage?: () => void;
+  onSelectAttachment?: (file: File) => void;
+  attachmentUploadState?: SelectedAttachmentState | null;
+  onDismissAttachment?: () => void;
+  /** Called when the user confirms a voice recording */
+  onSelectVoice?: (blob: Blob) => void;
+  voiceUploadState?: SelectedVoiceState | null;
+  onDismissVoice?: () => void;
+}
+
+const RESERVED_TOAST_ID = "majik-reserved-input-warning";
+
+// ─── Component ────────────────────────────────────────────────────────────────
+export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
+  majikah,
+  onSend,
+  onUpdate,
+  placeholder,
+  maxHeight = 200,
+  disabled = false,
+  sendOnEnter = true,
+  enableGIF = true,
+  enableEmoji = true,
+  enableImageUpload = false,
+  enableFileUpload = false,
+  enableVoiceMessage = true,
+  onSelectImage,
+  imageUploadState,
+  onDismissImage,
+  onSelectAttachment,
+  attachmentUploadState,
+  onDismissAttachment,
+  onSelectVoice,
+  voiceUploadState,
+  onDismissVoice,
+}) => {
+  const [value, setValue] = useState("");
+  const [focused, setFocused] = useState(false);
+  const [pickerMode, setPickerMode] = useState<PickerMode>(null);
+  const [selectedGif, setSelectedGif] = useState<IGif | null>(null);
+  const [gifQuery, setGifQuery] = useState("");
+  const [debouncedGifQuery, setDebouncedGifQuery] = useState("");
+  const [gifGridKey, setGifGridKey] = useState(0);
+
+  // Voice mode: "idle" = normal text UI; "active" = recorder has taken over
+  const [voiceMode, setVoiceMode] = useState<"idle" | "active">("idle");
+
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const popoverRef = useRef<HTMLDivElement | null>(null);
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const attachmentInputRef = useRef<HTMLInputElement | null>(null);
+  const onEmojiSelectRef = useRef<(emoji: { native: string }) => void>(
+    () => {},
+  );
+
+  // ── Auto-resize textarea ────────────────────────────────────────────────
+  useLayoutEffect(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    ta.style.height = "auto";
+    ta.style.height = `${Math.min(ta.scrollHeight, maxHeight)}px`;
+  }, [value, maxHeight]);
+
+  // ── Close picker on outside click ───────────────────────────────────────
+  useEffect(() => {
+    if (!pickerMode) return;
+    const handle = (e: MouseEvent) => {
+      if (
+        popoverRef.current &&
+        !popoverRef.current.contains(e.target as Node) &&
+        wrapperRef.current &&
+        !wrapperRef.current.contains(e.target as Node)
+      )
+        setPickerMode(null);
+    };
+    document.addEventListener("mousedown", handle);
+    return () => document.removeEventListener("mousedown", handle);
+  }, [pickerMode]);
+
+  // ── GIF search debounce ─────────────────────────────────────────────────
+  const debouncedSetQuery = useMemo(
+    () =>
+      debounce((q: string) => {
+        setDebouncedGifQuery(q);
+        setGifGridKey((k) => k + 1);
+      }, 400),
+    [],
+  );
+  useEffect(() => () => debouncedSetQuery.cancel(), [debouncedSetQuery]);
+
+  const handleGifQueryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const q = e.target.value;
+    setGifQuery(q);
+    debouncedSetQuery(q);
+  };
+
+  const fetchGifs = useMemo(
+    () =>
+      debouncedGifQuery.trim()
+        ? buildSearchFetcher(debouncedGifQuery.trim())
+        : buildTrendingFetcher(),
+    [debouncedGifQuery],
+  );
+
+  const handleGifSelect = useCallback((gif: IGif, e: React.SyntheticEvent) => {
+    e.preventDefault();
+    setSelectedGif(gif);
+    setPickerMode(null);
+    setGifQuery("");
+    setDebouncedGifQuery("");
+  }, []);
+
+  // ── Emoji insertion ─────────────────────────────────────────────────────
+  const insertEmoji = useCallback(
+    (emoji: { native: string }) => {
+      const ta = textareaRef.current;
+      const native = emoji.native;
+      if (!native) return;
+      if (ta) {
+        const start = ta.selectionStart ?? value.length;
+        const end = ta.selectionEnd ?? value.length;
+        const newValue = value.slice(0, start) + native + value.slice(end);
+        if (newValue.length <= MAX_CHARS) {
+          setValue(newValue);
+          onUpdate?.(newValue);
+          requestAnimationFrame(() => {
+            ta.focus();
+            const pos = start + native.length;
+            ta.setSelectionRange(pos, pos);
+          });
+        }
+      } else {
+        const newValue = value + native;
+        if (newValue.length <= MAX_CHARS) {
+          setValue(newValue);
+          onUpdate?.(newValue);
+        }
+      }
+    },
+    [value, onUpdate],
+  );
+  onEmojiSelectRef.current = insertEmoji;
+
+  const togglePicker = (mode: PickerMode) =>
+    setPickerMode((p) => (p === mode ? null : mode));
+
+  // ── Image file picker ───────────────────────────────────────────────────
+  const handleImageInputChange = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      e.target.value = "";
+      if (!file || !onSelectImage) return;
+      const err = await validateImageFile(file);
+      if (err) {
+        toast.error("Image rejected", {
+          description: err,
+          id: "toast-img-validation",
+          duration: 6000,
+        });
+        return;
+      }
+      onSelectImage(file);
+    },
+    [onSelectImage],
+  );
+
+  // ── Attachment file picker ──────────────────────────────────────────────
+  const handleAttachmentInputChange = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      e.target.value = "";
+      if (!file) return;
+      const result = await validateAttachmentFile(file);
+      if (result === ATTACHMENT_IS_IMAGE) {
+        if (!onSelectImage) {
+          toast.error("Image uploads not enabled here.", {
+            id: "toast-attachment-img-redirect-disabled",
+          });
+          return;
+        }
+        const imageErr = await validateImageFile(file);
+        if (imageErr) {
+          toast.error("Image rejected", {
+            description: imageErr,
+            id: "toast-img-validation",
+            duration: 6000,
+          });
+          return;
+        }
+        toast.info("Detected image — handling as image upload.", {
+          id: "toast-attachment-img-redirect",
+          duration: 3000,
+        });
+        onSelectImage(file);
+        return;
+      }
+      if (result !== null) {
+        toast.error("Attachment rejected", {
+          description: result,
+          id: "toast-attachment-validation",
+          duration: 6000,
+        });
+        return;
+      }
+      onSelectAttachment?.(file);
+    },
+    [onSelectImage, onSelectAttachment],
+  );
+
+  // ── Voice handlers ──────────────────────────────────────────────────────
+  const handleVoiceRecordDone = useCallback(
+    (blob: Blob) => {
+      // Recorder moves to preview phase on its own; we notify parent to start processing
+      onSelectVoice?.(blob);
+      // Keep voice mode "active" so the recorder's preview UI is shown
+    },
+    [onSelectVoice],
+  );
+
+  const handleVoiceCancel = useCallback(() => {
+    setVoiceMode("idle");
+    onDismissVoice?.();
+  }, [onDismissVoice]);
+
+  // When user double-clicks mic (hands-free start) or long-presses, activate voice mode
+  // The recorder itself manages its internal phase; we just need to show it
+  const handleMicActivate = useCallback(() => {
+    if (disabled) return;
+    setVoiceMode("active");
+  }, [disabled]);
+
+  // ── Reserved system message guard ───────────────────────────────────────
+  const inputIsReserved = isReserved(value);
+
+  // ── Derived image/attachment/voice state ────────────────────────────────
+  const imageIsUploading = [
+    "validating",
+    "scanning",
+    "encrypting",
+    "uploading",
+  ].includes(imageUploadState?.status ?? "");
+  const imageIsReady = imageUploadState?.status === "ready";
+  const imageHasError = imageUploadState?.status === "error";
+  const imageStatusLabel = statusLabel(
+    imageUploadState?.status,
+    imageUploadState?.errorMessage,
+  );
+
+  const attachmentIsUploading = [
+    "validating",
+    "scanning",
+    "encrypting",
+    "uploading",
+  ].includes(attachmentUploadState?.status ?? "");
+  const attachmentIsReady = attachmentUploadState?.status === "ready";
+  const attachmentHasError = attachmentUploadState?.status === "error";
+  const attachmentStatusLabel = statusLabel(
+    attachmentUploadState?.status,
+    attachmentUploadState?.errorMessage,
+  );
+  const attachmentExt =
+    attachmentUploadState?.file.name.split(".").pop()?.toUpperCase() ?? "FILE";
+
+  const voiceIsUploading = ["encrypting", "uploading"].includes(
+    voiceUploadState?.status ?? "",
+  );
+  const voiceIsReady = voiceUploadState?.status === "ready";
+  const voiceHasError = voiceUploadState?.status === "error";
+  const voiceStatusLabel = statusLabel(
+    voiceUploadState?.status,
+    voiceUploadState?.errorMessage,
+  );
+
+  // ── Send ─────────────────────────────────────────────────────────────────
+  const handleSend = async () => {
+    if (inputIsReserved) {
+      toast.error("Message contains reserved content.", {
+        description: "System tags cannot be sent manually.",
+        id: RESERVED_TOAST_ID,
+      });
+      return;
+    }
+    if (disabled) {
+      toast.error("Assign recipients first.");
+      return;
+    }
+    if (imageUploadState && imageIsUploading) {
+      toast.info("Please wait — image is still uploading.");
+      return;
+    }
+    if (attachmentUploadState && attachmentIsUploading) {
+      toast.info("Please wait — file is still uploading.");
+      return;
+    }
+    if (voiceUploadState && voiceIsUploading) {
+      toast.info("Please wait — voice message is still uploading.");
+      return;
+    }
+
+    const gifUrl = selectedGif?.images?.original?.url ?? null;
+    const composed = composeMessageWithGif(value, gifUrl);
+
+    if (!composed && !imageIsReady && !attachmentIsReady && !voiceIsReady)
+      return;
+
+    try {
+      await onSend(composed);
+      setValue("");
+      setSelectedGif(null);
+      onUpdate?.(composed);
+      if (voiceIsReady) {
+        setVoiceMode("idle");
+      }
+    } catch (err) {
+      console.error("Failed to send message", err);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      if (!sendOnEnter) return;
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const text = e.target.value;
+    if (text.length <= MAX_CHARS) {
+      setValue(text);
+      onUpdate?.(text);
+    } else {
+      const t = text.slice(0, MAX_CHARS);
+      setValue(t);
+      onUpdate?.(t);
+      toast.error("Message too long", {
+        description: `Limited to ${MAX_CHARS.toLocaleString()} characters.`,
+      });
+    }
+  };
+
+  // ── Derived ──────────────────────────────────────────────────────────────
+  const charCount = value.length;
+  const nearLimit = charCount > MAX_CHARS * 0.9;
+  const canSend =
+    !inputIsReserved &&
+    !imageIsUploading &&
+    !imageHasError &&
+    !attachmentIsUploading &&
+    !attachmentHasError &&
+    !voiceIsUploading &&
+    !voiceHasError &&
+    (value.trim().length > 0 ||
+      selectedGif !== null ||
+      imageIsReady ||
+      attachmentIsReady ||
+      voiceIsReady);
+
+  const gifPreviewUrl =
+    selectedGif?.images?.fixed_height_small?.url ??
+    selectedGif?.images?.fixed_height?.url ??
+    null;
+
+  const derivedPlaceholder = (() => {
+    if (imageUploadState) return "Add a caption for your image…";
+    if (attachmentUploadState) return "Add a message to go with your file…";
+    if (selectedGif) return "Add a message to go with your GIF…";
+    return placeholder ?? "Message… (Shift+Enter for new line)";
+  })();
+
+  // Activate voice mode when recorder first interaction detected
+  // We intercept pointerdown on the mic button via a wrapper
+  const isVoiceActive = voiceMode === "active";
+
+  // ── Render ────────────────────────────────────────────────────────────────
+  return (
+    <Wrapper ref={wrapperRef}>
+      {enableImageUpload && (
+        <input
+          ref={imageInputRef}
+          type="file"
+          accept={IMAGE_ACCEPT}
+          hidden
+          onChange={handleImageInputChange}
+        />
+      )}
+      {enableFileUpload && (
+        <input
+          ref={attachmentInputRef}
+          type="file"
+          accept="*/*"
+          hidden
+          onChange={handleAttachmentInputChange}
+        />
+      )}
+
+      {/* Popover */}
+      {pickerMode && !isVoiceActive && (
+        <Popover ref={popoverRef} data-private>
+          {pickerMode === "emoji" && enableEmoji && (
+            <Picker
+              data={data}
+              theme="dark"
+              set="native"
+              previewPosition="none"
+              skinTonePosition="none"
+              onEmojiSelect={(emoji: { native: string }) =>
+                onEmojiSelectRef.current(emoji)
+              }
+            />
+          )}
+          {pickerMode === "gif" && enableGIF && (
+            <GifPanel>
+              <GifSearchBar>
+                <GifSearchInput
+                  value={gifQuery}
+                  onChange={handleGifQueryChange}
+                  placeholder="Search GIFs or browse trending…"
+                  autoFocus
+                  data-private
+                />
+              </GifSearchBar>
+              <GifGrid data-private>
+                <Grid
+                  key={gifGridKey}
+                  fetchGifs={(offset) => fetchGifs(offset, majikah)}
+                  width={316}
+                  columns={3}
+                  gutter={4}
+                  onGifClick={handleGifSelect}
+                  noLink
+                  hideAttribution
+                />
+              </GifGrid>
+              <GifAttribution>Powered by GIPHY</GifAttribution>
+            </GifPanel>
+          )}
+        </Popover>
+      )}
+
+      {/* GIF preview */}
+      {selectedGif && gifPreviewUrl && enableGIF && !isVoiceActive && (
+        <GifPreviewStrip>
+          <GifPreviewThumb>
+            <GifPreviewImg
+              src={gifPreviewUrl}
+              alt={selectedGif.title ?? "GIF"}
+              data-private
+            />
+            <DismissBtn
+              onClick={() => setSelectedGif(null)}
+              title="Remove GIF"
+              type="button"
+            >
+              <XIcon size={10} weight="bold" />
+            </DismissBtn>
+          </GifPreviewThumb>
+          <GifPreviewLabel>GIF attached · tap to replace</GifPreviewLabel>
+        </GifPreviewStrip>
+      )}
+
+      {/* Image preview */}
+      {enableImageUpload && imageUploadState && !isVoiceActive && (
+        <ImagePreviewStrip>
+          <ImagePreviewThumb>
+            <ImagePreviewImg
+              src={imageUploadState.previewUrl}
+              alt="Selected image"
+              data-private
+            />
+            <DismissBtn
+              onClick={onDismissImage}
+              title="Remove image"
+              type="button"
+            >
+              <XIcon size={10} weight="bold" />
+            </DismissBtn>
+          </ImagePreviewThumb>
+          <ImagePreviewMeta>
+            <ImagePreviewLabel>
+              {imageIsReady ? "Image attached" : "Processing image…"}
+            </ImagePreviewLabel>
+            <UploadStatus $uploading={imageIsUploading} $error={imageHasError}>
+              {imageStatusLabel}
+            </UploadStatus>
+          </ImagePreviewMeta>
+        </ImagePreviewStrip>
+      )}
+
+      {/* Attachment preview */}
+      {enableFileUpload && attachmentUploadState && !isVoiceActive && (
+        <AttachmentPreviewStrip>
+          <AttachmentPreviewCard>
+            <AttachmentPreviewIcon>
+              <AttachmentExtBadge>{attachmentExt}</AttachmentExtBadge>
+            </AttachmentPreviewIcon>
+            <AttachmentPreviewInfo>
+              <AttachmentPreviewName title={attachmentUploadState.file.name}>
+                {attachmentUploadState.file.name}
+              </AttachmentPreviewName>
+              <AttachmentPreviewSize>
+                {formatBytes(attachmentUploadState.file.size)}
+              </AttachmentPreviewSize>
+              <UploadStatus
+                $uploading={attachmentIsUploading}
+                $error={attachmentHasError}
+              >
+                {attachmentStatusLabel}
+              </UploadStatus>
+            </AttachmentPreviewInfo>
+            <DismissBtn
+              onClick={onDismissAttachment}
+              title="Remove attachment"
+              type="button"
+              $absolute
+            >
+              <XIcon size={10} weight="bold" />
+            </DismissBtn>
+          </AttachmentPreviewCard>
+        </AttachmentPreviewStrip>
+      )}
+
+      {/* Voice upload status strip (shown when voice is ready/uploading after confirmation) */}
+      {enableVoiceMessage && voiceUploadState && isVoiceActive && (
+        <VoiceStatusStrip>
+          <VoiceStatusDot
+            $uploading={voiceIsUploading}
+            $ready={voiceIsReady}
+            $error={voiceHasError}
+          />
+          <VoiceStatusText $uploading={voiceIsUploading} $error={voiceHasError}>
+            {voiceStatusLabel}
+          </VoiceStatusText>
+        </VoiceStatusStrip>
+      )}
+
+      {/* Reserved warning */}
+      {inputIsReserved && !isVoiceActive && (
+        <ReservedWarning>
+          ⚠ Message contains a reserved system tag and cannot be sent.
+        </ReservedWarning>
+      )}
+
+      {/* Input row */}
+      <InputRow>
+        {/* Toolbar — hidden in voice mode */}
+        {!isVoiceActive && (
+          <Toolbar>
+            {enableEmoji && (
+              <ToolBtn
+                $active={pickerMode === "emoji"}
+                title="Emoji"
+                onClick={() => togglePicker("emoji")}
+                type="button"
+              >
+                <SmileyIcon
+                  size={15}
+                  weight={pickerMode === "emoji" ? "fill" : "regular"}
+                />
+              </ToolBtn>
+            )}
+            {enableGIF && (
+              <ToolBtn
+                $active={pickerMode === "gif" || selectedGif !== null}
+                title="GIF"
+                onClick={() => togglePicker("gif")}
+                type="button"
+              >
+                <GifLabel>GIF</GifLabel>
+              </ToolBtn>
+            )}
+            {enableImageUpload && (
+              <ToolBtn
+                $active={!!imageUploadState}
+                title="Upload image"
+                onClick={() => imageInputRef.current?.click()}
+                type="button"
+                disabled={!!imageUploadState}
+              >
+                <ImageIcon
+                  size={15}
+                  weight={imageUploadState ? "fill" : "regular"}
+                />
+              </ToolBtn>
+            )}
+            {enableFileUpload && (
+              <ToolBtn
+                $active={!!attachmentUploadState}
+                title="Attach file"
+                onClick={() => attachmentInputRef.current?.click()}
+                type="button"
+                disabled={!!attachmentUploadState}
+              >
+                <PaperclipIcon
+                  size={15}
+                  weight={attachmentUploadState ? "fill" : "regular"}
+                />
+              </ToolBtn>
+            )}
+          </Toolbar>
+        )}
+
+        {/* Main content area: textarea OR voice recorder */}
+        {isVoiceActive ? (
+          // Voice recorder takes up the entire middle area
+          <VoiceArea>
+            <MicToggleBtn
+              type="button"
+              disabled={disabled}
+              title="Record voice message"
+              onClick={handleVoiceCancel}
+            >
+              <ArrowLeftIcon size={16} weight="bold" />
+      
+            </MicToggleBtn>
+            <VoiceMessageRecorder
+              onRecordDone={handleVoiceRecordDone}
+              onCancel={handleVoiceCancel}
+              onError={(msg) => {
+                toast.error(msg);
+                setVoiceMode("idle");
+              }}
+              disabled={disabled}
+            />
+          </VoiceArea>
+        ) : (
+          <TextareaWrap $focused={focused} $reserved={inputIsReserved}>
+            <StyledTextarea
+              ref={textareaRef}
+              value={value}
+              onChange={handleChange}
+              onKeyDown={handleKeyDown}
+              onFocus={() => setFocused(true)}
+              onBlur={() => setFocused(false)}
+              placeholder={derivedPlaceholder}
+              rows={1}
+              $maxHeight={maxHeight}
+              maxLength={MAX_CHARS}
+              data-private="lipsum"
+            />
+            <InputMeta>
+              <CharCount $nearLimit={nearLimit}>
+                {charCount.toLocaleString()} / {MAX_CHARS.toLocaleString()}
+              </CharCount>
+              <KeyHint>↵ send · ⇧↵ new line</KeyHint>
+            </InputMeta>
+          </TextareaWrap>
+        )}
+
+        {/* Right-side actions */}
+        <RightActions>
+          {/* Mic toggle button — activates voice mode. Only shown when not in voice mode yet */}
+          {enableVoiceMessage && !isVoiceActive && (
+            <MicToggleBtn
+              type="button"
+              disabled={disabled}
+              title="Record voice message"
+              onClick={handleMicActivate}
+            >
+              <MicrophoneIcon size={16} weight="bold" />
+              <MicActivateHint>Hold or double-tap to record</MicActivateHint>
+            </MicToggleBtn>
+          )}
+
+          <SendBtn
+            onClick={handleSend}
+            disabled={!canSend}
+            title={
+              inputIsReserved
+                ? "Message contains a reserved system tag"
+                : imageIsUploading
+                  ? "Image is still uploading…"
+                  : attachmentIsUploading
+                    ? "File is still uploading…"
+                    : voiceIsUploading
+                      ? "Voice message is still uploading…"
+                      : "Send message"
+            }
+            type="button"
+          >
+            <PaperPlaneRightIcon size={16} weight="bold" />
+          </SendBtn>
+        </RightActions>
+      </InputRow>
+    </Wrapper>
+  );
+};
+
+// ─── Status label helper ──────────────────────────────────────────────────────
+function statusLabel(
+  status: string | undefined,
+  errorMessage?: string,
+): string {
+  switch (status) {
+    case "validating":
+      return "Validating…";
+    case "scanning":
+      return "Scanning…";
+    case "encrypting":
+      return "Encrypting…";
+    case "uploading":
+      return "Uploading…";
+    case "pending":
+      return "Pending…";
+    case "ready":
+      return "Ready to send";
+    case "error":
+      return errorMessage ?? "Upload failed";
+    default:
+      return "";
+  }
+}
 
 // ─── Styled components ────────────────────────────────────────────────────────
 
@@ -230,6 +952,8 @@ const Wrapper = styled.div`
   flex-shrink: 0;
   width: 100%;
 `;
+
+// ── Preview strips ────────────────────────────────────────────────────────────
 
 const GifPreviewStrip = styled.div`
   display: flex;
@@ -258,26 +982,6 @@ const GifPreviewImg = styled.img`
   object-fit: cover;
 `;
 
-const GifPreviewDismiss = styled.button`
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: rgba(0, 0, 0, 0.65);
-  border: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  color: rgba(255, 255, 255, 0.85);
-  transition: background 100ms;
-  &:hover {
-    background: rgba(0, 0, 0, 0.85);
-  }
-`;
-
 const GifPreviewLabel = styled.span`
   font-family: ${FONT_MONO};
   font-size: 9px;
@@ -286,8 +990,6 @@ const GifPreviewLabel = styled.span`
   opacity: 0.5;
   text-transform: uppercase;
 `;
-
-// ─── Image preview strip ──────────────────────────────────────────────────────
 
 const ImagePreviewStrip = styled.div`
   display: flex;
@@ -316,26 +1018,6 @@ const ImagePreviewImg = styled.img`
   object-fit: cover;
 `;
 
-const ImagePreviewDismiss = styled.button`
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: rgba(0, 0, 0, 0.65);
-  border: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  color: rgba(255, 255, 255, 0.85);
-  transition: background 100ms;
-  &:hover {
-    background: rgba(0, 0, 0, 0.85);
-  }
-`;
-
 const ImagePreviewMeta = styled.div`
   display: flex;
   flex-direction: column;
@@ -351,10 +1033,8 @@ const ImagePreviewLabel = styled.span`
   text-transform: uppercase;
 `;
 
-const ImagePreviewStatus = styled.span<{
-  $uploading?: boolean;
-  $error?: boolean;
-}>`
+/** Unified upload status label (replaces the three separate ones) */
+const UploadStatus = styled.span<{ $uploading?: boolean; $error?: boolean }>`
   font-family: ${FONT_MONO};
   font-size: 9px;
   letter-spacing: 0.04em;
@@ -362,8 +1042,6 @@ const ImagePreviewStatus = styled.span<{
     $error ? "#f06449" : $uploading ? "#f5a623" : "#3ecf8e"};
   opacity: 0.85;
 `;
-
-// ─── Attachment preview strip ─────────────────────────────────────────────────
 
 const AttachmentPreviewStrip = styled.div`
   display: flex;
@@ -398,7 +1076,7 @@ const AttachmentPreviewIcon = styled.div`
   color: #f5a623;
 `;
 
-const AttachmentPreviewExtBadge = styled.span`
+const AttachmentExtBadge = styled.span`
   font-family: ${FONT_MONO};
   font-size: 8px;
   font-weight: 700;
@@ -431,39 +1109,70 @@ const AttachmentPreviewSize = styled.span`
   opacity: 0.5;
 `;
 
-const AttachmentPreviewStatus = styled.span<{
-  $uploading?: boolean;
-  $error?: boolean;
-}>`
-  font-family: ${FONT_MONO};
-  font-size: 9px;
-  letter-spacing: 0.04em;
-  color: ${({ $uploading, $error }) =>
-    $error ? "#f06449" : $uploading ? "#f5a623" : "#3ecf8e"};
-  opacity: 0.85;
-`;
-
-const AttachmentPreviewDismiss = styled.button`
-  position: absolute;
-  top: 5px;
-  right: 5px;
+/** Shared dismiss button — absolute-positioned variant for card overlays */
+const DismissBtn = styled.button<{ $absolute?: boolean }>`
+  ${({ $absolute }) =>
+    $absolute &&
+    `
+    position: absolute;
+    top: 5px;
+    right: 5px;
+  `}
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background: rgba(0, 0, 0, 0.55);
+  background: rgba(0, 0, 0, 0.65);
   border: none;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  color: rgba(255, 255, 255, 0.75);
+  color: rgba(255, 255, 255, 0.85);
   transition: background 100ms;
   &:hover {
-    background: rgba(0, 0, 0, 0.8);
+    background: rgba(0, 0, 0, 0.85);
   }
 `;
 
-// ─── Reserved input warning banner ───────────────────────────────────────────
+// ── Voice status strip ────────────────────────────────────────────────────────
+
+const VoiceStatusStrip = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px 0;
+`;
+
+const VoiceStatusDot = styled.span<{
+  $uploading?: boolean;
+  $ready?: boolean;
+  $error?: boolean;
+}>`
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: ${({ $uploading, $ready, $error }) =>
+    $error
+      ? "#f06449"
+      : $ready
+        ? "#3ecf8e"
+        : $uploading
+          ? "#f5a623"
+          : "rgba(255,255,255,0.2)"};
+`;
+
+const VoiceStatusText = styled.span<{ $uploading?: boolean; $error?: boolean }>`
+  font-family: ${FONT_MONO};
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  color: ${({ $uploading, $error }) =>
+    $error ? "#f06449" : $uploading ? "#f5a623" : "#3ecf8e"};
+  opacity: 0.85;
+`;
+
+// ── Input row ─────────────────────────────────────────────────────────────────
+
 const ReservedWarning = styled.div`
   display: flex;
   align-items: center;
@@ -507,13 +1216,11 @@ const ToolBtn = styled.button<{ $active?: boolean }>`
     border-color 120ms ease,
     color 120ms ease,
     background 120ms ease;
-
   &:hover {
     background: ${({ theme }) => theme.colors.secondaryBackground};
     border-color: ${({ theme }) => theme.colors.textSecondary};
     color: ${({ theme }) => theme.colors.primary};
   }
-
   ${({ $active, theme }) =>
     $active &&
     css`
@@ -607,9 +1314,66 @@ const KeyHint = styled.span`
   opacity: 0.35;
 `;
 
+// ── Voice area ────────────────────────────────────────────────────────────────
+
+const VoiceArea = styled.div`
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  min-height: 48px;
+  gap: 0.5em;
+`;
+
+// ── Right actions column ──────────────────────────────────────────────────────
+
+const RightActions = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex-shrink: 0;
+  margin-top: 4px;
+`;
+
+const MicToggleBtn = styled.button`
+  width: 48px;
+  height: 48px;
+  border-radius: 10px;
+  border: none;
+  background: ${({ theme }) => theme.colors.secondaryBackground};
+  color: ${({ theme }) => theme.colors.primary};
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition:
+    opacity 120ms,
+    transform 120ms;
+  position: relative;
+  overflow: hidden;
+  &:hover:not(:disabled) {
+    opacity: 0.85;
+    transform: scale(1.05);
+  }
+  &:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+  }
+`;
+
+/** Visually hidden hint — the actual icon comes from VoiceMessageRecorder's mic button */
+const MicActivateHint = styled.span`
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  overflow: hidden;
+`;
+
 const SendBtn = styled.button`
-  width: 36px;
-  height: 36px;
+  width: 48px;
+  height: 48px;
   border-radius: 10px;
   border: none;
   background: ${({ theme }) => theme.gradients.strong};
@@ -619,7 +1383,6 @@ const SendBtn = styled.button`
   justify-content: center;
   cursor: pointer;
   flex-shrink: 0;
-  margin-top: 4px;
   transition:
     opacity 120ms ease,
     transform 120ms ease;
@@ -633,6 +1396,8 @@ const SendBtn = styled.button`
     transform: none;
   }
 `;
+
+// ── Popover ────────────────────────────────────────────────────────────────────
 
 const Popover = styled.div`
   position: absolute;
@@ -722,701 +1487,3 @@ const GifAttribution = styled.div`
   border-top: 1px solid ${({ theme }) => theme.colors.primaryBackground};
   flex-shrink: 0;
 `;
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-type PickerMode = "emoji" | "gif" | null;
-
-/** Status of an image being prepared for upload by the parent */
-export type ImageUploadStatus =
-  | "validating"
-  | "scanning"
-  | "encrypting"
-  | "uploading"
-  | "ready"
-  | "error";
-
-/** Status of a file attachment being prepared for upload by the parent */
-export type AttachmentUploadStatus =
-  | "validating"
-  | "scanning"
-  | "encrypting"
-  | "uploading"
-  | "ready"
-  | "error";
-
-export interface SelectedImageState {
-  file: File;
-  /** Object URL for preview — revoke when done */
-  previewUrl: string;
-  status: ImageUploadStatus;
-  errorMessage?: string;
-}
-
-export interface SelectedAttachmentState {
-  file: File;
-  status: AttachmentUploadStatus;
-  errorMessage?: string;
-}
-
-interface ChatInputBoxProps {
-  majikah: MajikahSession;
-  onSend: (text: string) => Promise<void> | void;
-  onUpdate?: (text: string) => void;
-  placeholder?: string;
-  maxHeight?: number;
-  disabled?: boolean;
-  sendOnEnter?: boolean;
-  enableGIF?: boolean;
-  enableEmoji?: boolean;
-  /** Enable the image upload button */
-  enableImageUpload?: boolean;
-  /** Enable the file attachment button */
-  enableFileUpload?: boolean;
-  /**
-   * Called when the user selects a valid image file (or when an attachment
-   * turns out to be an image — the component auto-redirects).
-   */
-  onSelectImage?: (file: File) => void;
-  /**
-   * Current image upload state driven by the parent.
-   */
-  imageUploadState?: SelectedImageState | null;
-  /** Called when the user dismisses the selected/uploading image */
-  onDismissImage?: () => void;
-  /**
-   * Called when the user selects a valid non-image file attachment.
-   */
-  onSelectAttachment?: (file: File) => void;
-  /**
-   * Current attachment upload state driven by the parent.
-   */
-  attachmentUploadState?: SelectedAttachmentState | null;
-  /** Called when the user dismisses the selected/uploading attachment */
-  onDismissAttachment?: () => void;
-}
-
-// ─── Reserved warning toast ID (deduplicated) ─────────────────────────────────
-const RESERVED_TOAST_ID = "majik-reserved-input-warning";
-
-// ─── Component ────────────────────────────────────────────────────────────────
-export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
-  majikah,
-  onSend,
-  onUpdate,
-  placeholder,
-  maxHeight = 200,
-  disabled = false,
-  sendOnEnter = true,
-  enableGIF = true,
-  enableEmoji = true,
-  enableImageUpload = false,
-  enableFileUpload = false,
-  onSelectImage,
-  imageUploadState,
-  onDismissImage,
-  onSelectAttachment,
-  attachmentUploadState,
-  onDismissAttachment,
-}) => {
-  const [value, setValue] = useState("");
-  const [focused, setFocused] = useState(false);
-  const [pickerMode, setPickerMode] = useState<PickerMode>(null);
-  const [selectedGif, setSelectedGif] = useState<IGif | null>(null);
-  const [gifQuery, setGifQuery] = useState("");
-  const [debouncedGifQuery, setDebouncedGifQuery] = useState("");
-  const [gifGridKey, setGifGridKey] = useState(0);
-
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const popoverRef = useRef<HTMLDivElement | null>(null);
-  const wrapperRef = useRef<HTMLDivElement | null>(null);
-  const imageInputRef = useRef<HTMLInputElement | null>(null);
-  const attachmentInputRef = useRef<HTMLInputElement | null>(null);
-  const onEmojiSelectRef = useRef<(emoji: { native: string }) => void>(
-    () => {},
-  );
-
-  // ── Auto-resize textarea ───────────────────────────────────────────────────
-  useLayoutEffect(() => {
-    const ta = textareaRef.current;
-    if (!ta) return;
-    ta.style.height = "auto";
-    ta.style.height = `${Math.min(ta.scrollHeight, maxHeight)}px`;
-  }, [value, maxHeight]);
-
-  // ── Close picker on outside click ─────────────────────────────────────────
-  useEffect(() => {
-    if (!pickerMode) return;
-    const handleOutside = (e: MouseEvent): void => {
-      if (
-        popoverRef.current &&
-        !popoverRef.current.contains(e.target as Node) &&
-        wrapperRef.current &&
-        !wrapperRef.current.contains(e.target as Node)
-      ) {
-        setPickerMode(null);
-      }
-    };
-    document.addEventListener("mousedown", handleOutside);
-    return () => document.removeEventListener("mousedown", handleOutside);
-  }, [pickerMode]);
-
-  // ── GIF search debounce ────────────────────────────────────────────────────
-  const debouncedSetQuery = useMemo(
-    () =>
-      debounce((q: string) => {
-        setDebouncedGifQuery(q);
-        setGifGridKey((k) => k + 1);
-      }, 400),
-    [],
-  );
-
-  useEffect(() => () => debouncedSetQuery.cancel(), [debouncedSetQuery]);
-
-  const handleGifQueryChange = (
-    e: React.ChangeEvent<HTMLInputElement>,
-  ): void => {
-    const q = e.target.value;
-    setGifQuery(q);
-    debouncedSetQuery(q);
-  };
-
-  // ── Giphy Grid fetch function ──────────────────────────────────────────────
-  const fetchGifs = useMemo(
-    () =>
-      debouncedGifQuery.trim()
-        ? buildSearchFetcher(debouncedGifQuery.trim())
-        : buildTrendingFetcher(),
-    [debouncedGifQuery],
-  );
-
-  // ── GIF select ─────────────────────────────────────────────────────────────
-  const handleGifSelect = useCallback((gif: IGif, e: React.SyntheticEvent) => {
-    e.preventDefault();
-    setSelectedGif(gif);
-    setPickerMode(null);
-    setGifQuery("");
-    setDebouncedGifQuery("");
-  }, []);
-
-  // ── Emoji insertion ────────────────────────────────────────────────────────
-  const insertEmoji = useCallback(
-    (emoji: { native: string }) => {
-      const ta = textareaRef.current;
-      const native = emoji.native;
-      if (!native) return;
-      if (ta) {
-        const start = ta.selectionStart ?? value.length;
-        const end = ta.selectionEnd ?? value.length;
-        const newValue = value.slice(0, start) + native + value.slice(end);
-        if (newValue.length <= MAX_CHARS) {
-          setValue(newValue);
-          onUpdate?.(newValue);
-          requestAnimationFrame(() => {
-            ta.focus();
-            const pos = start + native.length;
-            ta.setSelectionRange(pos, pos);
-          });
-        }
-      } else {
-        const newValue = value + native;
-        if (newValue.length <= MAX_CHARS) {
-          setValue(newValue);
-          onUpdate?.(newValue);
-        }
-      }
-    },
-    [value, onUpdate],
-  );
-
-  // eslint-disable-next-line react-hooks/refs
-  onEmojiSelectRef.current = insertEmoji;
-
-  const togglePicker = (mode: PickerMode): void => {
-    setPickerMode((prev) => (prev === mode ? null : mode));
-  };
-
-  // ── Image file picker ──────────────────────────────────────────────────────
-  const handleImageInputChange = useCallback(
-    async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      e.target.value = "";
-      if (!file || !onSelectImage) return;
-
-      const validationError = await validateImageFile(file);
-      if (validationError) {
-        toast.error("Image rejected", {
-          description: validationError,
-          id: "toast-img-validation",
-          duration: 6000,
-        });
-        return;
-      }
-
-      onSelectImage(file);
-    },
-    [onSelectImage],
-  );
-
-  // ── Attachment file picker ─────────────────────────────────────────────────
-  const handleAttachmentInputChange = useCallback(
-    async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      e.target.value = "";
-      if (!file) return;
-
-      const result = await validateAttachmentFile(file);
-
-      if (result === ATTACHMENT_IS_IMAGE) {
-        // Auto-redirect to image handler
-        if (!onSelectImage) {
-          toast.error("Image uploads are not enabled in this context.", {
-            id: "toast-attachment-img-redirect-disabled",
-          });
-          return;
-        }
-        const imageError = await validateImageFile(file);
-        if (imageError) {
-          toast.error("Image rejected", {
-            description: imageError,
-            id: "toast-img-validation",
-            duration: 6000,
-          });
-          return;
-        }
-        toast.info("Detected image — handling as image upload.", {
-          id: "toast-attachment-img-redirect",
-          duration: 3000,
-        });
-        onSelectImage(file);
-        return;
-      }
-
-      if (result !== null) {
-        toast.error("Attachment rejected", {
-          description: result,
-          id: "toast-attachment-validation",
-          duration: 6000,
-        });
-        return;
-      }
-
-      onSelectAttachment?.(file);
-    },
-    [onSelectImage, onSelectAttachment],
-  );
-
-  // ── Reserved system message guard ─────────────────────────────────────────
-  const inputIsReserved = isReserved(value);
-
-  // ── Derived image state ────────────────────────────────────────────────────
-  const imageIsUploading =
-    imageUploadState?.status === "validating" ||
-    imageUploadState?.status === "scanning" ||
-    imageUploadState?.status === "encrypting" ||
-    imageUploadState?.status === "uploading";
-
-  const imageIsReady = imageUploadState?.status === "ready";
-  const imageHasError = imageUploadState?.status === "error";
-
-  const imageStatusLabel = (() => {
-    switch (imageUploadState?.status) {
-      case "validating":
-        return "Validating…";
-      case "scanning":
-        return "Scanning…";
-      case "encrypting":
-        return "Encrypting…";
-      case "uploading":
-        return "Uploading…";
-      case "ready":
-        return "Ready to send";
-      case "error":
-        return imageUploadState.errorMessage ?? "Upload failed";
-      default:
-        return "";
-    }
-  })();
-
-  // ── Derived attachment state ───────────────────────────────────────────────
-  const attachmentIsUploading =
-    attachmentUploadState?.status === "validating" ||
-    attachmentUploadState?.status === "scanning" ||
-    attachmentUploadState?.status === "encrypting" ||
-    attachmentUploadState?.status === "uploading";
-
-  const attachmentIsReady = attachmentUploadState?.status === "ready";
-  const attachmentHasError = attachmentUploadState?.status === "error";
-
-  const attachmentStatusLabel = (() => {
-    switch (attachmentUploadState?.status) {
-      case "validating":
-        return "Validating…";
-      case "scanning":
-        return "Scanning…";
-      case "encrypting":
-        return "Encrypting…";
-      case "uploading":
-        return "Uploading…";
-      case "ready":
-        return "Ready to send";
-      case "error":
-        return attachmentUploadState.errorMessage ?? "Upload failed";
-      default:
-        return "";
-    }
-  })();
-
-  const attachmentExt =
-    attachmentUploadState?.file.name.split(".").pop()?.toUpperCase() ?? "FILE";
-
-  // ── Send ───────────────────────────────────────────────────────────────────
-  const handleSend = async (): Promise<void> => {
-    if (inputIsReserved) {
-      toast.error("Message contains reserved content.", {
-        description: "System tags cannot be sent manually.",
-        id: RESERVED_TOAST_ID,
-      });
-      return;
-    }
-
-    if (disabled) {
-      toast.error("Assign recipients first.");
-      return;
-    }
-
-    const gifUrl = selectedGif?.images?.original?.url ?? null;
-    const composed = composeMessageWithGif(value, gifUrl);
-
-    if (imageUploadState && imageIsUploading) {
-      toast.info("Please wait — image is still uploading.");
-      return;
-    }
-
-    if (attachmentUploadState && attachmentIsUploading) {
-      toast.info("Please wait — file is still uploading.");
-      return;
-    }
-
-    if (!composed && !imageIsReady && !attachmentIsReady) return;
-
-    try {
-      await onSend(composed);
-      setValue("");
-      setSelectedGif(null);
-      onUpdate?.(composed);
-    } catch (err) {
-      console.error("Failed to send message", err);
-    }
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      if (!sendOnEnter) return;
-      e.preventDefault();
-      handleSend();
-    }
-  };
-
-  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>): void => {
-    const text = e.target.value;
-    if (text.length <= MAX_CHARS) {
-      setValue(text);
-      onUpdate?.(text);
-    } else {
-      const t = text.slice(0, MAX_CHARS);
-      setValue(t);
-      onUpdate?.(t);
-      toast.error("Message too long", {
-        description: `Limited to ${MAX_CHARS.toLocaleString()} characters.`,
-      });
-    }
-  };
-
-  // ── Derived ────────────────────────────────────────────────────────────────
-  const charCount = value.length;
-  const nearLimit = charCount > MAX_CHARS * 0.9;
-  const canSend =
-    !inputIsReserved &&
-    !imageIsUploading &&
-    !imageHasError &&
-    !attachmentIsUploading &&
-    !attachmentHasError &&
-    (value.trim().length > 0 ||
-      selectedGif !== null ||
-      imageIsReady ||
-      attachmentIsReady);
-
-  const gifPreviewUrl =
-    selectedGif?.images?.fixed_height_small?.url ??
-    selectedGif?.images?.fixed_height?.url ??
-    null;
-
-  // ── Placeholder ────────────────────────────────────────────────────────────
-  const derivedPlaceholder = (() => {
-    if (imageUploadState) return "Add a caption for your image…";
-    if (attachmentUploadState) return "Add a message to go with your file…";
-    if (selectedGif) return "Add a message to go with your GIF…";
-    return placeholder ?? "Message… (Shift+Enter for new line)";
-  })();
-
-  // ── Render ─────────────────────────────────────────────────────────────────
-  return (
-    <Wrapper ref={wrapperRef}>
-      {/* Hidden image file input */}
-      {enableImageUpload && (
-        <input
-          ref={imageInputRef}
-          type="file"
-          accept={IMAGE_ACCEPT}
-          hidden
-          onChange={handleImageInputChange}
-        />
-      )}
-
-      {/* Hidden attachment file input — accepts everything; validator decides */}
-      {enableFileUpload && (
-        <input
-          ref={attachmentInputRef}
-          type="file"
-          accept="*/*"
-          hidden
-          onChange={handleAttachmentInputChange}
-        />
-      )}
-
-      {/* Popover */}
-      {pickerMode && (
-        <Popover ref={popoverRef} data-private>
-          {pickerMode === "emoji" && enableEmoji && (
-            <Picker
-              data={data}
-              theme="dark"
-              set="native"
-              previewPosition="none"
-              skinTonePosition="none"
-              onEmojiSelect={(emoji: { native: string }) =>
-                onEmojiSelectRef.current(emoji)
-              }
-            />
-          )}
-
-          {pickerMode === "gif" && enableGIF && (
-            <GifPanel>
-              <GifSearchBar>
-                <GifSearchInput
-                  value={gifQuery}
-                  onChange={handleGifQueryChange}
-                  placeholder="Search GIFs or browse trending…"
-                  autoFocus
-                  data-private
-                />
-              </GifSearchBar>
-              <GifGrid data-private>
-                <Grid
-                  key={gifGridKey}
-                  fetchGifs={(offset) => fetchGifs(offset, majikah)}
-                  width={316}
-                  columns={3}
-                  gutter={4}
-                  onGifClick={handleGifSelect}
-                  noLink
-                  hideAttribution
-                />
-              </GifGrid>
-              <GifAttribution>Powered by GIPHY</GifAttribution>
-            </GifPanel>
-          )}
-        </Popover>
-      )}
-
-      {/* GIF preview strip */}
-      {selectedGif && gifPreviewUrl && enableGIF && (
-        <GifPreviewStrip>
-          <GifPreviewThumb>
-            <GifPreviewImg
-              src={gifPreviewUrl}
-              alt={selectedGif.title ?? "GIF"}
-              data-private
-            />
-            <GifPreviewDismiss
-              onClick={() => setSelectedGif(null)}
-              title="Remove GIF"
-              type="button"
-            >
-              <XIcon size={10} weight="bold" />
-            </GifPreviewDismiss>
-          </GifPreviewThumb>
-          <GifPreviewLabel>GIF attached · tap to replace</GifPreviewLabel>
-        </GifPreviewStrip>
-      )}
-
-      {/* Image preview strip */}
-      {enableImageUpload && imageUploadState && (
-        <ImagePreviewStrip>
-          <ImagePreviewThumb>
-            <ImagePreviewImg
-              src={imageUploadState.previewUrl}
-              alt="Selected image"
-              data-private
-            />
-            <ImagePreviewDismiss
-              onClick={onDismissImage}
-              title="Remove image"
-              type="button"
-            >
-              <XIcon size={10} weight="bold" />
-            </ImagePreviewDismiss>
-          </ImagePreviewThumb>
-          <ImagePreviewMeta>
-            <ImagePreviewLabel>
-              {imageIsReady ? "Image attached" : "Processing image…"}
-            </ImagePreviewLabel>
-            <ImagePreviewStatus
-              $uploading={imageIsUploading}
-              $error={imageHasError}
-            >
-              {imageStatusLabel}
-            </ImagePreviewStatus>
-          </ImagePreviewMeta>
-        </ImagePreviewStrip>
-      )}
-
-      {/* Attachment preview strip */}
-      {enableFileUpload && attachmentUploadState && (
-        <AttachmentPreviewStrip>
-          <AttachmentPreviewCard>
-            <AttachmentPreviewIcon>
-              <AttachmentPreviewExtBadge>
-                {attachmentExt}
-              </AttachmentPreviewExtBadge>
-            </AttachmentPreviewIcon>
-            <AttachmentPreviewInfo>
-              <AttachmentPreviewName title={attachmentUploadState.file.name}>
-                {attachmentUploadState.file.name}
-              </AttachmentPreviewName>
-              <AttachmentPreviewSize>
-                {formatBytes(attachmentUploadState.file.size)}
-              </AttachmentPreviewSize>
-              <AttachmentPreviewStatus
-                $uploading={attachmentIsUploading}
-                $error={attachmentHasError}
-              >
-                {attachmentStatusLabel}
-              </AttachmentPreviewStatus>
-            </AttachmentPreviewInfo>
-            <AttachmentPreviewDismiss
-              onClick={onDismissAttachment}
-              title="Remove attachment"
-              type="button"
-            >
-              <XIcon size={10} weight="bold" />
-            </AttachmentPreviewDismiss>
-          </AttachmentPreviewCard>
-        </AttachmentPreviewStrip>
-      )}
-
-      {/* Reserved system tag warning banner */}
-      {inputIsReserved && (
-        <ReservedWarning>
-          ⚠ Message contains a reserved system tag and cannot be sent.
-        </ReservedWarning>
-      )}
-
-      {/* Input row */}
-      <InputRow>
-        <Toolbar>
-          {enableEmoji && (
-            <ToolBtn
-              $active={pickerMode === "emoji"}
-              title="Emoji"
-              onClick={() => togglePicker("emoji")}
-              type="button"
-            >
-              <SmileyIcon
-                size={15}
-                weight={pickerMode === "emoji" ? "fill" : "regular"}
-              />
-            </ToolBtn>
-          )}
-          {enableGIF && (
-            <ToolBtn
-              $active={pickerMode === "gif" || selectedGif !== null}
-              title="GIF"
-              onClick={() => togglePicker("gif")}
-              type="button"
-            >
-              <GifLabel>GIF</GifLabel>
-            </ToolBtn>
-          )}
-          {enableImageUpload && (
-            <ToolBtn
-              $active={!!imageUploadState}
-              title="Upload image"
-              onClick={() => imageInputRef.current?.click()}
-              type="button"
-              disabled={!!imageUploadState}
-            >
-              <ImageIcon
-                size={15}
-                weight={imageUploadState ? "fill" : "regular"}
-              />
-            </ToolBtn>
-          )}
-          {enableFileUpload && (
-            <ToolBtn
-              $active={!!attachmentUploadState}
-              title="Attach file"
-              onClick={() => attachmentInputRef.current?.click()}
-              type="button"
-              disabled={!!attachmentUploadState}
-            >
-              <PaperclipIcon
-                size={15}
-                weight={attachmentUploadState ? "fill" : "regular"}
-              />
-            </ToolBtn>
-          )}
-        </Toolbar>
-
-        <TextareaWrap $focused={focused} $reserved={inputIsReserved}>
-          <StyledTextarea
-            ref={textareaRef}
-            value={value}
-            onChange={handleChange}
-            onKeyDown={handleKeyDown}
-            onFocus={() => setFocused(true)}
-            onBlur={() => setFocused(false)}
-            placeholder={derivedPlaceholder}
-            rows={1}
-            $maxHeight={maxHeight}
-            maxLength={MAX_CHARS}
-            data-private="lipsum"
-          />
-          <InputMeta>
-            <CharCount $nearLimit={nearLimit}>
-              {charCount.toLocaleString()} / {MAX_CHARS.toLocaleString()}
-            </CharCount>
-            <KeyHint>↵ send · ⇧↵ new line</KeyHint>
-          </InputMeta>
-        </TextareaWrap>
-
-        <SendBtn
-          onClick={handleSend}
-          disabled={!canSend}
-          title={
-            inputIsReserved
-              ? "Message contains a reserved system tag"
-              : imageIsUploading
-                ? "Image is still uploading…"
-                : attachmentIsUploading
-                  ? "File is still uploading…"
-                  : "Send message"
-          }
-          type="button"
-        >
-          <PaperPlaneRightIcon size={16} weight="bold" />
-        </SendBtn>
-      </InputRow>
-    </Wrapper>
-  );
-};

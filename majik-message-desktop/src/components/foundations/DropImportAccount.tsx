@@ -147,7 +147,6 @@ export const DropImportAccount: React.FC<DropImportProps> = ({
 
     try {
       const isMajikByte = await MajikBytes.isValidPNG(file);
-      console.log("isMajikByte: ", isMajikByte);
 
       if (isMajikByte.isValid) {
         const loadedMbyte = await MajikBytes.fromPNG(file);

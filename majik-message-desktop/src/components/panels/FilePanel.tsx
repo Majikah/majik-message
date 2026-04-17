@@ -655,7 +655,7 @@ const FilePanel: React.FC<FilePanelProps> = ({ majik }) => {
              */}
             <MajikContactListSelector
               id="message-recipients"
-              contacts={selectorContacts}
+              contacts={isDecryptMode ? detectedContacts : selectorContacts}
               value={selectorValue}
               onUpdate={isDecryptMode ? undefined : handleRecipientsUpdate}
               onClearAll={isDecryptMode ? undefined : handleRecipientsClear}

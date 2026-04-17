@@ -1,16 +1,60 @@
-import React, { useCallback, useMemo, useState } from "react";
+"use client";
+
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import styled from "styled-components";
 
 import { toast } from "sonner";
 
 import { ButtonPrimaryConfirm } from "@/globals/buttons";
-import { downloadBlob, isDevEnvironment } from "@/utils/utils";
-import type { MajikMessageDatabase } from "./majik-context-wrapper/majik-message-database";
-import type { MajikMessagePublicKey } from "@majikah/majik-message";
+
+import { sha256, type MajikMessagePublicKey } from "@majikah/majik-message";
 import { MajikContactListSelector } from "./MajikContactListSelector";
-import { ChatInputBox } from "./functional/ChatInputBox";
-import type { MajikahSession } from "./majikah-session-wrapper/majikah-session";
+import { MajikMessageDatabase } from "@/components/majik-context-wrapper/majik-message-database";
+import {
+  ChatInputBox,
+  SelectedAttachmentState,
+  SelectedImageState,
+} from "@/components/functional/ChatInputBox";
 import { MajikContact } from "@majikah/majik-contact";
+import { MajikFile } from "@majikah/majik-file";
+import {
+  FileScanResult,
+  MajikFileScanner,
+} from "@/SDK/majik-file-scanner/majik-file-scanner";
+import { downloadBlob, isDevEnvironment } from "@/utils/utils";
+import { MajikahSession } from "./majikah-session-wrapper/majikah-session";
+import { UploadIntentBody } from "./majikah-session-wrapper/types/files-api";
+
+/* ======================================================
+ * Upload constants
+ * ====================================================== */
+
+/** Minimum YARA score to allow upload (mirrors UserFiles) */
+const IMAGE_SCAN_PASS_THRESHOLD = 70;
+const ATTACHMENT_SCAN_PASS_THRESHOLD = 70;
+
+/* ======================================================
+ * Scanner singleton (shared across image + attachment paths)
+ * ====================================================== */
+
+const fileScanner = new MajikFileScanner();
+let fileScannerReady = false;
+
+async function ensureFileScanner(): Promise<void> {
+  if (!fileScannerReady) {
+    await fileScanner.initialize();
+    fileScannerReady = true;
+  }
+}
+
+/* ======================================================
+ * Types
+ * ====================================================== */
+
+interface UploadedFileRef {
+  file: MajikFile;
+  context: "chat_image" | "chat_attachment";
+}
 
 /* ---------------------------------------------
  * Styled Components
@@ -46,7 +90,6 @@ const PreviewActions = styled.div`
 
 const ExportButton = styled(ButtonPrimaryConfirm)`
   padding: 6px 20px;
-  width: 100%;
 `;
 
 interface NewMessageFormProps {
@@ -68,6 +111,16 @@ const NewMessageForm: React.FC<NewMessageFormProps> = ({
   const [input, setInput] = useState("");
   const [output, setOutput] = useState("");
 
+  // ── Image upload state ────────────────────────────────────────────────────
+  const [imageUploadState, setImageUploadState] =
+    useState<SelectedImageState | null>(null);
+  const uploadedImageRef = useRef<UploadedFileRef | null>(null);
+
+  // ── Attachment upload state ───────────────────────────────────────────────
+  const [attachmentUploadState, setAttachmentUploadState] =
+    useState<SelectedAttachmentState | null>(null);
+  const uploadedAttachmentRef = useRef<UploadedFileRef | null>(null);
+
   const [myAccount] = useState<MajikContact | null>(() => {
     const userAccount = majik.getActiveAccount();
     if (!userAccount) return null;
@@ -80,6 +133,8 @@ const NewMessageForm: React.FC<NewMessageFormProps> = ({
     return [myAccount];
   });
 
+  const [isSending, setIsSending] = useState<boolean>(false);
+
   const handleRecipientsUpdate = (updated: MajikContact[]): void => {
     if (updated.length === 0) {
       if (!myAccount) {
@@ -89,6 +144,8 @@ const NewMessageForm: React.FC<NewMessageFormProps> = ({
       }
     }
     setRecipients(updated);
+    handleDismissAttachment();
+    handleDismissImage();
   };
 
   const handleRecipientsClear = (): void => {
@@ -180,24 +237,21 @@ const NewMessageForm: React.FC<NewMessageFormProps> = ({
       }),
     );
 
-    const encrypted = await majik.encryptTextForScanner(
+    const encryptedMessage = await majik.encryptTextForScanner(
       input,
       recipientPubKeys,
       false,
     );
-    setOutput(encrypted ?? "");
+    setOutput(encryptedMessage ?? "");
   };
 
   const processSend = async (
     senderPublicKey: MajikMessagePublicKey,
     text: string,
   ): Promise<string> => {
+    setIsSending(true);
     if (isDevEnvironment())
       console.log("Sending message from: ", senderPublicKey);
-
-    if (!text?.trim()) {
-      throw new Error("A valid message is required.");
-    }
 
     if (!senderPublicKey?.trim()) {
       throw new Error("A valid sender public key is required.");
@@ -212,11 +266,81 @@ const NewMessageForm: React.FC<NewMessageFormProps> = ({
         .filter((r) => r.isMajikahRegistered())
         .map(async (r) => r.getPublicKeyBase64()),
     );
-    // .filter((pk) => pk !== senderPublicKey)
+
+    const participants = [...messageRecipients, senderPublicKey];
+
+    const convID = generateConversationID(participants);
+
+    if (isDevEnvironment())
+      console.log("Sending message from:", senderPublicKey);
+
+    if (!senderPublicKey?.trim())
+      throw new Error("A valid sender public key is required.");
+    if (!majik.currentIdentity)
+      throw new Error("You must have an active identity set.");
+    if (!convID?.trim()) throw new Error("Select a conversation first.");
+
+    let composed = text?.trim() ?? "";
+
+    // ── Append image tag if image is ready ──────────────────────────────
+    if (uploadedImageRef.current) {
+      const intentBody: UploadIntentBody = {
+        fileHash: uploadedImageRef.current.file.toJSON().file_hash,
+        sizeOriginal: uploadedImageRef.current.file.toJSON().size_original,
+        mimeType: uploadedImageRef.current.file.toJSON().mime_type,
+        context: uploadedImageRef.current.context,
+        isTemporary: true,
+        expiresAt: uploadedImageRef.current.file.toJSON().expires_at,
+        originalName: uploadedImageRef.current.file.toJSON().original_name,
+        conversationId: convID,
+        chatMessageId: null,
+      };
+
+      const confirmedImage = await majik.uploadFile(
+        intentBody,
+        uploadedImageRef.current.file,
+      );
+
+      if (confirmedImage.id) {
+        composed = composed
+          ? `${composed}\n[img:${confirmedImage.id}]`
+          : `[img:${confirmedImage.id}]`;
+      }
+    }
+
+    // ── Append file tag if attachment is ready ──────────────────────────
+    if (uploadedAttachmentRef.current) {
+      const fileJSON = uploadedAttachmentRef.current.file.toJSON();
+
+      const intentBody: UploadIntentBody = {
+        fileHash: fileJSON.file_hash,
+        sizeOriginal: fileJSON.size_original,
+        mimeType: fileJSON.mime_type,
+        context: uploadedAttachmentRef.current.context,
+        isTemporary: true,
+        expiresAt: fileJSON.expires_at,
+        originalName: fileJSON.original_name,
+        conversationId: convID,
+        chatMessageId: null,
+      };
+
+      const confirmedFile = await majik.uploadFile(
+        intentBody,
+        uploadedAttachmentRef.current.file,
+      );
+
+      if (confirmedFile.id) {
+        composed = composed
+          ? `${composed}\n[file:${confirmedFile.id}]`
+          : `[file:${confirmedFile.id}]`;
+      }
+    }
+
+    if (!composed?.trim()) throw new Error("A valid message is required.");
 
     const sendMessageResponse = await majik.sendMessage(
       messageRecipients,
-      text,
+      composed,
     );
 
     if (
@@ -246,7 +370,7 @@ const NewMessageForm: React.FC<NewMessageFormProps> = ({
       loading: `Sending message...`,
       success: (outputMessage) => {
         setTimeout(() => {}, 1000);
-
+        setIsSending(false);
         return outputMessage;
       },
       error: (error) => {
@@ -254,6 +378,205 @@ const NewMessageForm: React.FC<NewMessageFormProps> = ({
       },
     });
   };
+
+  /* ====================================================================
+   * Image upload pipeline: scan → encrypt → ready
+   * ==================================================================== */
+
+  const handleSelectImage = useCallback(
+    async (file: File) => {
+      const previewUrl = URL.createObjectURL(file);
+
+      setImageUploadState({ file, previewUrl, status: "scanning" });
+      uploadedImageRef.current = null;
+
+      try {
+        // ── YARA scan ────────────────────────────────────────────────────
+        await ensureFileScanner();
+        const scanResult: FileScanResult = await fileScanner.scan(file);
+
+        if (scanResult.score < IMAGE_SCAN_PASS_THRESHOLD) {
+          const reason =
+            scanResult.status === "flagged"
+              ? `YARA threat detected (${scanResult.remarks.length} rule(s) matched)`
+              : `Scan score too low (${scanResult.score}/100, minimum ${IMAGE_SCAN_PASS_THRESHOLD})`;
+
+          setImageUploadState((prev) =>
+            prev ? { ...prev, status: "error", errorMessage: reason } : null,
+          );
+          toast.error(`Image blocked — ${reason}`, {
+            id: "toast-img-scan-blocked",
+            duration: 8000,
+          });
+          return;
+        }
+
+        // ── Encrypt ──────────────────────────────────────────────────────
+        setImageUploadState((prev) =>
+          prev ? { ...prev, status: "uploading" } : null,
+        );
+
+        if (!majik.currentIdentity)
+          throw new Error("No active identity — please log in.");
+
+        const recipientPubKeys = await Promise.all(
+          recipients.map(async (r) => {
+            const rBase64 = await r.getPublicKeyBase64();
+            return rBase64;
+          }),
+        );
+
+        const bytes = new Uint8Array(await file.arrayBuffer());
+
+        const convID = generateConversationID(recipientPubKeys);
+
+        const encryptedResult = await majik.encryptFile({
+          data: bytes,
+          mimeType: file.type || "image/jpeg",
+          originalName: file.name,
+          context: "chat_image",
+          isTemporary: true,
+          userId: majik?.user?.id,
+          expiresAt: 15,
+          recipients: recipientPubKeys,
+          compressionLevel: 6,
+          conversationId: convID,
+        });
+
+        uploadedImageRef.current = {
+          file: encryptedResult.file,
+          context: "chat_image",
+        };
+
+        setImageUploadState((prev) =>
+          prev ? { ...prev, status: "ready" } : null,
+        );
+
+        toast.success("Image ready", {
+          description: "Press send to attach it to your message.",
+          id: "toast-img-ready",
+          duration: 3000,
+        });
+      } catch (err) {
+        console.error("[RealtimeChatInput] image upload error:", err);
+        const msg = err instanceof Error ? err.message : "Upload failed";
+        setImageUploadState((prev) =>
+          prev ? { ...prev, status: "error", errorMessage: msg } : null,
+        );
+        toast.error("Image upload failed", {
+          description: msg,
+          id: "toast-img-upload-error",
+          duration: 6000,
+        });
+      }
+    },
+    [majik, recipients],
+  );
+
+  const handleDismissImage = useCallback(() => {
+    if (imageUploadState?.previewUrl) {
+      URL.revokeObjectURL(imageUploadState.previewUrl);
+    }
+    setImageUploadState(null);
+    uploadedImageRef.current = null;
+  }, [imageUploadState]);
+
+  /* ====================================================================
+   * Attachment upload pipeline: scan → encrypt → ready
+   * ==================================================================== */
+
+  const handleSelectAttachment = useCallback(
+    async (file: File) => {
+      setAttachmentUploadState({ file, status: "scanning" });
+      uploadedAttachmentRef.current = null;
+
+      try {
+        // ── YARA scan ────────────────────────────────────────────────────
+        await ensureFileScanner();
+        const scanResult: FileScanResult = await fileScanner.scan(file);
+
+        if (scanResult.score < ATTACHMENT_SCAN_PASS_THRESHOLD) {
+          const reason =
+            scanResult.status === "flagged"
+              ? `YARA threat detected (${scanResult.remarks.length} rule(s) matched)`
+              : `Scan score too low (${scanResult.score}/100, minimum ${ATTACHMENT_SCAN_PASS_THRESHOLD})`;
+
+          setAttachmentUploadState((prev) =>
+            prev ? { ...prev, status: "error", errorMessage: reason } : null,
+          );
+          toast.error(`File blocked — ${reason}`, {
+            id: "toast-attachment-scan-blocked",
+            duration: 8000,
+          });
+          return;
+        }
+
+        // ── Encrypt ──────────────────────────────────────────────────────
+        setAttachmentUploadState((prev) =>
+          prev ? { ...prev, status: "uploading" } : null,
+        );
+
+        if (!majik.currentIdentity)
+          throw new Error("No active identity — please log in.");
+
+        const recipientPubKeys = await Promise.all(
+          recipients.map(async (r) => {
+            const rBase64 = await r.getPublicKeyBase64();
+            return rBase64;
+          }),
+        );
+
+        const convID = generateConversationID(recipientPubKeys);
+
+        const bytes = new Uint8Array(await file.arrayBuffer());
+
+        const encryptedResult = await majik.encryptFile({
+          data: bytes,
+          mimeType: file.type || "application/octet-stream",
+          originalName: file.name,
+          context: "chat_attachment",
+          isTemporary: true,
+          userId: majik?.user?.id,
+          expiresAt: 1,
+          recipients: recipientPubKeys,
+          compressionLevel: 6,
+          conversationId: convID,
+        });
+
+        uploadedAttachmentRef.current = {
+          file: encryptedResult.file,
+          context: "chat_attachment",
+        };
+
+        setAttachmentUploadState((prev) =>
+          prev ? { ...prev, status: "ready" } : null,
+        );
+
+        toast.success("File ready", {
+          description: "Press send to attach it to your message.",
+          id: "toast-attachment-ready",
+          duration: 3000,
+        });
+      } catch (err) {
+        console.error("[RealtimeChatInput] attachment upload error:", err);
+        const msg = err instanceof Error ? err.message : "Upload failed";
+        setAttachmentUploadState((prev) =>
+          prev ? { ...prev, status: "error", errorMessage: msg } : null,
+        );
+        toast.error("File upload failed", {
+          description: msg,
+          id: "toast-attachment-upload-error",
+          duration: 6000,
+        });
+      }
+    },
+    [majik, recipients],
+  );
+
+  const handleDismissAttachment = useCallback(() => {
+    setAttachmentUploadState(null);
+    uploadedAttachmentRef.current = null;
+  }, []);
 
   const contacts = useMemo(() => {
     if (!majik) return [];
@@ -285,10 +608,17 @@ const NewMessageForm: React.FC<NewMessageFormProps> = ({
             majikah={majikah}
             onSend={handleSend}
             onUpdate={handleEncryptMessage}
-            disabled={!recipients || recipients.length <= 1}
+            disabled={!recipients || recipients.length <= 1 || isSending}
             enableEmoji
             enableGIF
             enableImageUpload
+            enableFileUpload
+            onSelectImage={handleSelectImage}
+            imageUploadState={imageUploadState}
+            onDismissImage={handleDismissImage}
+            onSelectAttachment={handleSelectAttachment}
+            attachmentUploadState={attachmentUploadState}
+            onDismissAttachment={handleDismissAttachment}
           />
           <PreviewActions>
             <ExportButton onClick={handleCopy}>Copy</ExportButton>
@@ -306,3 +636,15 @@ const NewMessageForm: React.FC<NewMessageFormProps> = ({
 };
 
 export default NewMessageForm;
+
+function generateConversationID(participants: MajikMessagePublicKey[]): string {
+  // Sort alphabetically to ensure same conversation ID regardless of order
+  const sorted = Array.from(participants).sort();
+
+  // Join with delimiter
+  const combined = sorted.join("|");
+
+  const hashedID = sha256(combined);
+
+  return `conv_${hashedID}`;
+}

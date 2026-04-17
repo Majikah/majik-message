@@ -22,6 +22,10 @@ import {
   FileAttachmentReadyInfo,
   FileAttachmentRenderer,
 } from "./FileAttachmentRenderer";
+import {
+  VoiceMessageReadyInfo,
+  VoiceMessageRenderer,
+} from "./VoiceMessageRenderer";
 
 // ─── Local tokens ─────────────────────────────────────────────────────────────
 const FONT_MONO = "'Fira Mono', 'JetBrains Mono', monospace";
@@ -35,6 +39,8 @@ const CALL_TAG_RE =
   /\n?\[call:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\]$/i;
 const FILE_TAG_RE =
   /\n?\[file:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\]$/i;
+const VOICE_TAG_RE =
+  /\n?\[voice:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\]$/i;
 
 // ─── GIF message parser ───────────────────────────────────────────────────────
 
@@ -69,6 +75,7 @@ interface ParsedMessage {
   imgFileId: string | null;
   callId: string | null;
   fileId: string | null;
+  voiceId: string | null;
 }
 
 function parseMessageContent(raw: string): ParsedMessage {
@@ -82,6 +89,7 @@ function parseMessageContent(raw: string): ParsedMessage {
       imgFileId: null,
       callId: callMatch[1],
       fileId: null,
+      voiceId: null,
     };
   }
 
@@ -97,8 +105,23 @@ function parseMessageContent(raw: string): ParsedMessage {
         imgFileId: fileId,
         callId: null,
         fileId: null,
+        voiceId: null,
       };
     }
+  }
+
+  // ── Voice message (check before file, same UUID shape) ──────────────────
+  const voiceMatch = raw.match(VOICE_TAG_RE);
+  if (voiceMatch) {
+    const text = raw.slice(0, raw.length - voiceMatch[0].length);
+    return {
+      text,
+      gifUrl: null,
+      imgFileId: null,
+      callId: null,
+      fileId: null,
+      voiceId: voiceMatch[1],
+    };
   }
 
   const fileMatch = raw.match(FILE_TAG_RE);
@@ -110,6 +133,7 @@ function parseMessageContent(raw: string): ParsedMessage {
       imgFileId: null,
       callId: null,
       fileId: fileMatch[1],
+      voiceId: null,
     };
   }
 
@@ -126,6 +150,7 @@ function parseMessageContent(raw: string): ParsedMessage {
         imgFileId: null,
         callId: null,
         fileId: null,
+        voiceId: null,
       };
     }
 
@@ -142,6 +167,7 @@ function parseMessageContent(raw: string): ParsedMessage {
         imgFileId: null,
         callId: null,
         fileId: null,
+        voiceId: null,
       };
     }
 
@@ -151,6 +177,7 @@ function parseMessageContent(raw: string): ParsedMessage {
       imgFileId: null,
       callId: null,
       fileId: null,
+      voiceId: null,
     };
   }
 
@@ -160,6 +187,7 @@ function parseMessageContent(raw: string): ParsedMessage {
     imgFileId: null,
     callId: null,
     fileId: null,
+    voiceId: null,
   };
 }
 
@@ -247,11 +275,14 @@ const Bubble = styled.div<{
   $hasImg: boolean;
   $hasCall: boolean;
   $hasFile: boolean;
+  $hasVoice: boolean;
 }>`
-  padding: ${({ $hasGif, $hasImg, $hasCall, $hasFile }) =>
-    $hasGif || $hasImg || $hasCall || $hasFile ? "0" : "10px 14px"};
-  min-height: ${({ $hasGif, $hasImg, $hasCall, $hasFile }) =>
-    $hasGif || $hasImg || $hasCall || $hasFile ? "0" : "42px"};
+  padding: ${({ $hasGif, $hasImg, $hasCall, $hasFile, $hasVoice }) =>
+    $hasGif || $hasImg || $hasCall || $hasFile || $hasVoice
+      ? "0"
+      : "10px 14px"};
+  min-height: ${({ $hasGif, $hasImg, $hasCall, $hasFile, $hasVoice }) =>
+    $hasGif || $hasImg || $hasCall || $hasFile || $hasVoice ? "0" : "42px"};
   border-radius: 16px;
   font-size: 13px;
   line-height: 1.6;
@@ -489,6 +520,7 @@ const CBaseChatBubble: React.FC<CBaseChatBubbleProps> = ({
     imgFileId,
     callId,
     fileId,
+    voiceId,
   }: ParsedMessage = useMemo(
     () =>
       text
@@ -499,6 +531,7 @@ const CBaseChatBubble: React.FC<CBaseChatBubbleProps> = ({
             imgFileId: null,
             callId: null,
             fileId: null,
+            voiceId: null,
           },
     [text],
   );
@@ -507,6 +540,7 @@ const CBaseChatBubble: React.FC<CBaseChatBubbleProps> = ({
   const hasImg = imgFileId !== null;
   const hasCall = callId !== null;
   const hasFile = fileId !== null;
+  const hasVoice = voiceId !== null;
 
   const imgRef = useRef<HTMLImageElement | null>(null);
   useEffect(() => {
@@ -649,6 +683,17 @@ const CBaseChatBubble: React.FC<CBaseChatBubbleProps> = ({
           </ImageMedia>
         );
 
+      case hasVoice:
+        return (
+          <VoiceMessageRenderer
+            majik={majik}
+            fileId={voiceId!}
+            conversationId={message.getConversationID()}
+            isOwn={isOwn}
+            onReady={(_info: VoiceMessageReadyInfo) => {}}
+          />
+        );
+
       case hasFile:
         return (
           <FileAttachmentRenderer
@@ -760,6 +805,7 @@ const CBaseChatBubble: React.FC<CBaseChatBubbleProps> = ({
             $hasImg={hasImg}
             $hasCall={hasCall}
             $hasFile={hasFile}
+            $hasVoice={hasVoice}
             data-private
           >
             {renderBubbleContent()}

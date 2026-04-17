@@ -527,6 +527,7 @@ const CBaseUserAccount: React.FC<CBaseUserAccountProps> = ({
     (!!onEdit && canEdit) ||
     !!onSetActive ||
     !!onShare ||
+    !!onDownload ||
     !!onCopyPublicKey ||
     !!onBlock ||
     !!onUnBlock ||
@@ -693,7 +694,7 @@ const CBaseUserAccount: React.FC<CBaseUserAccountProps> = ({
               />
             )}
 
-            {/* Share */}
+            {/* Download Card */}
             {!!onDownload && (
               <StyledIconButton
                 icon={DownloadIcon}
