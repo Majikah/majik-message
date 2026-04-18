@@ -93,7 +93,8 @@ function App(): JSX.Element {
 
   const { majik, loading, updateInstance } = useMajik();
   const { majikah } = useMajikah();
-  const { unreadChatCount, unreadThreadCount } = useMajikahNotifications();
+  const userNotifications =
+    useMajikahNotifications();
 
   const [unlockId, setUnlockId] = useState<string | null>(null);
   const [unlockResolver, setUnlockResolver] = useState<
@@ -125,6 +126,9 @@ function App(): JSX.Element {
     publicKey: majik?.currentIdentity?.publicKey || null,
     session: majikah,
     enabled: true,
+    onPushReceived: () => {
+      userNotifications.notifyActivity();
+    },
   });
 
   useEffect(() => {
@@ -609,7 +613,7 @@ function App(): JSX.Element {
       element: (
         <ConversationSidePanel majik={majik} onUpdate={handleRefreshInstance} />
       ),
-      notification: <NotificationDot count={unreadChatCount} />,
+      notification: <NotificationDot count={userNotifications.unreadChatCount} />,
     },
     {
       id: "threads",
@@ -617,7 +621,7 @@ function App(): JSX.Element {
       name: "Threads",
       icon: LinkIcon,
       element: <EmailThreads majik={majik} onUpdate={handleRefreshInstance} />,
-      notification: <NotificationDot count={unreadThreadCount} />,
+      notification: <NotificationDot count={userNotifications.unreadThreadCount} />,
     },
     {
       id: "contacts",
