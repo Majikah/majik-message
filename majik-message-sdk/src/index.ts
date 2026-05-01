@@ -5,10 +5,8 @@ export * from "./core/contacts/majik-contact-directory";
 export * from "./core/contacts/majik-contact-groups";
 export * from "./core/crypto/constants";
 export * from "./core/crypto/crypto-provider";
-export * from "./core/crypto/encryption-engine";
 export * from "./core/messages/message-envelope";
 export * from "./core/messages/envelope-cache";
-export * from "./core/scanner/scanner-engine";
 export * from "./core/utils/utilities";
 
 export * from "./core/crypto/keystore-manager";

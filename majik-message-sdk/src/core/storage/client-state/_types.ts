@@ -8,12 +8,6 @@
  * adapter only moves bytes.
  */
 
-import type {
-  CurrencyCode,
-  TaxDetail,
-  PaymentTerms,
-  Party,
-} from "@majikah/majik-invoice";
 import { MajikStorageAdapter } from "../storage-adapter";
 
 // ---------------------------------------------------------------------------
@@ -35,7 +29,7 @@ export interface ClientStateEntry {
 
 export const CLIENT_STATE_KEYS = {
   ACCOUNT_ORDER: "user_account_order",
-  INVOICE_DEFAULTS: "invoice_defaults",
+  // INVOICE_DEFAULTS: "invoice_defaults",
 } as const;
 
 export type ClientStateKey =
@@ -50,20 +44,6 @@ export type ClientStateKey =
  * account. Stored as a JSON array: `["id1", "id2", ...]`.
  */
 export type AccountOrderValue = string[];
-
-/**
- * User-configured defaults applied when creating new invoices.
- */
-export interface InvoiceDefaults {
-  currency: CurrencyCode;
-  defaultTaxes?: TaxDetail[];
-  paymentTerms?: PaymentTerms;
-  issuer?: Partial<Party>;
-  invoiceNumberPrefix?: string;
-  invoiceNumberCounter?: number;
-  notes?: string;
-  tagline?: string;
-}
 
 // ---------------------------------------------------------------------------
 // Adapter interface

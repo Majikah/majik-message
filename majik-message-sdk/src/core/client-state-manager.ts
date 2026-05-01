@@ -30,7 +30,6 @@ import {
   CLIENT_STATE_KEYS,
   ClientStateEntry,
   ClientStateStorageAdapter,
-  InvoiceDefaults,
 } from "./storage/client-state/_types";
 import { InMemoryClientStateAdapter } from "./storage/client-state/adapter-memory";
 
@@ -201,87 +200,87 @@ export class ClientStateManager {
 
   // ── Typed: invoice defaults ───────────────────────────────────────────────
 
-  /**
-   * Retrieve user-configured invoice defaults.
-   * Returns `null` if none have been saved yet.
-   */
-  async getInvoiceDefaults(): Promise<InvoiceDefaults | null> {
-    const raw = await this.get(CLIENT_STATE_KEYS.INVOICE_DEFAULTS);
-    if (raw === null) return null;
-    try {
-      return JSON.parse(raw) as InvoiceDefaults;
-    } catch {
-      console.warn(
-        "ClientStateManager: malformed invoice defaults — discarding.",
-      );
-      return null;
-    }
-  }
+  // /**
+  //  * Retrieve user-configured invoice defaults.
+  //  * Returns `null` if none have been saved yet.
+  //  */
+  // async getInvoiceDefaults(): Promise<InvoiceDefaults | null> {
+  //   const raw = await this.get(CLIENT_STATE_KEYS.INVOICE_DEFAULTS);
+  //   if (raw === null) return null;
+  //   try {
+  //     return JSON.parse(raw) as InvoiceDefaults;
+  //   } catch {
+  //     console.warn(
+  //       "ClientStateManager: malformed invoice defaults — discarding.",
+  //     );
+  //     return null;
+  //   }
+  // }
 
-  /**
-   * Persist user-configured invoice defaults.
-   */
-  async setInvoiceDefaults(defaults: InvoiceDefaults): Promise<void> {
-    await this.set(
-      CLIENT_STATE_KEYS.INVOICE_DEFAULTS,
-      JSON.stringify(defaults),
-    );
-  }
+  // /**
+  //  * Persist user-configured invoice defaults.
+  //  */
+  // async setInvoiceDefaults(defaults: InvoiceDefaults): Promise<void> {
+  //   await this.set(
+  //     CLIENT_STATE_KEYS.INVOICE_DEFAULTS,
+  //     JSON.stringify(defaults),
+  //   );
+  // }
 
-  /**
-   * Remove the persisted invoice defaults.
-   */
-  async removeInvoiceDefaults(): Promise<void> {
-    await this.remove(CLIENT_STATE_KEYS.INVOICE_DEFAULTS);
-  }
+  // /**
+  //  * Remove the persisted invoice defaults.
+  //  */
+  // async removeInvoiceDefaults(): Promise<void> {
+  //   await this.remove(CLIENT_STATE_KEYS.INVOICE_DEFAULTS);
+  // }
 
-  async currentInvoiceNumber(): Promise<number> {
-    const current = await this.getInvoiceDefaults();
-    const counter = current?.invoiceNumberCounter ?? 0;
-    return counter;
-  }
+  // async currentInvoiceNumber(): Promise<number> {
+  //   const current = await this.getInvoiceDefaults();
+  //   const counter = current?.invoiceNumberCounter ?? 0;
+  //   return counter;
+  // }
 
-  async incrementInvoiceNumber(): Promise<number> {
-    // 1. Get current defaults
-    const current = await this.getInvoiceDefaults();
+  // async incrementInvoiceNumber(): Promise<number> {
+  //   // 1. Get current defaults
+  //   const current = await this.getInvoiceDefaults();
 
-    // 2. Initialize safely if missing
-    const counter = current?.invoiceNumberCounter ?? 0;
+  //   // 2. Initialize safely if missing
+  //   const counter = current?.invoiceNumberCounter ?? 0;
 
-    const updated: InvoiceDefaults = {
-      ...(current ?? {
-        currency: "PHP" as any, // fallback — adjust if you have a real default
-      }),
-      invoiceNumberCounter: counter + 1,
-    };
+  //   const updated: InvoiceDefaults = {
+  //     ...(current ?? {
+  //       currency: "PHP" as any, // fallback — adjust if you have a real default
+  //     }),
+  //     invoiceNumberCounter: counter + 1,
+  //   };
 
-    // 3. Persist
-    await this.setInvoiceDefaults(updated);
+  //   // 3. Persist
+  //   await this.setInvoiceDefaults(updated);
 
-    // 4. Return the new value (useful for generating invoice number)
-    return updated.invoiceNumberCounter!;
-  }
+  //   // 4. Return the new value (useful for generating invoice number)
+  //   return updated.invoiceNumberCounter!;
+  // }
 
-  async decrementInvoiceNumber(): Promise<number> {
-    // 1. Get current defaults
-    const current = await this.getInvoiceDefaults();
+  // async decrementInvoiceNumber(): Promise<number> {
+  //   // 1. Get current defaults
+  //   const current = await this.getInvoiceDefaults();
 
-    // 2. Initialize safely if missing
-    const counter = current?.invoiceNumberCounter ?? 0;
+  //   // 2. Initialize safely if missing
+  //   const counter = current?.invoiceNumberCounter ?? 0;
 
-    const updated: InvoiceDefaults = {
-      ...(current ?? {
-        currency: "PHP" as any, // fallback — adjust if you have a real default
-      }),
-      invoiceNumberCounter: counter - 1,
-    };
+  //   const updated: InvoiceDefaults = {
+  //     ...(current ?? {
+  //       currency: "PHP" as any, // fallback — adjust if you have a real default
+  //     }),
+  //     invoiceNumberCounter: counter - 1,
+  //   };
 
-    // 3. Persist
-    await this.setInvoiceDefaults(updated);
+  //   // 3. Persist
+  //   await this.setInvoiceDefaults(updated);
 
-    // 4. Return the new value (useful for generating invoice number)
-    return updated.invoiceNumberCounter!;
-  }
+  //   // 4. Return the new value (useful for generating invoice number)
+  //   return updated.invoiceNumberCounter!;
+  // }
 
   // ── Async count ───────────────────────────────────────────────────────────
 

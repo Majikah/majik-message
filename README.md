@@ -600,9 +600,10 @@ Once enabled, any page you load will be automatically scanned for quantum-safe e
 | Typing Indicators                 | ✓ Supported                    |
 | Read Receipts                     | ✓ Supported                    |
 | Message Expiration                | ✓ Custom timers available      |
-| File/Image Sharing                | ⧗ Coming soon                  |
-| Voice Messages                    | ⧗ Coming soon                  |
-| Video Calling                     | ⧗ Planned                      |
+| File/Image Sharing                | ✓ Supported                    |
+| Voice Messages                    | ✓ Supported                    |
+| P2P Audio Calling                 | ✓ Supported                    |
+
 
 ---
 
