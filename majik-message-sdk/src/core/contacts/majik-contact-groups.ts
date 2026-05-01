@@ -160,6 +160,12 @@ export class MajikContactGroupManager {
     };
   }
 
+  clear(): this {
+    this.groups.clear();
+    this.contactGroupIndex.clear();
+    return this;
+  }
+
   getGroup(id: string): MajikContactGroup | undefined {
     this.assertGroupId(id);
     return this.groups.get(id);

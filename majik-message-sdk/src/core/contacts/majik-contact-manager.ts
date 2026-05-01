@@ -1,9 +1,6 @@
-/* -------------------------------
- * Types
- * ------------------------------- */
-
 import {
   MajikContact,
+  MajikContactCard,
   MajikContactData,
   MajikContactGroup,
   MajikContactGroupMeta,
@@ -11,41 +8,39 @@ import {
 import { MajikContactDirectory } from "./majik-contact-directory";
 import { MajikContactGroupManager } from "./majik-contact-groups";
 import { MAJIK_API_RESPONSE } from "../types";
-import { MessageEnvelope } from "../messages/message-envelope";
 import { MajikContactManagerError } from "./errors";
 import { MajikContactManagerJSON } from "./types";
+import {
+  arrayBufferToBase64,
+  arrayToBase64,
+  base64ToArrayBuffer,
+} from "../utils/utilities";
+import { KEY_ALGO } from "../crypto/constants";
+import { gunzipSync, gzipSync } from "fflate";
+import { MajikContactStorageAdapter } from "../storage/contact-directory/contacts/_types";
+import { MajikContactGroupStorageAdapter } from "../storage/contact-directory/groups/_types";
+import { InMemoryContactAdapter } from "../storage/contact-directory/contacts/adapter-memory";
+import { InMemoryContactGroupAdapter } from "../storage/contact-directory/groups/adapter-memory";
 
-/* -------------------------------
- * MajikContactManager Class
- * ------------------------------- */
+// ---------------------------------------------------------------------------
+// MajikContactManager
+// ---------------------------------------------------------------------------
 
-/**
- * Unified facade over MajikContactDirectory and MajikContactGroupManager.
- *
- * Responsibilities:
- *  - Owns both the directory and the group manager as a single cohesive unit
- *  - Proxies all directory methods so MajikMessage call sites need only change
- *    `contactDirectory` → `contacts` with no logic changes
- *  - Wires lifecycle hooks automatically so callers can never forget them:
- *      • removeContact()  → always calls groups.handleContactRemoved()
- *      • blockContact()   → always syncs the Blocked system group
- *      • unblockContact() → always syncs the Blocked system group
- *  - Exposes the group manager via `.group` for all group-specific operations
- *  - Serializes both directory and groups into one unified payload for
- *    MajikMessage.toJSON() / MajikMessage.fromJSON()
- *
- * Construction:
- *  - Pass nothing → fresh directory + fresh group manager (new session)
- *  - Pass a directory → wraps it, creates a fresh group manager bound to it
- *  - Pass both → fully restores a prior session (used by fromJSON)
- */
+export interface MajikContactManagerAdapters {
+  contacts?: MajikContactStorageAdapter;
+  groups?: MajikContactGroupStorageAdapter;
+}
+
 export class MajikContactManager {
   private readonly directory: MajikContactDirectory;
   private readonly groupManager: MajikContactGroupManager;
+  private _contactAdapter: MajikContactStorageAdapter;
+  private _groupAdapter: MajikContactGroupStorageAdapter;
 
   constructor(
     directory?: MajikContactDirectory,
     groupManager?: MajikContactGroupManager,
+    adapters?: MajikContactManagerAdapters,
   ) {
     this.directory = directory ?? new MajikContactDirectory();
 
@@ -55,61 +50,216 @@ export class MajikContactManager {
     } else {
       this.groupManager = new MajikContactGroupManager(this.directory);
     }
+
+    this._contactAdapter = adapters?.contacts ?? new InMemoryContactAdapter();
+    this._groupAdapter = adapters?.groups ?? new InMemoryContactGroupAdapter();
   }
 
-  /* ================================
-   * Group Manager Access
-   * ================================ */
+  // ── Adapter management ────────────────────────────────────────────────────
 
-  /**
-   * Direct access to the full MajikContactGroupManager API.
-   * Use for all group-specific operations:
-   *   manager.group.addToFavorites(contactId)
-   *   manager.group.createGroup(id, name)
-   *   manager.group.getContactsInGroup(groupId)
-   *   etc.
-   */
-  get group(): MajikContactGroupManager {
-    return this.groupManager;
+  get contactAdapter(): MajikContactStorageAdapter {
+    return this._contactAdapter;
+  }
+
+  get groupAdapter(): MajikContactGroupStorageAdapter {
+    return this._groupAdapter;
   }
 
   /**
-   * Direct access to the underlying MajikContactDirectory.
-   * Prefer the proxied methods on this class over accessing the directory
-   * directly — they keep group state in sync automatically.
+   * Swap both adapters at runtime. Does NOT migrate data.
+   *
+   * Migration pattern:
+   * ```ts
+   * const snap = await manager.toJSON();
+   * manager.setAdapters({ contacts: new IDBContactAdapter(), groups: new IDBGroupAdapter() });
+   * await manager.hydrate();                    // warms from new (empty) adapters
+   * await manager.bulkRestoreFromJSON(snap);    // writes old data into new adapters
+   * ```
    */
-  get directory_(): MajikContactDirectory {
-    return this.directory;
+  setAdapters(adapters: MajikContactManagerAdapters): void {
+    if (adapters.contacts) this._contactAdapter = adapters.contacts;
+    if (adapters.groups) this._groupAdapter = adapters.groups;
   }
 
-  /* ================================
-   * Contact Management (Proxied)
-   * All signatures are intentionally identical to MajikContactDirectory
-   * so MajikMessage call sites require zero logic changes.
-   * ================================ */
+  // ── Hydration ─────────────────────────────────────────────────────────────
 
-  addContact(contact: MajikContact): this {
+  /**
+   * Load all contacts and groups from the adapters into the in-memory
+   * directory and group manager. Call once after construction (or after
+   * swapping adapters).
+   *
+   * Restoration order:
+   *  1. Contacts — must come first so groups can validate member existence.
+   *  2. Groups — restored via groupManager.fromJSON() which rebuilds the
+   *     reverse index and re-bootstraps system groups.
+   *  3. Orphan pruning — any group member ID not present in the restored
+   *     directory is silently removed (guards against data drift).
+   */
+  async hydrate(): Promise<void> {
+    // ── 1. Contacts ───────────────────────────────────────────────────────
+    const serializedContacts = await this._contactAdapter.list();
+    this.directory.clear();
+
+    for (const item of serializedContacts) {
+      try {
+        const raw = base64ToArrayBuffer(item.publicKeyBase64);
+        let publicKey: CryptoKey | { raw: Uint8Array };
+        try {
+          publicKey = await crypto.subtle.importKey(
+            "raw",
+            raw,
+            KEY_ALGO,
+            true,
+            [],
+          );
+        } catch {
+          publicKey = { raw: new Uint8Array(raw) };
+        }
+
+        const contact = MajikContact.create(
+          item.id,
+          publicKey as any,
+          item.mlKey,
+          item.fingerprint,
+          item.meta,
+          item.edPublicKeyBase64,
+          item.mlDsaPublicKeyBase64,
+        );
+        // Use the internal map directly to avoid addContact's duplicate-check
+        // (re-hydrating from persisted state, not user-facing add)
+        this.directory["contacts"].set(contact.id, contact);
+        this.directory["fingerprintMap"].set(contact.fingerprint, contact.id);
+      } catch (err) {
+        console.warn(
+          `MajikContactManager.hydrate: skipping malformed contact "${item?.id}":`,
+          err,
+        );
+      }
+    }
+
+    // ── 2. Groups ─────────────────────────────────────────────────────────
+    const serializedGroups = await this._groupAdapter.list();
+    this.groupManager.fromJSON({ groups: serializedGroups });
+
+    // ── 3. Orphan pruning ─────────────────────────────────────────────────
+    MajikContactManager.pruneOrphanedMembers(this.directory, this.groupManager);
+  }
+
+  // ── Write-through helpers ─────────────────────────────────────────────────
+
+  /**
+   * Persists a single contact to the adapter (called after every mutating
+   * operation that affects a contact's serialized form).
+   */
+  private async persistContact(contact: MajikContact): Promise<void> {
+    const json = await contact.toJSON();
+    await this._contactAdapter.save(json);
+  }
+
+  /**
+   * Persists a single group to the adapter.
+   */
+  private async persistGroup(group: MajikContactGroup): Promise<void> {
+    await this._groupAdapter.save(group.toJSON());
+  }
+
+  // ── CRUD ──────────────────────────────────────────────────────────────────
+
+  /**
+   * Adds a contact to the directory and persists it to the adapter.
+   */
+  async addContact(contact: MajikContact): Promise<this> {
     this.directory.addContact(contact);
-    return this;
-  }
-
-  addContacts(contacts: MajikContact[]): this {
-    this.directory.addContacts(contacts);
+    await this.persistContact(contact);
     return this;
   }
 
   /**
-   * Removes a contact from the directory and automatically removes them
-   * from every group they belong to via the group manager hook.
-   * The two operations are always atomic from the caller's perspective.
+   * Adds multiple contacts atomically — adapter write uses bulkSave.
    */
-  removeContact(id: string): MAJIK_API_RESPONSE {
+  async addContacts(contacts: MajikContact[]): Promise<this> {
+    this.directory.addContacts(contacts);
+    const jsons = await Promise.all(contacts.map((c) => c.toJSON()));
+    await this._contactAdapter.bulkSave(jsons);
+    return this;
+  }
+
+  /**
+   * Removes a contact from the directory, all groups, and the adapter.
+   */
+  async removeContact(id: string): Promise<MAJIK_API_RESPONSE> {
     const result = this.directory.removeContact(id);
     if (result.success) {
       this.groupManager.handleContactRemoved(id);
+      await this._contactAdapter.remove(id);
+      // Persist every group whose membership changed
+      await this._persistAllGroups();
     }
     return result;
   }
+
+  /**
+   * Updates contact metadata and persists the change.
+   */
+  async updateContactMeta(
+    id: string,
+    meta: Partial<MajikContactData["meta"]>,
+  ): Promise<MajikContact> {
+    const contact = this.directory.updateContactMeta(id, meta);
+    await this.persistContact(contact);
+    return contact;
+  }
+
+  /**
+   * Blocks a contact and persists both the contact and the Blocked group.
+   */
+  async blockContact(id: string): Promise<MajikContact> {
+    const contact = this.directory.blockContact(id);
+    const blocked = this.groupManager.addContactToGroupIfAbsent(
+      this.groupManager.getBlockedGroup().id,
+      id,
+    );
+    await this.persistContact(contact);
+    await this.persistGroup(blocked);
+    return contact;
+  }
+
+  /**
+   * Unblocks a contact and persists both the contact and the Blocked group.
+   */
+  async unblockContact(id: string): Promise<MajikContact> {
+    const contact = this.directory.unblockContact(id);
+    const blocked = this.groupManager.removeContactFromGroupIfPresent(
+      this.groupManager.getBlockedGroup().id,
+      id,
+    );
+    await this.persistContact(contact);
+    await this.persistGroup(blocked);
+    return contact;
+  }
+
+  async setMajikahStatus(id: string, status: boolean): Promise<MajikContact> {
+    const contact = this.directory.setMajikahStatus(id, status);
+    await this.persistContact(contact);
+    return contact;
+  }
+
+  /**
+   * Clears all contacts and groups from both the in-memory stores and adapters.
+   */
+  async clear(): Promise<this> {
+    const allContactIds = this.directory.listContacts().map((c) => c.id);
+    this.directory.clear();
+    allContactIds.forEach((id) => this.groupManager.handleContactRemoved(id));
+
+    this.directory.clear();
+    this.groupManager.clear();
+    await this._contactAdapter.clear();
+    await this._groupAdapter.clear();
+    return this;
+  }
+
+  // ── Sync reads (unchanged from original) ──────────────────────────────────
 
   getContact(id: string): MajikContact | undefined {
     return this.directory.getContact(id);
@@ -141,43 +291,6 @@ export class MajikContactManager {
     return this.directory.listContacts(sortedByLabel, majikahOnly);
   }
 
-  updateContactMeta(
-    id: string,
-    meta: Partial<MajikContactData["meta"]>,
-  ): MajikContact {
-    return this.directory.updateContactMeta(id, meta);
-  }
-
-  /**
-   * Blocks a contact on the directory AND adds them to the system Blocked
-   * group — both sides are always kept in sync.
-   */
-  blockContact(id: string): MajikContact {
-    const contact = this.directory.blockContact(id);
-    this.groupManager.addContactToGroupIfAbsent(
-      this.groupManager.getBlockedGroup().id,
-      id,
-    );
-    return contact;
-  }
-
-  /**
-   * Unblocks a contact on the directory AND removes them from the system
-   * Blocked group — both sides are always kept in sync.
-   */
-  unblockContact(id: string): MajikContact {
-    const contact = this.directory.unblockContact(id);
-    this.groupManager.removeContactFromGroupIfPresent(
-      this.groupManager.getBlockedGroup().id,
-      id,
-    );
-    return contact;
-  }
-
-  setMajikahStatus(id: string, status: boolean): MajikContact {
-    return this.directory.setMajikahStatus(id, status);
-  }
-
   isMajikahRegistered(id: string): boolean {
     return this.directory.isMajikahRegistered(id);
   }
@@ -186,303 +299,375 @@ export class MajikContactManager {
     return this.directory.isMajikahIdentityChecked(id);
   }
 
-  hasContactForEnvelope(envelope: MessageEnvelope): boolean {
-    return this.directory.hasContactForEnvelope(envelope);
+  // ── Group CRUD (now async, write-through) ─────────────────────────────────
+
+  get group(): MajikContactGroupManager {
+    return this.groupManager;
   }
 
-  /* ================================
-   * Group CRUD Pass-throughs
-   * ================================ */
+  get directory_(): MajikContactDirectory {
+    return this.directory;
+  }
 
-  /**
-   * Creates and registers a new user-defined group.
-   * Throws if a group with the same ID already exists.
-   */
-  createGroup(
+  async createGroup(
     id: string,
     name: string,
     meta?: Partial<Omit<MajikContactGroupMeta, "name">>,
     initialMemberIds?: string[],
-  ): MajikContactGroup {
-    return this.groupManager.createGroup(id, name, meta, initialMemberIds);
+  ): Promise<MajikContactGroup> {
+    const group = this.groupManager.createGroup(
+      id,
+      name,
+      meta,
+      initialMemberIds,
+    );
+    await this.persistGroup(group);
+    return group;
   }
 
-  /**
-   * Registers an already-constructed MajikContactGroup instance.
-   * Throws if a group with the same ID already exists.
-   */
-  addGroup(group: MajikContactGroup): this {
+  async addGroup(group: MajikContactGroup): Promise<this> {
     this.groupManager.addGroup(group);
+    await this.persistGroup(group);
     return this;
   }
 
-  /**
-   * Removes a user group by ID.
-   * System groups (Favorites, Blocked) cannot be deleted.
-   */
-  removeGroup(id: string): MAJIK_API_RESPONSE {
-    return this.groupManager.removeGroup(id);
+  async removeGroup(id: string): Promise<MAJIK_API_RESPONSE> {
+    const result = this.groupManager.removeGroup(id);
+    if (result.success) {
+      await this._groupAdapter.remove(id);
+    }
+    return result;
   }
 
-  /**
-   * Returns a group by ID, or undefined if not found.
-   */
   getGroup(id: string): MajikContactGroup | undefined {
     return this.groupManager.getGroup(id);
   }
 
-  /**
-   * Returns a group by ID. Throws if not found.
-   */
   getGroupOrThrow(id: string): MajikContactGroup {
     return this.groupManager.getGroupOrThrow(id);
   }
 
-  /**
-   * Returns true if a group with the given ID exists.
-   */
   hasGroup(id: string): boolean {
     return this.groupManager.hasGroup(id);
   }
 
-  /**
-   * Returns all groups.
-   *
-   * @param includeSystem  Include system groups (Favorites, Blocked). Default: true.
-   * @param sortedByName   Sort results alphabetically by group name. Default: false.
-   */
   listGroups(includeSystem = true, sortedByName = false): MajikContactGroup[] {
     return this.groupManager.listGroups(includeSystem, sortedByName);
   }
 
-  /**
-   * Returns only user-created groups (excludes Favorites and Blocked).
-   * Sorted alphabetically by name.
-   */
   listUserGroups(sortedByName = true): MajikContactGroup[] {
     return this.groupManager.listGroups(false, sortedByName);
   }
 
-  /**
-   * Returns only system groups (Favorites and Blocked).
-   */
   listSystemGroups(): MajikContactGroup[] {
     return this.groupManager.listGroups(true).filter((g) => g.isSystem);
   }
 
-  /**
-   * Updates mutable metadata on a group (name, description).
-   * Name is locked on system groups — will throw if attempted.
-   */
-  updateGroupMeta(
+  async updateGroupMeta(
     id: string,
     meta: Partial<
       Pick<MajikContactGroupMeta, "name" | "description" | "color">
     >,
-  ): MajikContactGroup {
-    return this.groupManager.updateGroupMeta(id, meta);
+  ): Promise<MajikContactGroup> {
+    const group = this.groupManager.updateGroupMeta(id, meta);
+    await this.persistGroup(group);
+    return group;
   }
 
-  /* ================================
-   * Group Membership Pass-throughs
-   * ================================ */
+  // ── Group membership (async, write-through) ───────────────────────────────
 
-  /**
-   * Adds a contact to a group.
-   * Validates the contact exists in the directory.
-   * If the group is the system Blocked group, also calls contact.block().
-   * Throws if the contact is already a member — use addContactToGroupIfAbsent for idempotent.
-   */
-  addContactToGroup(groupId: string, contactId: string): MajikContactGroup {
-    return this.groupManager.addContactToGroup(groupId, contactId);
-  }
-
-  /**
-   * Idempotent variant — does not throw if the contact is already a member.
-   */
-  addContactToGroupIfAbsent(
+  async addContactToGroup(
     groupId: string,
     contactId: string,
-  ): MajikContactGroup {
-    return this.groupManager.addContactToGroupIfAbsent(groupId, contactId);
+  ): Promise<MajikContactGroup> {
+    const group = this.groupManager.addContactToGroup(groupId, contactId);
+    await this.persistGroup(group);
+    return group;
   }
 
-  /**
-   * Adds multiple contacts to a group in one call (all-or-nothing).
-   */
-  addContactsToGroup(groupId: string, contactIds: string[]): MajikContactGroup {
-    return this.groupManager.addContactsToGroup(groupId, contactIds);
-  }
-
-  /**
-   * Removes a contact from a group.
-   * If the group is the system Blocked group, also calls contact.unblock().
-   * Throws if the contact is not a member — use removeContactFromGroupIfPresent for idempotent.
-   */
-  removeContactFromGroup(
+  async addContactToGroupIfAbsent(
     groupId: string,
     contactId: string,
-  ): MajikContactGroup {
-    return this.groupManager.removeContactFromGroup(groupId, contactId);
-  }
-
-  /**
-   * Idempotent variant — does not throw if the contact is not a member.
-   */
-  removeContactFromGroupIfPresent(
-    groupId: string,
-    contactId: string,
-  ): MajikContactGroup {
-    return this.groupManager.removeContactFromGroupIfPresent(
+  ): Promise<MajikContactGroup> {
+    const group = this.groupManager.addContactToGroupIfAbsent(
       groupId,
       contactId,
     );
+    await this.persistGroup(group);
+    return group;
   }
 
-  /**
-   * Moves a contact from one group to another atomically.
-   * Throws if the contact is not a member of the source group.
-   */
-  moveContactBetweenGroups(
+  async addContactsToGroup(
+    groupId: string,
+    contactIds: string[],
+  ): Promise<MajikContactGroup> {
+    const group = this.groupManager.addContactsToGroup(groupId, contactIds);
+    await this.persistGroup(group);
+    return group;
+  }
+
+  async removeContactFromGroup(
+    groupId: string,
+    contactId: string,
+  ): Promise<MajikContactGroup> {
+    const group = this.groupManager.removeContactFromGroup(groupId, contactId);
+    await this.persistGroup(group);
+    return group;
+  }
+
+  async removeContactFromGroupIfPresent(
+    groupId: string,
+    contactId: string,
+  ): Promise<MajikContactGroup> {
+    const group = this.groupManager.removeContactFromGroupIfPresent(
+      groupId,
+      contactId,
+    );
+    await this.persistGroup(group);
+    return group;
+  }
+
+  async moveContactBetweenGroups(
     contactId: string,
     fromGroupId: string,
     toGroupId: string,
-  ): void {
-    return this.groupManager.moveContact(contactId, fromGroupId, toGroupId);
+  ): Promise<void> {
+    this.groupManager.moveContact(contactId, fromGroupId, toGroupId);
+    // Persist both affected groups
+    const from = this.groupManager.getGroup(fromGroupId);
+    const to = this.groupManager.getGroup(toGroupId);
+    const writes: Promise<void>[] = [];
+    if (from) writes.push(this.persistGroup(from));
+    if (to) writes.push(this.persistGroup(to));
+    await Promise.all(writes);
   }
 
-  /* ================================
-   * Group Query Pass-throughs
-   * ================================ */
+  // ── Group query pass-throughs (sync, unchanged) ───────────────────────────
 
-  /**
-   * Returns all hydrated MajikContact instances in the given group.
-   * Contacts removed from the directory since last save are silently skipped.
-   */
   getContactsInGroup(groupId: string): MajikContact[] {
     return this.groupManager.getContactsInGroup(groupId);
   }
 
-  /**
-   * Returns hydrated contacts in the group, sorted by label (or ID if no label).
-   */
   getContactsInGroupSorted(groupId: string): MajikContact[] {
     return this.groupManager.getContactsInGroupSorted(groupId);
   }
 
-  /**
-   * Returns true if the contact is a member of the given group.
-   */
   isContactInGroup(groupId: string, contactId: string): boolean {
     return this.groupManager.isContactInGroup(groupId, contactId);
   }
 
-  /**
-   * Returns all groups the contact belongs to.
-   */
   getGroupsForContact(contactId: string): MajikContactGroup[] {
     return this.groupManager.getGroupsForContact(contactId);
   }
 
-  /**
-   * Returns all group IDs the contact belongs to.
-   */
   getGroupIdsForContact(contactId: string): string[] {
     return this.groupManager.getGroupIdsForContact(contactId);
   }
 
-  /* ================================
-   * System Group Convenience Pass-throughs
-   * ================================ */
+  // ── System group convenience (async, write-through) ───────────────────────
 
-  /**
-   * Adds the contact to the Favorites group (idempotent).
-   */
-  addToFavorites(contactId: string): MajikContactGroup {
-    return this.groupManager.addToFavorites(contactId);
+  async addToFavorites(contactId: string): Promise<MajikContactGroup> {
+    const group = this.groupManager.addToFavorites(contactId);
+    await this.persistGroup(group);
+    return group;
   }
 
-  /**
-   * Removes the contact from the Favorites group (idempotent).
-   */
-  removeFromFavorites(contactId: string): MajikContactGroup {
-    return this.groupManager.removeFromFavorites(contactId);
+  async removeFromFavorites(contactId: string): Promise<MajikContactGroup> {
+    const group = this.groupManager.removeFromFavorites(contactId);
+    await this.persistGroup(group);
+    return group;
   }
 
-  /**
-   * Returns true if the contact is in the Favorites group.
-   */
   isFavorite(contactId: string): boolean {
     return this.groupManager.isFavorite(contactId);
   }
 
-  /**
-   * Returns true if the contact is in the Blocked group.
-   */
   isContactBlocked(contactId: string): boolean {
     return this.groupManager.isBlocked(contactId);
   }
 
-  /**
-   * Returns the Favorites system group instance.
-   */
   getFavoritesGroup(): MajikContactGroup {
     return this.groupManager.getFavoritesGroup();
   }
 
-  /**
-   * Returns the Blocked system group instance.
-   */
   getBlockedGroup(): MajikContactGroup {
     return this.groupManager.getBlockedGroup();
   }
 
-  /**
-   * Returns all contacts in the Favorites group as hydrated MajikContact instances.
-   */
   getFavoriteContacts(): MajikContact[] {
     return this.groupManager.getContactsInGroup(
       this.groupManager.getFavoritesGroup().id,
     );
   }
 
-  /**
-   * Returns all contacts in the Blocked group as hydrated MajikContact instances.
-   */
   getBlockedContacts(): MajikContact[] {
     return this.groupManager.getContactsInGroup(
       this.groupManager.getBlockedGroup().id,
     );
   }
 
-  /* ================================
-   * Directory Clear
-   * ================================ */
+  // ── Import / Export (unchanged) ───────────────────────────────────────────
 
-  /**
-   * Clears both the directory and all group memberships.
-   * System groups are preserved (re-bootstrapped by the group manager).
-   */
-  clear(): this {
-    const allContactIds = this.directory.listContacts().map((c) => c.id);
+  async exportContactAsJSON(contactId: string): Promise<string | null> {
+    const contact = this.getContact(contactId);
+    if (!contact) return null;
 
-    this.directory.clear();
+    let publicKeyBase64: string;
+    const anyPub: any = contact.publicKey;
+    if (anyPub?.raw instanceof Uint8Array) {
+      publicKeyBase64 = arrayBufferToBase64(anyPub.raw.buffer);
+    } else {
+      const raw = await crypto.subtle.exportKey(
+        "raw",
+        contact.publicKey as CryptoKey,
+      );
+      publicKeyBase64 = arrayBufferToBase64(raw);
+    }
 
-    // Notify the group manager for every contact so the reverse index
-    // and group memberships are cleaned up properly
-    allContactIds.forEach((id) => this.groupManager.handleContactRemoved(id));
-
-    return this;
+    return JSON.stringify(
+      {
+        id: contact.id,
+        label: contact.meta?.label || "",
+        publicKey: publicKeyBase64,
+        fingerprint: contact.fingerprint,
+        mlKey: contact.mlKey,
+        edPublicKeyBase64: contact.edPublicKeyBase64,
+        mlDsaPublicKeyBase64: contact.mlDsaPublicKeyBase64,
+      } satisfies MajikContactCard,
+      null,
+      2,
+    );
   }
 
-  /* ================================
-   * Serialization / Persistence
-   * ================================ */
+  async exportContactAsString(contactId: string): Promise<string | null> {
+    const contact = this.getContact(contactId);
+    if (!contact) return null;
+    return this.exportContactCompressed(contact);
+  }
 
-  /**
-   * Serializes both the directory and all groups into a single unified payload.
-   * This is what MajikMessage.toJSON() should persist.
-   */
+  async importContactFromJSON(jsonStr: string): Promise<MAJIK_API_RESPONSE> {
+    try {
+      const data: MajikContactCard = JSON.parse(jsonStr);
+      if (!data.id || !data.publicKey || !data.fingerprint) {
+        return { success: false, message: "Invalid contact JSON" };
+      }
+
+      const rawBuffer = base64ToArrayBuffer(data.publicKey as string);
+      let publicKey: CryptoKey | { raw: Uint8Array };
+      try {
+        publicKey = await crypto.subtle.importKey(
+          "raw",
+          rawBuffer,
+          KEY_ALGO,
+          true,
+          [],
+        );
+      } catch {
+        publicKey = { raw: new Uint8Array(rawBuffer) };
+      }
+
+      const contact = new MajikContact({
+        id: data.id,
+        publicKey,
+        fingerprint: data.fingerprint,
+        meta: { label: data.label },
+        mlKey: data.mlKey,
+        edPublicKeyBase64: data.edPublicKeyBase64,
+        mlDsaPublicKeyBase64: data.mlDsaPublicKeyBase64,
+      });
+
+      await this.addContact(contact);
+      return { success: true, message: "Contact imported successfully" };
+    } catch (err) {
+      return {
+        success: false,
+        message: err instanceof Error ? err.message : "Unknown error",
+      };
+    }
+  }
+
+  async importContactFromString(
+    base64Str: string,
+  ): Promise<MAJIK_API_RESPONSE> {
+    try {
+      const contact = await this.importContactCompressed(base64Str);
+      await this.addContact(contact);
+      return { success: true, message: "Contact imported successfully" };
+    } catch (err) {
+      return {
+        success: false,
+        message: err instanceof Error ? err.message : "Unknown error",
+      };
+    }
+  }
+
+  async exportContactCompressed(contact: MajikContact): Promise<string> {
+    let publicKeyBase64: string;
+    const anyPub: any = contact.publicKey;
+    if (anyPub?.raw instanceof Uint8Array) {
+      publicKeyBase64 = arrayBufferToBase64(anyPub.raw.buffer);
+    } else {
+      const raw = await crypto.subtle.exportKey(
+        "raw",
+        contact.publicKey as CryptoKey,
+      );
+      publicKeyBase64 = arrayBufferToBase64(raw);
+    }
+
+    const jsonObj: MajikContactCard = {
+      id: contact.id,
+      label: contact.meta?.label || "",
+      publicKey: publicKeyBase64,
+      fingerprint: contact.fingerprint,
+      mlKey: contact.mlKey,
+      edPublicKeyBase64: contact.edPublicKeyBase64,
+      mlDsaPublicKeyBase64: contact.mlDsaPublicKeyBase64,
+    };
+
+    const compressed = gzipSync(
+      new TextEncoder().encode(JSON.stringify(jsonObj)),
+    );
+    return arrayToBase64(compressed);
+  }
+
+  async importContactCompressed(base64Str: string): Promise<MajikContact> {
+    const compressed = base64ToArrayBuffer(base64Str);
+    const jsonStr = new TextDecoder().decode(
+      gunzipSync(new Uint8Array(compressed)),
+    );
+    const data: MajikContactCard = JSON.parse(jsonStr);
+
+    const rawBuffer = base64ToArrayBuffer(data.publicKey as string);
+    let publicKey: CryptoKey | { raw: Uint8Array };
+    try {
+      publicKey = await crypto.subtle.importKey(
+        "raw",
+        rawBuffer,
+        KEY_ALGO,
+        true,
+        [],
+      );
+    } catch {
+      publicKey = { raw: new Uint8Array(rawBuffer) };
+    }
+
+    if (!data?.id || !publicKey || !data?.fingerprint || !data?.mlKey) {
+      throw new Error("Invalid contact JSON");
+    }
+
+    return new MajikContact({
+      id: data.id,
+      publicKey,
+      fingerprint: data.fingerprint,
+      meta: { label: data.label },
+      mlKey: data.mlKey,
+      edPublicKeyBase64: data.edPublicKeyBase64,
+      mlDsaPublicKeyBase64: data.mlDsaPublicKeyBase64,
+    });
+  }
+
+  // ── Serialization ─────────────────────────────────────────────────────────
+
   async toJSON(): Promise<MajikContactManagerJSON> {
     return {
       contacts: await this.directory.toJSON(),
@@ -491,19 +676,25 @@ export class MajikContactManager {
   }
 
   /**
-   * Restores a MajikContactManager from a unified serialized payload.
-   *
-   * Restoration order:
-   *  1. Restore the directory (contacts + crypto keys)
-   *  2. Restore groups via the group manager
-   *  3. Silently strip any group member IDs that no longer exist in the
-   *     restored directory (orphan pruning) — guards against data drift
-   *     between directory and group state across serialization rounds
-   *
-   * @param data   The payload produced by toJSON().
+   * Restore from a JSON snapshot into the current adapters.
+   * Writes all contacts and groups through to the adapters.
+   * Used after setAdapters() to migrate data into a new store.
    */
+  async bulkRestoreFromJSON(data: MajikContactManagerJSON): Promise<void> {
+    if (!data?.contacts || !data?.groups) {
+      throw new MajikContactManagerError(
+        "bulkRestoreFromJSON: invalid payload — expected { contacts, groups }",
+      );
+    }
+
+    await this._contactAdapter.bulkSave(data.contacts.contacts);
+    await this._groupAdapter.bulkSave(data.groups.groups);
+    await this.hydrate();
+  }
+
   static async fromJSON(
-    data: MajikContactManagerJSON
+    data: MajikContactManagerJSON,
+    adapters?: MajikContactManagerAdapters,
   ): Promise<MajikContactManager> {
     if (!data || typeof data !== "object") {
       throw new MajikContactManagerError(
@@ -521,66 +712,37 @@ export class MajikContactManager {
       );
     }
 
-    // Step 1 — restore directory
-    let directory: MajikContactDirectory;
-    try {
-      directory = new MajikContactDirectory();
-      await directory.fromJSON(data.contacts);
-    } catch (err) {
-      throw new MajikContactManagerError(
-        "fromJSON: failed to restore contact directory",
-        err,
-      );
-    }
-
-    // Step 2 — restore group manager bound to the restored directory
-    let groupManager: MajikContactGroupManager;
-    try {
-      groupManager = new MajikContactGroupManager(directory);
-      groupManager.fromJSON(data.groups);
-    } catch (err) {
-      throw new MajikContactManagerError(
-        "fromJSON: failed to restore group manager",
-        err,
-      );
-    }
-
-    // Step 3 — silently prune orphaned member IDs from every group
-    // An orphan is a contact ID that exists in a group but is absent from
-    // the restored directory. This can happen if a contact was removed
-    // between two save cycles or data was partially corrupted.
-    MajikContactManager.pruneOrphanedMembers(directory, groupManager);
-
-    return new MajikContactManager(directory, groupManager);
+    const manager = new MajikContactManager(undefined, undefined, adapters);
+    await manager.bulkRestoreFromJSON(data);
+    return manager;
   }
 
+  // ── Private helpers ───────────────────────────────────────────────────────
+
   /**
-   * Walks every group and removes any member ID not present in the directory.
-   * Operates directly on the group instances — no re-serialization needed.
+   * Persists every group currently in the group manager to the adapter.
+   * Used after bulk contact removal where multiple groups may be affected.
    */
+  private async _persistAllGroups(): Promise<void> {
+    const all = this.groupManager.listGroups(true);
+    await this._groupAdapter.bulkSave(all.map((g) => g.toJSON()));
+  }
+
   private static pruneOrphanedMembers(
     directory: MajikContactDirectory,
     groupManager: MajikContactGroupManager,
   ): void {
-    const allGroups = groupManager.listGroups(true); // include system groups
-
+    const allGroups = groupManager.listGroups(true);
     for (const group of allGroups) {
       const orphans = group
         .listMemberIds()
         .filter((id) => !directory.hasContact(id));
-
       for (const orphanId of orphans) {
-        // Use the idempotent variant — safe even if the index is already clean
         group.removeMemberIfPresent(orphanId);
-        // Also clean up the reverse index on the group manager
         groupManager.handleContactRemoved(orphanId);
       }
     }
   }
-
-  /* ================================
-   * Assertions
-   * ================================ */
 
   private assertGroupManagerInstance(gm: unknown): void {
     if (!gm || !(gm instanceof MajikContactGroupManager)) {

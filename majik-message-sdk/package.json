@@ -99,7 +99,6 @@
     "ed2curve": "^0.3.0",
     "fernet": "^0.3.3",
     "fflate": "^0.8.2",
-    "idb": "^8.0.3",
     "nanoid": "^5.1.6"
   },
   "devDependencies": {

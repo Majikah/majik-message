@@ -4,34 +4,20 @@ import {
   MajikContact,
   MajikContactGroup,
   MajikContactGroupMeta,
-  type MajikContactCard,
   type MajikContactMeta,
   type SerializedMajikContact,
 } from "@majikah/majik-contact";
-import { KEY_ALGO } from "./core/crypto/constants";
 import { MessageEnvelope } from "./core/messages/message-envelope";
 import {
   EnvelopeCache,
   type EnvelopeCacheItem,
   type EnvelopeCacheJSON,
 } from "./core/messages/envelope-cache";
-import { MajikKeyStore } from "./core/crypto/keystore";
-import {
-  arrayBufferToBase64,
-  arrayToBase64,
-  base64ToArrayBuffer,
-  base64ToUint8Array,
-} from "./core/utils/utilities";
-import {
-  autoSaveMajikFileData,
-  loadSavedMajikFileData,
-} from "./core/utils/majik-file-utils";
+
+import { arrayToBase64, base64ToUint8Array } from "./core/utils/utilities";
+
 import { randomBytes } from "@stablelib/random";
-import {
-  clearAllBlobs,
-  idbLoadBlob,
-  idbSaveBlob,
-} from "./core/utils/idb-majik-system";
+
 import type {
   DecryptFileOptions,
   EncryptFileOptions,
@@ -69,9 +55,20 @@ import {
   type VerificationResult,
 } from "@majikah/majik-signature";
 
-import { gzipSync, gunzipSync } from "fflate";
-import { MajikContactManager } from "./core/contacts/majik-contact-manager";
+import {
+  MajikContactManager,
+  MajikContactManagerAdapters,
+} from "./core/contacts/majik-contact-manager";
 import { MajikContactManagerJSON } from "./core/contacts/types";
+import {
+  ClientStateStorageAdapter,
+  InMemoryClientStateAdapter,
+  InMemoryKeystoreAdapter,
+  MajikKeyStorageAdapter,
+  SQLiteDatabase,
+} from "./core/storage";
+import { MajikKeyManager } from "./core/crypto/keystore-manager";
+import { ClientStateManager } from "./core/client-state-manager";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -95,14 +92,39 @@ interface MajikMessageStatic<T extends MajikMessage> {
 }
 
 export interface MajikMessageConfig {
-  keyStore?: typeof MajikKeyStore; // optional — MajikKeyStore is static
+  dbSQL?: SQLiteDatabase;
+
   /**
-   * Optional pre-constructed MajikContactManager.
-   * When omitted, MajikMessage creates a fresh one internally.
-   * Pass one when restoring state from fromJSON() or loadState().
+   * Shared contact directory.
+   * Pass the same instance used by MajikMessage to keep contacts in sync.
    */
   contactManager?: MajikContactManager;
+
+  /**
+   * Pre-constructed key manager. If provided, adapters.keys is ignored.
+   * Pass the same instance used by MajikMessage / MajikSignatureClient
+   * to share a single keystore across clients.
+   */
+  keyManager?: MajikKeyManager;
+
   envelopeCache?: EnvelopeCache;
+
+  /**
+   * Pre-constructed client state manager. If provided, adapters.clientState
+   * is ignored.
+   */
+  clientStateManager?: ClientStateManager;
+
+  adapters?: {
+    contacts?: MajikContactManagerAdapters;
+    keys?: MajikKeyStorageAdapter;
+    /**
+     * Adapter for client-level state (account order, invoice defaults, etc.).
+     * Defaults to IDB_ADAPTER_CLIENT_STATE in browser environments.
+     * Pass InMemoryClientStateAdapter for tests or non-browser runtimes.
+     */
+    clientState?: ClientStateStorageAdapter;
+  };
 }
 
 export interface MajikMessageJSON {
@@ -120,28 +142,48 @@ type EventCallback = (...args: any[]) => void;
 // ─── MajikMessage ─────────────────────────────────────────────────────────────
 
 export class MajikMessage {
-  private userProfile: string = "default";
-  private id: string;
-  private contacts: MajikContactManager;
-  private envelopeCache: EnvelopeCache;
-  private listeners: Map<MajikMessageEvents, EventCallback[]> = new Map();
-  private ownAccounts: Map<string, MajikContact> = new Map();
-  private ownAccountsOrder: string[] = [];
-  private autosaveTimer: number | null = null;
-  private autosaveIntervalId: number | null = null;
-  private readonly autosaveIntervalMs = 15_000;
-  private readonly autosaveDebounceMs = 500;
+  private readonly _id: string;
+  private _db: SQLiteDatabase | null;
 
-  constructor(
-    config: MajikMessageConfig,
-    id?: string,
-    userProfile: string = "default",
-  ) {
-    this.userProfile = userProfile || "default";
-    this.id = id || arrayToBase64(randomBytes(32));
-    this.contacts = config.contactManager ?? new MajikContactManager();
-    this.envelopeCache =
-      config.envelopeCache || new EnvelopeCache(undefined, userProfile);
+  private _contacts: MajikContactManager;
+  private _keys: MajikKeyManager;
+  private _state: ClientStateManager;
+
+  private envelopeCache: EnvelopeCache;
+  private _listeners: Map<MajikMessageEvents, EventCallback[]> = new Map();
+  /** MajikContact instances for accounts this client owns. */
+  private _ownAccounts: Map<string, MajikContact> = new Map();
+
+  /**
+   * Ordered list of own account IDs — head is the active account.
+   * Source of truth is ClientStateManager; this array is the in-memory
+   * working copy kept in sync on every mutation.
+   */
+  private _ownAccountsOrder: string[] = [];
+
+  private _autosaveOrderTimer: number | null = null;
+
+  constructor(config: MajikMessageConfig, id?: string) {
+    this._id = id || arrayToBase64(randomBytes(32));
+    this._db = config.dbSQL || null;
+
+    this.envelopeCache = config.envelopeCache || new EnvelopeCache(undefined);
+
+    this._contacts =
+      config.contactManager ??
+      new MajikContactManager(undefined, undefined, config.adapters?.contacts);
+
+    this._keys =
+      config.keyManager ??
+      new MajikKeyManager(
+        config.adapters?.keys ?? new InMemoryKeystoreAdapter(),
+      );
+
+    this._state =
+      config.clientStateManager ??
+      new ClientStateManager(
+        config.adapters?.clientState ?? new InMemoryClientStateAdapter(),
+      );
 
     const events: MajikMessageEvents[] = [
       "message",
@@ -157,21 +199,128 @@ export class MajikMessage {
       "contact-group-change",
       "active-account-change",
     ];
-    events.forEach((e) => this.listeners.set(e, []));
+    events.forEach((e) => this._listeners.set(e, []));
+  }
 
-    this.attachAutosaveHandlers();
+  /** Expose the key manager so callers can share it with other clients. */
+  get keyManager(): MajikKeyManager {
+    return this._keys;
+  }
+
+  /** Expose the client state manager for direct access if needed. */
+  get stateManager(): ClientStateManager {
+    return this._state;
+  }
+
+  // ── Hydration ─────────────────────────────────────────────────────────────
+
+  /**
+   * Load all domains from their adapters and restore client state.
+   * Call once on startup.
+   *
+   * ```ts
+   * const client = new MajikBuwizClient({ adapters: { keys: idbAdapter, ... } });
+   * await client.hydrate();
+   * ```
+   */
+  async hydrate(): Promise<void> {
+    // 1. Keys — load into manager cache
+    await this._keys.hydrate();
+
+    // 2. Contacts + groups
+    await this._contacts.hydrate();
+
+    // 4. Client state — account order, invoice defaults, etc.
+    await this._state.hydrate();
+
+    // 5. Own accounts — rebuild from keys loaded in step 1
+    await this._hydrateOwnAccounts();
+
+    // 6. Account order — restore from state manager, prune stale IDs
+    await this._restoreAccountOrder();
+  }
+
+  // ── Private hydration helpers ─────────────────────────────────────────────
+
+  private async _hydrateOwnAccounts(): Promise<void> {
+    const keys = this._keys.list();
+    for (const key of keys) {
+      if (!this._ownAccounts.has(key.id)) {
+        try {
+          const contact = key.toContact();
+          if (!this._contacts.hasContact(contact.id)) {
+            await this._contacts.addContact(contact);
+          }
+          this._ownAccounts.set(key.id, contact);
+          if (!this._ownAccountsOrder.includes(key.id)) {
+            this._ownAccountsOrder.push(key.id);
+          }
+        } catch (err) {
+          console.warn(
+            `MajikBuwizClient: failed to hydrate own account "${key.id}":`,
+            err,
+          );
+        }
+      }
+    }
+  }
+
+  private async _restoreAccountOrder(): Promise<void> {
+    try {
+      const saved = await this._state.getAccountOrder();
+      if (saved) {
+        // Prune IDs that no longer exist, then append any new ones at the tail
+        const valid = saved.filter((id) => this._ownAccounts.has(id));
+        const appended = this._ownAccountsOrder.filter(
+          (id) => !valid.includes(id),
+        );
+        this._ownAccountsOrder = [...valid, ...appended];
+      }
+    } catch {
+      // Non-fatal — order defaults to insertion order from _hydrateOwnAccounts
+    }
+  }
+
+  private _scheduleOrderSave(): void {
+    if (this._autosaveOrderTimer !== null) {
+      window.clearTimeout(this._autosaveOrderTimer);
+    }
+    this._autosaveOrderTimer = window.setTimeout(() => {
+      void this._persistAccountOrder();
+      this._autosaveOrderTimer = null;
+    }, 300) as unknown as number;
+  }
+
+  private async _persistAccountOrder(): Promise<void> {
+    try {
+      await this._state.setAccountOrder(this._ownAccountsOrder);
+    } catch (err) {
+      console.warn("MajikBuwizClient: failed to persist account order:", err);
+    }
+  }
+
+  /**
+   * Construct a client and immediately hydrate it.
+   */
+  static async create<T extends MajikMessage>(
+    this: new (config: MajikMessageConfig) => T,
+    config: MajikMessageConfig = {},
+  ): Promise<T> {
+    const client = new this(config);
+    await client.hydrate();
+    return client;
   }
 
   /**
    * Resolve a list of account/contact IDs into MajikRecipient objects.
-   * Each recipient needs their ML-KEM public key from MajikKeyStore.
+   * Each recipient needs their ML-KEM public key from this.keyManager.
    */
   private async _resolveRecipientsByPublicKey(
     publicKeys: MajikMessagePublicKey[],
   ): Promise<MajikRecipient[]> {
     return Promise.all(
       publicKeys.map(async (pkey) => {
-        const contact = await this.contacts.getContactByPublicKeyBase64(pkey);
+        const contact = await this._contacts.getContactByPublicKeyBase64(pkey);
         if (!contact)
           throw new Error(`No contact found for public key "${pkey}"`);
 
@@ -200,8 +349,8 @@ export class MajikMessage {
     id: string,
     promptFn?: (id: string) => string | Promise<string>,
   ): Promise<MajikIdentity> {
-    await MajikKeyStore.ensureUnlocked(id, promptFn);
-    const key = MajikKeyStore.get(id);
+    await this.keyManager.ensureUnlocked(id, promptFn);
+    const key = this.keyManager.get(id);
     if (!key) throw new Error(`Account not found: ${id}`);
     if (!key.hasMlKem) {
       throw new Error(
@@ -231,8 +380,8 @@ export class MajikMessage {
     if (!id)
       throw new Error("No active account — call setActiveAccount() first");
 
-    await MajikKeyStore.ensureUnlocked(id);
-    const key = MajikKeyStore.get(id);
+    await this.keyManager.ensureUnlocked(id);
+    const key = this.keyManager.get(id);
     if (!key) throw new Error(`Account not found in keystore: "${id}"`);
     if (!key.hasMlKem) {
       throw new Error(
@@ -262,7 +411,7 @@ export class MajikMessage {
   ): Promise<MajikFileRecipient[]> {
     return Promise.all(
       publicKeys.map(async (pkey) => {
-        const contact = await this.contacts.getContactByPublicKeyBase64(pkey);
+        const contact = await this._contacts.getContactByPublicKeyBase64(pkey);
         if (!contact)
           throw new Error(`No contact found for public key "${pkey}"`);
 
@@ -290,99 +439,154 @@ export class MajikMessage {
       : "extension";
   }
 
-  // ── Account Management ────────────────────────────────────────────────────
+  // ==========================================================================
+  // ── ACCOUNT MANAGEMENT ────────────────────────────────────────────────────
+  // ==========================================================================
 
-  generateMnemonic(): string {
-    return MajikKeyStore.generateMnemonic();
+  generateMnemonic(strength: 128 | 256 = 128): string {
+    return MajikKeyManager.generateMnemonic(strength);
   }
 
-  async exportAccountMnemonicBackup(
-    id: string,
+  async createAccount(
     mnemonic: string,
-  ): Promise<string> {
-    return MajikKeyStore.exportMnemonicBackup(id, mnemonic);
+    passphrase: string,
+    label?: string,
+  ): Promise<{ id: string; fingerprint: string; backup: string }> {
+    try {
+      const key = await MajikKey.create(mnemonic, passphrase, label);
+      await this._keys.save(key);
+      const contact = key.toContact();
+      this._registerOwnAccount(contact);
+      this._emit("new-account", contact);
+      return { id: key.id, fingerprint: key.fingerprint, backup: key.backup };
+    } catch (err) {
+      this._emit("error", err, { context: "createAccount" });
+      throw err;
+    }
   }
 
-  /**
-   * Import an account from a mnemonic-encrypted backup.
-   * Fully upgrades to Argon2id KDF + ML-KEM keys in one step.
-   */
   async importAccountFromMnemonicBackup(
     backupBase64: string,
     mnemonic: string,
     passphrase: string,
     label?: string,
   ): Promise<{ id: string; fingerprint: string }> {
-    const key = await MajikKeyStore.importFromMnemonicBackup(
-      backupBase64,
-      mnemonic,
-      passphrase,
-      label,
-    );
-
-    if (this.getOwnAccountById(key.id)) {
-      throw new Error("Account with the same ID already exists");
+    try {
+      const key = await this._keys.importFromMnemonicBackup(
+        backupBase64,
+        mnemonic,
+        passphrase,
+        label,
+      );
+      if (this.getOwnAccountById(key.id)) {
+        throw new Error("Account with the same ID already exists");
+      }
+      const contact = key.toContact();
+      this._registerOwnAccount(contact);
+      this._emit("new-account", contact);
+      return { id: key.id, fingerprint: key.fingerprint };
+    } catch (err) {
+      this._emit("error", err, { context: "importAccountFromMnemonicBackup" });
+      throw err;
     }
-    const keyContact = key.toContact();
-
-    this.addOwnAccount(keyContact);
-    return { id: key.id, fingerprint: key.fingerprint };
   }
 
-  /**
-   * Create a new account from a mnemonic, store it encrypted with passphrase.
-   */
-  async createAccountFromMnemonic(
+  async replaceAccountFromMnemonicBackup(
+    backupBase64: string,
     mnemonic: string,
     passphrase: string,
     label?: string,
-  ): Promise<{ id: string; fingerprint: string; backup: string }> {
-    const key = await MajikKey.create(mnemonic, passphrase, label);
-    await MajikKeyStore.addMajikKey(key);
+  ): Promise<{ id: string; fingerprint: string }> {
+    try {
+      const currentAccount = this.getActiveAccountKey();
+      const currentContact = this.getActiveAccount();
 
-    const keyContact = key.toContact();
+      const finalLabel = label?.trim() || currentContact?.meta?.label;
 
-    this.addOwnAccount(keyContact);
-    return { id: key.id, fingerprint: key.fingerprint, backup: key.backup };
+      // 1. Import first (no mutation yet)
+      const key = await this._keys.importFromMnemonicBackup(
+        backupBase64,
+        mnemonic,
+        passphrase,
+        finalLabel,
+      );
+
+      // 2. Prevent duplicate (except self-replace)
+      if (this.getOwnAccountById(key.id) && key.id !== currentAccount?.id) {
+        throw new Error("Account with the same ID already exists");
+      }
+
+      const contact = key.toContact();
+
+      // 3. Remove old account if different
+      if (currentAccount && currentAccount.id !== key.id) {
+        await this.removeOwnAccount(currentAccount.id);
+      }
+
+      // 4. Register new account
+      this._registerOwnAccount(contact);
+
+      // 5. Set active
+      await this.setActiveAccount(contact.id, true);
+
+      this._emit("new-account", contact);
+
+      return { id: key.id, fingerprint: key.fingerprint };
+    } catch (err) {
+      this._emit("error", err, {
+        context: "replaceAccountFromMnemonicBackup",
+      });
+      throw err;
+    }
+  }
+
+  async exportAccountMnemonicBackup(
+    id: string,
+    mnemonic: string,
+  ): Promise<string> {
+    return this._keys.exportMnemonicBackup(id, mnemonic);
   }
 
   addOwnAccount(account: MajikContact): void {
-    if (!this.ownAccounts.has(account.id)) {
-      this.ownAccounts.set(account.id, account);
-      this.ownAccountsOrder.push(account.id);
-    }
-    try {
-      if (!this.contacts.hasContact(account.id)) {
-        this.contacts.addContact(account);
-      }
-      if (!this.getActiveAccount()) {
-        this.setActiveAccount(account.id);
-      }
-      this.emit("new-account", account);
-    } catch {
-      // ignore if contact can't be added
-    }
-    this.scheduleAutosave();
+    this._registerOwnAccount(account);
+    this._emit("new-account", account);
   }
 
-  listOwnAccounts(majikahOnly = false): MajikContact[] {
-    let accounts = this.ownAccountsOrder
-      .map((id) => this.ownAccounts.get(id))
-      .filter((c): c is MajikContact => !!c);
-
-    if (majikahOnly) {
-      accounts = accounts.filter((a) => this.isContactMajikahRegistered(a.id));
-    }
-    return accounts;
+  async removeOwnAccount(id: string): Promise<boolean> {
+    if (!this._ownAccounts.has(id)) return false;
+    this._ownAccounts.delete(id);
+    const idx = this._ownAccountsOrder.indexOf(id);
+    if (idx > -1) this._ownAccountsOrder.splice(idx, 1);
+    await this._contacts.removeContact(id);
+    await this._keys.delete(id);
+    this._scheduleOrderSave();
+    this._emit("removed-account", id);
+    return true;
   }
 
   getOwnAccountById(id: string): MajikContact | undefined {
-    return this.ownAccounts.get(id);
+    return this._ownAccounts.get(id);
+  }
+
+  getActiveAccount(): MajikContact | null {
+    if (!this._ownAccountsOrder.length) return null;
+    return this._ownAccounts.get(this._ownAccountsOrder[0]) ?? null;
+  }
+
+  getActiveAccountKey(): MajikKey | null {
+    if (!this._ownAccountsOrder.length) return null;
+
+    const activeKey = this._keys.get(this._ownAccountsOrder[0]);
+    if (!activeKey) return null;
+    return activeKey;
+  }
+
+  isAccountActive(id: string): boolean {
+    return this._ownAccounts.has(id) && this._ownAccountsOrder[0] === id;
   }
 
   async setActiveAccount(id: string, bypassIdentity = false): Promise<boolean> {
-    if (!this.ownAccounts.has(id)) return false;
-
+    if (!this._ownAccounts.has(id)) return false;
     if (!bypassIdentity) {
       try {
         await this.ensureIdentityUnlocked(id);
@@ -390,15 +594,13 @@ export class MajikMessage {
         return false;
       }
     }
-
     const previousActive = this.getActiveAccount()?.id;
-    const index = this.ownAccountsOrder.indexOf(id);
-    if (index > -1) this.ownAccountsOrder.splice(index, 1);
-    this.ownAccountsOrder.unshift(id);
-    this.scheduleAutosave();
-
+    const index = this._ownAccountsOrder.indexOf(id);
+    if (index > -1) this._ownAccountsOrder.splice(index, 1);
+    this._ownAccountsOrder.unshift(id);
+    this._scheduleOrderSave();
     if (previousActive !== id) {
-      this.emit(
+      this._emit(
         "active-account-change",
         this.getActiveAccount(),
         previousActive,
@@ -407,600 +609,298 @@ export class MajikMessage {
     return true;
   }
 
-  getActiveAccount(): MajikContact | null {
-    if (!this.ownAccountsOrder.length) return null;
-    return this.ownAccounts.get(this.ownAccountsOrder[0]) ?? null;
+  listOwnAccounts(majikahOnly = false): MajikContact[] {
+    let accounts = this._ownAccountsOrder
+      .map((id) => this._ownAccounts.get(id))
+      .filter((c): c is MajikContact => !!c);
+
+    if (majikahOnly) {
+      accounts = accounts.filter((a) => this.isContactMajikahRegistered(a.id));
+    }
+    return accounts;
   }
 
-  isAccountActive(id: string): boolean {
-    return !!this.ownAccounts.has(id) && this.ownAccountsOrder[0] === id;
+  isContactMajikahRegistered(id: string): boolean {
+    return this._contacts.isMajikahRegistered(id);
   }
 
-  removeOwnAccount(id: string): boolean {
-    if (!this.ownAccounts.has(id)) return false;
-    this.ownAccounts.delete(id);
-    const idx = this.ownAccountsOrder.indexOf(id);
-    if (idx > -1) this.ownAccountsOrder.splice(idx, 1);
-    this.removeContact(id);
-    this.envelopeCache.deleteByFingerprint(id).catch(() => {});
-    this.emit("removed-account", id);
-    this.scheduleAutosave();
-    return true;
+  isContactMajikahIdentityChecked(id: string): boolean {
+    return this._contacts.isMajikahIdentityChecked(id);
+  }
+
+  setContactMajikahStatus(id: string, status: boolean): void {
+    this._contacts.setMajikahStatus(id, status);
   }
 
   async hasOwnIdentity(fingerprint: string): Promise<boolean> {
-    return MajikKeyStore.hasIdentity(fingerprint);
+    return this.keyManager.has(fingerprint);
   }
 
-  async updatePassphrase(
-    currentPassphrase: string,
-    newPassphrase: string,
-    id?: string,
-  ): Promise<void> {
-    const target = id ? this.getOwnAccountById(id) : this.getActiveAccount();
-    if (!target) throw new Error("No target account specified");
-    await MajikKeyStore.updatePassphrase(
-      target.id,
-      currentPassphrase,
-      newPassphrase,
-    );
-    this.scheduleAutosave();
-  }
-
-  // ── Contact Management ────────────────────────────────────────────────────
+  // ==========================================================================
+  // ── CONTACT MANAGEMENT ────────────────────────────────────────────────────
+  // ==========================================================================
 
   getContactByID(id: string): MajikContact | null {
     if (!id?.trim()) throw new Error("Invalid contact ID");
-    return this.contacts.getContact(id) ?? null;
-  }
-
-  hasContact(id: string): boolean {
-    if (!id?.trim()) throw new Error("Invalid contact ID");
-    return this.contacts.hasContact(id);
-  }
-
-  async hasContactByPublicKeyBase64(
-    publicKey: MajikMessagePublicKey,
-  ): Promise<boolean> {
-    if (!publicKey?.trim()) throw new Error("Invalid contact public key");
-    return await this.contacts.hasContactByPublicKeyBase64(publicKey);
+    return this._contacts.getContact(id) ?? null;
   }
 
   async getContactByPublicKey(
-    publicKeyBase64: MajikMessagePublicKey,
+    publicKeyBase64: string,
   ): Promise<MajikContact | null> {
     if (!publicKeyBase64?.trim()) throw new Error("Invalid public key");
     return (
-      (await this.contacts.getContactByPublicKeyBase64(publicKeyBase64)) ?? null
+      (await this._contacts.getContactByPublicKeyBase64(publicKeyBase64)) ??
+      null
     );
   }
 
-  async exportContactAsJSON(contactID: string): Promise<string | null> {
-    const contact = this.contacts.getContact(contactID);
-    if (!contact) return null;
-
-    let publicKeyBase64: string;
-    const anyPub: any = contact.publicKey;
-    if (anyPub?.raw instanceof Uint8Array) {
-      publicKeyBase64 = arrayBufferToBase64(anyPub.raw.buffer);
-    } else {
-      const raw = await crypto.subtle.exportKey(
-        "raw",
-        contact.publicKey as CryptoKey,
-      );
-      publicKeyBase64 = arrayBufferToBase64(raw);
-    }
-
-    return JSON.stringify(
-      {
-        id: contact.id,
-        label: contact.meta?.label || "",
-        publicKey: publicKeyBase64,
-        fingerprint: contact.fingerprint,
-        mlKey: contact.mlKey,
-        edPublicKeyBase64: contact.edPublicKeyBase64,
-        mlDsaPublicKeyBase64: contact.mlDsaPublicKeyBase64,
-      } satisfies MajikContactCard,
-      null,
-      2,
-    );
+  async exportContactAsJSON(id: string): Promise<string | null> {
+    if (!id?.trim()) throw new Error("Invalid contact ID");
+    return this._contacts.exportContactAsJSON(id);
   }
 
-  async exportContactAsString(contactID: string): Promise<string | null> {
-    const contact = this.contacts.getContact(contactID);
-    if (!contact) return null;
-
-    const compressedString = this.exportContactCompressed(contact);
-    return compressedString;
+  async exportContactAsString(id: string): Promise<string | null> {
+    if (!id?.trim()) throw new Error("Invalid contact ID");
+    return this._contacts.exportContactAsString(id);
   }
 
   async importContactFromJSON(jsonStr: string): Promise<MAJIK_API_RESPONSE> {
-    try {
-      const data: MajikContactCard = JSON.parse(jsonStr);
-      if (!data.id || !data.publicKey || !data.fingerprint) {
-        return { success: false, message: "Invalid contact JSON" };
-      }
-
-      const rawBuffer = base64ToArrayBuffer(data.publicKey as string);
-      let publicKey: CryptoKey | { raw: Uint8Array };
-      try {
-        publicKey = await crypto.subtle.importKey(
-          "raw",
-          rawBuffer,
-          KEY_ALGO,
-          true,
-          [],
-        );
-      } catch {
-        publicKey = { raw: new Uint8Array(rawBuffer) };
-      }
-
-      this.addContact(
-        new MajikContact({
-          id: data.id,
-          publicKey,
-          fingerprint: data.fingerprint,
-          meta: { label: data.label },
-          mlKey: data.mlKey,
-          edPublicKeyBase64: data.edPublicKeyBase64,
-          mlDsaPublicKeyBase64: data.mlDsaPublicKeyBase64,
-        }),
-      );
-
-      return { success: true, message: "Contact imported successfully" };
-    } catch (err) {
-      return {
-        success: false,
-        message: err instanceof Error ? err.message : "Unknown error",
-      };
-    }
+    if (!jsonStr?.trim()) throw new Error("Invalid contact JSON");
+    return this._contacts.importContactFromJSON(jsonStr);
   }
 
   async importContactFromString(
     base64Str: string,
   ): Promise<MAJIK_API_RESPONSE> {
-    try {
-      const parsedContact = await this.importContactCompressed(base64Str);
-
-      this.addContact(parsedContact);
-      return { success: true, message: "Contact imported successfully" };
-    } catch (err) {
-      return {
-        success: false,
-        message: err instanceof Error ? err.message : "Unknown error",
-      };
-    }
+    if (!base64Str?.trim()) throw new Error("Invalid contact string");
+    return this._contacts.importContactFromString(base64Str);
   }
 
   async exportContactCompressed(contact: MajikContact): Promise<string> {
-    // Prepare JSON with raw keys
-    let publicKeyBase64: string;
-    const anyPub: any = contact.publicKey;
-    if (anyPub?.raw instanceof Uint8Array) {
-      publicKeyBase64 = arrayBufferToBase64(anyPub.raw.buffer);
-    } else {
-      const raw = await crypto.subtle.exportKey(
-        "raw",
-        contact.publicKey as CryptoKey,
-      );
-      publicKeyBase64 = arrayBufferToBase64(raw);
-    }
-
-    const jsonObj: MajikContactCard = {
-      id: contact.id,
-      label: contact.meta?.label || "",
-      publicKey: publicKeyBase64,
-      fingerprint: contact.fingerprint,
-      mlKey: contact.mlKey,
-      edPublicKeyBase64: contact.edPublicKeyBase64,
-      mlDsaPublicKeyBase64: contact.mlDsaPublicKeyBase64,
-    };
-
-    const jsonStr = JSON.stringify(jsonObj);
-
-    const utf8 = new TextEncoder().encode(jsonStr);
-
-    // Compress with gzip or Brotli
-    const compressed = gzipSync(utf8);
-
-    // Encode for string export
-    return arrayToBase64(compressed);
+    if (!contact?.id?.trim()) throw new Error("Invalid contact");
+    return this._contacts.exportContactCompressed(contact);
   }
 
   async importContactCompressed(base64Str: string): Promise<MajikContact> {
-    const compressed = base64ToArrayBuffer(base64Str);
-    const decompressed = gunzipSync(new Uint8Array(compressed));
-    const jsonStr = new TextDecoder().decode(decompressed);
-
-    const data: MajikContactCard = JSON.parse(jsonStr);
-
-    const rawBuffer = base64ToArrayBuffer(data.publicKey as string);
-    let publicKey: CryptoKey | { raw: Uint8Array };
-    try {
-      publicKey = await crypto.subtle.importKey(
-        "raw",
-        rawBuffer,
-        KEY_ALGO,
-        true,
-        [],
-      );
-    } catch {
-      publicKey = { raw: new Uint8Array(rawBuffer) };
-    }
-
-    if (!data?.id || !publicKey || !data?.fingerprint || !data?.mlKey) {
-      throw new Error("Invalid contact JSON");
-    }
-
-    return new MajikContact({
-      id: data.id,
-      publicKey,
-      fingerprint: data.fingerprint,
-      meta: { label: data.label },
-      mlKey: data.mlKey,
-      edPublicKeyBase64: data.edPublicKeyBase64,
-      mlDsaPublicKeyBase64: data.mlDsaPublicKeyBase64,
-    });
+    if (!base64Str?.trim()) throw new Error("Invalid contact string");
+    return this._contacts.importContactCompressed(base64Str);
   }
 
-  addContact(contact: MajikContact): void {
+  async addContact(contact: MajikContact): Promise<void> {
     if (
       !contact?.id ||
       !contact?.publicKey ||
       !contact?.fingerprint ||
       !contact?.mlKey
     ) {
-      throw new Error("Invalid contact JSON");
+      throw new Error("Invalid contact — missing required fields");
     }
-
-    this.contacts.addContact(contact);
-    this.emit("new-contact", contact);
-    this.scheduleAutosave();
+    await this._contacts.addContact(contact);
+    this._emit("new-contact", contact);
   }
 
-  removeContact(id: string): void {
-    const result = this.contacts.removeContact(id);
+  async removeContact(id: string): Promise<void> {
+    const result = await this._contacts.removeContact(id);
     if (!result.success) throw new Error(result.message);
-    this.emit("removed-contact", id);
-    this.scheduleAutosave();
+    this._emit("removed-contact", id);
   }
 
-  updateContactMeta(id: string, meta: Partial<MajikContactMeta>): void {
-    this.contacts.updateContactMeta(id, meta);
-    this.scheduleAutosave();
-  }
-
-  blockContact(id: string): void {
-    this.contacts.blockContact(id);
-    this.scheduleAutosave();
-  }
-  unblockContact(id: string): void {
-    this.contacts.unblockContact(id);
-    this.scheduleAutosave();
-  }
-
-  listContacts(all = true, majikahOnly = false): MajikContact[] {
-    const contacts = this.contacts.listContacts(true, majikahOnly);
-    if (all) return contacts;
-    const ownIds = new Set(this.listOwnAccounts(majikahOnly).map((a) => a.id));
+  listContacts(includeOwnAccounts = false): MajikContact[] {
+    const contacts = this._contacts.listContacts(true);
+    if (includeOwnAccounts) return contacts;
+    const ownIds = new Set(this.listOwnAccounts().map((a) => a.id));
     return contacts.filter((c) => !ownIds.has(c.id));
   }
 
-  isContactMajikahRegistered(id: string): boolean {
-    return this.contacts.isMajikahRegistered(id);
+  async updateContactMeta(
+    id: string,
+    meta: Partial<MajikContactMeta>,
+  ): Promise<void> {
+    await this._contacts.updateContactMeta(id, meta);
   }
 
-  isContactMajikahIdentityChecked(id: string): boolean {
-    return this.contacts.isMajikahIdentityChecked(id);
-  }
-
-  setContactMajikahStatus(id: string, status: boolean): void {
-    this.contacts.setMajikahStatus(id, status);
-    this.scheduleAutosave();
-  }
-
-  /* ================================
-   * Group CRUD Pass-throughs
-   * ================================ */
-
-  /**
-   * Creates and registers a new user-defined group.
-   * Throws if a group with the same ID already exists.
-   */
-  createGroup(
+  async createGroup(
     id: string,
     name: string,
     meta?: Partial<Omit<MajikContactGroupMeta, "name">>,
     initialMemberIds?: string[],
-  ): this {
-    const newGroup = this.contacts.createGroup(
+  ): Promise<this> {
+    const newGroup = await this._contacts.createGroup(
       id,
       name,
       meta,
       initialMemberIds,
     );
-
-    this.emit("new-contact-group", newGroup);
-    this.scheduleAutosave();
+    this._emit("new-contact-group", newGroup);
     return this;
   }
 
-  /**
-   * Registers an already-constructed MajikContactGroup instance.
-   * Throws if a group with the same ID already exists.
-   */
-  addGroup(group: MajikContactGroup): this {
-    this.contacts.addGroup(group);
-
-    this.emit("new-contact-group", group);
-    this.scheduleAutosave();
+  async addGroup(group: MajikContactGroup): Promise<this> {
+    await this._contacts.addGroup(group);
+    this._emit("new-contact-group", group);
     return this;
   }
 
-  /**
-   * Removes a user group by ID.
-   * System groups (Favorites, Blocked) cannot be deleted.
-   */
-  removeGroup(id: string): MAJIK_API_RESPONSE {
-    const response = this.contacts.removeGroup(id);
-
-    this.emit("removed-contact-group", response.data as MajikContactGroup);
-    this.scheduleAutosave();
+  async removeGroup(id: string): Promise<MAJIK_API_RESPONSE> {
+    const response = await this._contacts.removeGroup(id);
+    this._emit("removed-contact-group", response.data as MajikContactGroup);
     return response;
   }
 
-  /**
-   * Returns a group by ID, or undefined if not found.
-   */
   getContactGroup(id: string): MajikContactGroup | undefined {
-    return this.contacts.getGroup(id);
+    return this._contacts.getGroup(id);
   }
 
-  /**
-   * Returns a group by ID. Throws if not found.
-   */
   getGroupOrThrow(id: string): MajikContactGroup {
-    return this.contacts.getGroupOrThrow(id);
+    return this._contacts.getGroupOrThrow(id);
   }
 
-  /**
-   * Returns true if a group with the given ID exists.
-   */
   hasGroup(id: string): boolean {
-    return this.contacts.hasGroup(id);
+    return this._contacts.hasGroup(id);
   }
 
-  /**
-   * Returns all groups.
-   *
-   * @param includeSystem  Include system groups (Favorites, Blocked). Default: true.
-   * @param sortedByName   Sort results alphabetically by group name. Default: false.
-   */
   listContactGroups(
     includeSystem = true,
     sortedByName = false,
   ): MajikContactGroup[] {
-    return this.contacts.listGroups(includeSystem, sortedByName);
+    return this._contacts.listGroups(includeSystem, sortedByName);
   }
 
-  /**
-   * Returns only user-created groups (excludes Favorites and Blocked).
-   * Sorted alphabetically by name.
-   */
   listUserGroups(sortedByName = true): MajikContactGroup[] {
-    return this.contacts.listGroups(false, sortedByName);
+    return this._contacts.listGroups(false, sortedByName);
   }
 
-  /**
-   * Returns only system groups (Favorites and Blocked).
-   */
   listSystemGroups(): MajikContactGroup[] {
-    return this.contacts.listGroups(true).filter((g) => g.isSystem);
+    return this._contacts.listGroups(true).filter((g) => g.isSystem);
   }
 
-  /**
-   * Updates mutable metadata on a group (name, description).
-   * Name is locked on system groups — will throw if attempted.
-   */
-  updateGroupMeta(
+  async updateGroupMeta(
     id: string,
     meta: Partial<
       Pick<MajikContactGroupMeta, "name" | "description" | "color">
     >,
-  ): this {
-    const updatedGroup = this.contacts.updateGroupMeta(id, meta);
-    this.emit("contact-group-change", updatedGroup);
-    this.scheduleAutosave();
+  ): Promise<this> {
+    const updatedGroup = await this._contacts.updateGroupMeta(id, meta);
+    this._emit("contact-group-change", updatedGroup);
     return this;
   }
 
-  /* ================================
-   * Group Membership Pass-throughs
-   * ================================ */
-
-  /**
-   * Adds a contact to a group.
-   * Validates the contact exists in the directory.
-   * If the group is the system Blocked group, also calls contact.block().
-   * Throws if the contact is already a member — use addContactToGroupIfAbsent for idempotent.
-   */
-  addContactToGroup(groupID: string, contactID: string): this {
-    const updatedGroup = this.contacts.addContactToGroup(groupID, contactID);
-
-    this.emit("contact-group-change", updatedGroup);
-    this.scheduleAutosave();
-    return this;
-  }
-
-  /**
-   * Adds multiple contacts to a group in one call (all-or-nothing).
-   */
-  addContactsToGroup(groupID: string, contactIds: string[]): this {
-    const updatedGroup = this.contacts.addContactsToGroup(groupID, contactIds);
-    this.emit("contact-group-change", updatedGroup);
-    this.scheduleAutosave();
-    return this;
-  }
-
-  /**
-   * Removes a contact from a group.
-   * If the group is the system Blocked group, also calls contact.unblock().
-   * Throws if the contact is not a member — use removeContactFromGroupIfPresent for idempotent.
-   */
-  removeContactFromGroup(groupID: string, contactID: string): this {
-    const updatedGroup = this.contacts.removeContactFromGroup(
+  async addContactToGroup(groupID: string, contactID: string): Promise<this> {
+    const updatedGroup = await this._contacts.addContactToGroup(
       groupID,
       contactID,
     );
-
-    this.emit("contact-group-change", updatedGroup);
-    this.scheduleAutosave();
+    this._emit("contact-group-change", updatedGroup);
     return this;
   }
 
-  /**
-   * Moves a contact from one group to another atomically.
-   * Throws if the contact is not a member of the source group.
-   */
-  moveContactBetweenGroups(
+  async addContactsToGroup(
+    groupID: string,
+    contactIds: string[],
+  ): Promise<this> {
+    const updatedGroup = await this._contacts.addContactsToGroup(
+      groupID,
+      contactIds,
+    );
+    this._emit("contact-group-change", updatedGroup);
+    return this;
+  }
+
+  async removeContactFromGroup(
+    groupID: string,
+    contactID: string,
+  ): Promise<this> {
+    const updatedGroup = await this._contacts.removeContactFromGroup(
+      groupID,
+      contactID,
+    );
+    this._emit("contact-group-change", updatedGroup);
+    return this;
+  }
+
+  async moveContactBetweenGroups(
     contactID: string,
     fromGroupId: string,
     toGroupId: string,
-  ): this {
-    const updatedGroup = this.contacts.moveContactBetweenGroups(
+  ): Promise<this> {
+    const updatedGroup = await this._contacts.moveContactBetweenGroups(
       contactID,
       fromGroupId,
       toGroupId,
     );
-
-    this.emit("contact-group-change", updatedGroup);
-    this.scheduleAutosave();
+    this._emit("contact-group-change", updatedGroup);
     return this;
   }
 
-  /* ================================
-   * Group Query Pass-throughs
-   * ================================ */
-
-  /**
-   * Returns all hydrated MajikContact instances in the given group.
-   * Contacts removed from the directory since last save are silently skipped.
-   */
   getContactsInGroup(groupID: string): MajikContact[] {
-    return this.contacts.getContactsInGroup(groupID);
+    return this._contacts.getContactsInGroup(groupID);
   }
 
-  /**
-   * Returns hydrated contacts in the group, sorted by label (or ID if no label).
-   */
   getContactsInGroupSorted(groupID: string): MajikContact[] {
-    return this.contacts.getContactsInGroupSorted(groupID);
+    return this._contacts.getContactsInGroupSorted(groupID);
   }
 
-  /**
-   * Returns true if the contact is a member of the given group.
-   */
   isContactInGroup(groupID: string, contactID: string): boolean {
-    return this.contacts.isContactInGroup(groupID, contactID);
+    return this._contacts.isContactInGroup(groupID, contactID);
   }
 
-  /**
-   * Returns all groups the contact belongs to.
-   */
   getGroupsForContact(contactID: string): MajikContactGroup[] {
-    return this.contacts.getGroupsForContact(contactID);
+    return this._contacts.getGroupsForContact(contactID);
   }
 
-  /**
-   * Returns all group IDs the contact belongs to.
-   */
   getGroupIdsForContact(contactID: string): string[] {
-    return this.contacts.getGroupIdsForContact(contactID);
+    return this._contacts.getGroupIdsForContact(contactID);
   }
 
-  /* ================================
-   * System Group Convenience Pass-throughs
-   * ================================ */
-
-  /**
-   * Adds the contact to the Favorites group (idempotent).
-   */
-  addContactToFavorites(contactID: string): this {
-    const updatedGroup = this.contacts.addToFavorites(contactID);
-
-    this.emit("contact-group-change", updatedGroup);
-    this.scheduleAutosave();
+  async addContactToFavorites(contactID: string): Promise<this> {
+    const updatedGroup = await this._contacts.addToFavorites(contactID);
+    this._emit("contact-group-change", updatedGroup);
     return this;
   }
 
-  /**
-   * Removes the contact from the Favorites group (idempotent).
-   */
-  removeContactFromFavorites(contactID: string): this {
-    const updatedGroup = this.contacts.removeFromFavorites(contactID);
-
-    this.emit("contact-group-change", updatedGroup);
-    this.scheduleAutosave();
+  async removeContactFromFavorites(contactID: string): Promise<this> {
+    const updatedGroup = await this._contacts.removeFromFavorites(contactID);
+    this._emit("contact-group-change", updatedGroup);
     return this;
   }
 
-  /**
-   * Returns true if the contact is in the Favorites group.
-   */
   isContactFavorite(contactID: string): boolean {
-    return this.contacts.isFavorite(contactID);
+    return this._contacts.isFavorite(contactID);
   }
-
-  /**
-   * Returns true if the contact is in the Blocked group.
-   */
   isContactBlocked(contactID: string): boolean {
-    return this.contacts.isContactBlocked(contactID);
+    return this._contacts.isContactBlocked(contactID);
   }
-
-  /**
-   * Returns the Favorites system group instance.
-   */
   getFavoritesGroup(): MajikContactGroup {
-    return this.contacts.getFavoritesGroup();
+    return this._contacts.getFavoritesGroup();
   }
-
-  /**
-   * Returns the Blocked system group instance.
-   */
   getBlockedGroup(): MajikContactGroup {
-    return this.contacts.getBlockedGroup();
+    return this._contacts.getBlockedGroup();
   }
 
-  /**
-   * Returns all contacts in the Favorites group as hydrated MajikContact instances.
-   */
   getFavoriteContacts(): MajikContact[] {
-    return this.contacts.getContactsInGroup(
-      this.contacts.getFavoritesGroup().id,
+    return this._contacts.getContactsInGroup(
+      this._contacts.getFavoritesGroup().id,
     );
   }
 
-  /**
-   * Returns all contacts in the Blocked group as hydrated MajikContact instances.
-   */
   getBlockedContacts(): MajikContact[] {
-    return this.contacts.getContactsInGroup(this.contacts.getBlockedGroup().id);
+    return this._contacts.getContactsInGroup(
+      this._contacts.getBlockedGroup().id,
+    );
   }
 
-  /* ================================
-   * Directory Clear
-   * ================================ */
-
-  /**
-   * Clears both the directory and all group memberships.
-   * System groups are preserved (re-bootstrapped by the group manager).
-   */
-  clearDirectory(): this {
-    this.contacts.clear();
-    this.scheduleAutosave();
-
+  async clearDirectory(): Promise<this> {
+    await this._contacts.clear();
     return this;
+  }
+
+  resolveSignerLabel(signerId: string): string {
+    const ownAccount = this._ownAccounts.get(signerId);
+    if (ownAccount?.meta?.label) return ownAccount.meta.label;
+    const contact = this._contacts.getContact(signerId);
+    if (contact?.meta?.label) return contact.meta.label;
+    return `${signerId.slice(0, 16)}…`;
   }
 
   // ── Encryption / Decryption ───────────────────────────────────────────────
@@ -1039,8 +939,7 @@ export class MajikMessage {
       );
     }
 
-    this.scheduleAutosave();
-    this.emit("envelope", envelope);
+    this._emit("envelope", envelope);
     return scannerString;
   }
 
@@ -1099,7 +998,7 @@ export class MajikMessage {
       return await this.composeMessage(recipientPubKeys, plaintext, cache);
     } catch (err) {
       console.warn("Error: ", err);
-      this.emit("error", err, { context: "encryptTextForScanner" });
+      this._emit("error", err, { context: "encryptTextForScanner" });
       return null;
     }
   }
@@ -1192,7 +1091,7 @@ export class MajikMessage {
 
       return { messageChat, scannerString };
     } catch (err) {
-      this.emit("error", err, { context: "createEncryptedMajikMessageChat" });
+      this._emit("error", err, { context: "createEncryptedMajikMessageChat" });
       throw err;
     }
   }
@@ -1215,7 +1114,7 @@ export class MajikMessage {
       const envelope = MajikEnvelope.fromJSON(JSON.parse(encryptedPayload));
       return await envelope.decrypt(identity);
     } catch (err) {
-      this.emit("error", err, { context: "decryptMajikMessageChat" });
+      this._emit("error", err, { context: "decryptMajikMessageChat" });
       throw err;
     }
   }
@@ -1278,7 +1177,7 @@ export class MajikMessage {
     if (!activeId)
       throw new Error("No active account — call setActiveAccount() first");
 
-    const signingKey = MajikKeyStore.get(activeId);
+    const signingKey = this.keyManager.get(activeId);
 
     // ── 4. Build CreateOptions ─────────────────────────────────────────────
     const createOptions = {
@@ -1453,9 +1352,9 @@ export class MajikMessage {
       throw new Error("No active account — call setActiveAccount() first");
 
     try {
-      await MajikKeyStore.ensureUnlocked(id);
+      await this.keyManager.ensureUnlocked(id);
       // get() is safe after ensureUnlocked() — key is in the memory cache.
-      const key = MajikKeyStore.get(id);
+      const key = this.keyManager.get(id);
       if (!key) throw new Error(`Account not found in keystore: "${id}"`);
       if (!key.hasSigningKeys) {
         throw new Error(
@@ -1469,7 +1368,7 @@ export class MajikMessage {
         timestamp: options?.timestamp,
       });
     } catch (err) {
-      this.emit("error", err, { context: "signMajikFile" });
+      this._emit("error", err, { context: "signMajikFile" });
       throw err;
     }
   }
@@ -1520,7 +1419,7 @@ export class MajikMessage {
 
       return file.verify(sig.extractPublicKeys());
     } catch (err) {
-      this.emit("error", err, { context: "verifyMajikFile" });
+      this._emit("error", err, { context: "verifyMajikFile" });
       throw err;
     }
   }
@@ -1587,7 +1486,7 @@ export class MajikMessage {
 
       return file.verifyBinary(decryptIdentity, sig.extractPublicKeys());
     } catch (err) {
-      this.emit("error", err, { context: "verifyMajikFileBinary" });
+      this._emit("error", err, { context: "verifyMajikFileBinary" });
       throw err;
     }
   }
@@ -1622,7 +1521,7 @@ export class MajikMessage {
 
     // get() checks the memory cache — no async needed since the account
     // must already be loaded to be the active account.
-    const key = MajikKeyStore.get(id);
+    const key = this.keyManager.get(id);
     if (!key) return false;
 
     return key.fingerprint === sigInfo.signerId;
@@ -1979,7 +1878,7 @@ export class MajikMessage {
   hasSigningCapability(accountId?: string): boolean {
     const id = accountId ?? this.getActiveAccount()?.id;
     if (!id) return false;
-    const key = MajikKeyStore.get(id);
+    const key = this.keyManager.get(id);
     return key?.hasSigningKeys === true;
   }
 
@@ -1995,7 +1894,7 @@ export class MajikMessage {
   async clearCachedEnvelopes(): Promise<boolean> {
     const response = await this.envelopeCache.clear();
     if (!response?.success) throw new Error(response.message);
-    this.scheduleAutosave();
+    this._scheduleOrderSave();
     return response.success;
   }
 
@@ -2003,41 +1902,41 @@ export class MajikMessage {
 
   /**
    * Ensure an identity is unlocked.
-   * Delegates entirely to MajikKeyStore.ensureUnlocked() — passphrase prompting
+   * Delegates entirely to this.keyManager.ensureUnlocked() — passphrase prompting
    * is handled there via onUnlockRequested or the optional promptFn.
    */
   async ensureIdentityUnlocked(
     id: string,
     promptFn?: (id: string) => string | Promise<string>,
   ): Promise<CryptoKey | { raw: Uint8Array }> {
-    return MajikKeyStore.ensureUnlocked(id, promptFn);
+    return this.keyManager.ensureUnlocked(id, promptFn);
   }
 
   async isPassphraseValid(passphrase: string, id?: string): Promise<boolean> {
     const target = id ? this.getOwnAccountById(id) : this.getActiveAccount();
     if (!target) return false;
-    return MajikKeyStore.isPassphraseValid(target.id, passphrase);
+    return this.keyManager.isPassphraseValid(target.id, passphrase);
   }
 
   // ── Events ────────────────────────────────────────────────────────────────
 
   on(event: MajikMessageEvents, callback: EventCallback): void {
-    this.listeners.get(event)?.push(callback);
+    this._listeners.get(event)?.push(callback);
   }
 
   off(event: MajikMessageEvents, callback?: EventCallback): void {
-    const cbs = this.listeners.get(event);
+    const cbs = this._listeners.get(event);
     if (!cbs?.length) return;
     if (callback) {
       const i = cbs.indexOf(callback);
       if (i !== -1) cbs.splice(i, 1);
     } else {
-      this.listeners.set(event, []);
+      this._listeners.set(event, []);
     }
   }
 
-  private emit(event: MajikMessageEvents, ...args: any[]): void {
-    this.listeners.get(event)?.forEach((cb) => cb(...args));
+  private _emit(event: MajikMessageEvents, ...args: any[]): void {
+    this._listeners.get(event)?.forEach((cb) => cb(...args));
   }
 
   // ── Content & File Signing ────────────────────────────────────────────────
@@ -2066,8 +1965,8 @@ export class MajikMessage {
       throw new Error("No active account — call setActiveAccount() first");
 
     try {
-      await MajikKeyStore.ensureUnlocked(id);
-      const key = MajikKeyStore.get(id);
+      await this.keyManager.ensureUnlocked(id);
+      const key = this.keyManager.get(id);
       if (!key) throw new Error(`Account not found in keystore: "${id}"`);
       if (!key.hasSigningKeys) {
         throw new Error(
@@ -2081,7 +1980,7 @@ export class MajikMessage {
         timestamp: options?.timestamp,
       });
     } catch (err) {
-      this.emit("error", err, { context: "signContent" });
+      this._emit("error", err, { context: "signContent" });
       throw err;
     }
   }
@@ -2120,8 +2019,8 @@ export class MajikMessage {
       throw new Error("No active account — call setActiveAccount() first");
 
     try {
-      await MajikKeyStore.ensureUnlocked(id);
-      const key = MajikKeyStore.get(id);
+      await this.keyManager.ensureUnlocked(id);
+      const key = this.keyManager.get(id);
       if (!key) throw new Error(`Account not found in keystore: "${id}"`);
       if (!key.hasSigningKeys) {
         throw new Error(
@@ -2137,7 +2036,7 @@ export class MajikMessage {
         expectedSigners: options?.expectedSigners,
       });
     } catch (err) {
-      this.emit("error", err, { context: "signFile" });
+      this._emit("error", err, { context: "signFile" });
       throw err;
     }
   }
@@ -2185,8 +2084,8 @@ export class MajikMessage {
     if (!id)
       throw new Error("No active account — call setActiveAccount() first");
 
-    await MajikKeyStore.ensureUnlocked(id);
-    const key = MajikKeyStore.get(id);
+    await this.keyManager.ensureUnlocked(id);
+    const key = this.keyManager.get(id);
     if (!key) throw new Error(`Account not found in keystore: "${id}"`);
     if (!key.hasSigningKeys) {
       throw new Error(
@@ -2212,7 +2111,7 @@ export class MajikMessage {
             error: null,
           };
         } catch (err) {
-          this.emit("error", err, { context: "batchSignFiles" });
+          this._emit("error", err, { context: "batchSignFiles" });
           return {
             blob: null,
             signature: null,
@@ -2276,7 +2175,7 @@ export class MajikMessage {
 
       return MajikSignature.verify(content, sig, sig.extractPublicKeys());
     } catch (err) {
-      this.emit("error", err, { context: "verifyContent" });
+      this._emit("error", err, { context: "verifyContent" });
       throw err;
     }
   }
@@ -2354,7 +2253,7 @@ export class MajikMessage {
       );
       return results[0];
     } catch (err) {
-      this.emit("error", err, { context: "verifyFile" });
+      this._emit("error", err, { context: "verifyFile" });
       throw err;
     }
   }
@@ -2454,7 +2353,7 @@ export class MajikMessage {
             error: null,
           };
         } catch (err) {
-          this.emit("error", err, { context: "batchVerifyFiles" });
+          this._emit("error", err, { context: "batchVerifyFiles" });
           return {
             valid: false,
             signerId: undefined,
@@ -2488,7 +2387,7 @@ export class MajikMessage {
     try {
       return MajikSignature.extractFrom(file, options);
     } catch (err) {
-      this.emit("error", err, { context: "extractSignature" });
+      this._emit("error", err, { context: "extractSignature" });
       throw err;
     }
   }
@@ -2509,7 +2408,7 @@ export class MajikMessage {
     try {
       return MajikSignature.stripFrom(file, options);
     } catch (err) {
-      this.emit("error", err, { context: "stripSignature" });
+      this._emit("error", err, { context: "stripSignature" });
       throw err;
     }
   }
@@ -2530,7 +2429,7 @@ export class MajikMessage {
     try {
       return MajikSignature.isSigned(file, options);
     } catch (err) {
-      this.emit("error", err, { context: "isFileSigned" });
+      this._emit("error", err, { context: "isFileSigned" });
       throw err;
     }
   }
@@ -2552,7 +2451,7 @@ export class MajikMessage {
     if (!id)
       throw new Error("No active account — call setActiveAccount() first");
 
-    const key = MajikKeyStore.get(id);
+    const key = this.keyManager.get(id);
     if (!key) throw new Error(`Account not found in keystore: "${id}"`);
     if (!key.hasSigningKeys) {
       throw new Error(
@@ -2631,7 +2530,7 @@ export class MajikMessage {
     try {
       return MajikSignature.getAllowlist(file, options);
     } catch (err) {
-      this.emit("error", err, { context: "getAllowlist" });
+      this._emit("error", err, { context: "getAllowlist" });
       throw err;
     }
   }
@@ -2652,7 +2551,7 @@ export class MajikMessage {
     try {
       return MajikSignature.canSign(file, key, options);
     } catch (err) {
-      this.emit("error", err, { context: "canSign" });
+      this._emit("error", err, { context: "canSign" });
       throw err;
     }
   }
@@ -2669,7 +2568,7 @@ export class MajikMessage {
     try {
       return MajikSignature.isMultiSig(file, options);
     } catch (err) {
-      this.emit("error", err, { context: "isMultiSig" });
+      this._emit("error", err, { context: "isMultiSig" });
       throw err;
     }
   }
@@ -2700,7 +2599,7 @@ export class MajikMessage {
     try {
       return MajikSignature.getSignatories(file, options, filter);
     } catch (err) {
-      this.emit("error", err, { context: "getSignatories" });
+      this._emit("error", err, { context: "getSignatories" });
       throw err;
     }
   }
@@ -2716,7 +2615,7 @@ export class MajikMessage {
     try {
       return MajikSignature.getSignedSignatories(file, options);
     } catch (err) {
-      this.emit("error", err, { context: "getSignedSignatories" });
+      this._emit("error", err, { context: "getSignedSignatories" });
       throw err;
     }
   }
@@ -2732,7 +2631,7 @@ export class MajikMessage {
     try {
       return MajikSignature.getPendingSignatories(file, options);
     } catch (err) {
-      this.emit("error", err, { context: "getPendingSignatories" });
+      this._emit("error", err, { context: "getPendingSignatories" });
       throw err;
     }
   }
@@ -2748,7 +2647,7 @@ export class MajikMessage {
     try {
       return MajikSignature.getAllSignatories(file, options);
     } catch (err) {
-      this.emit("error", err, { context: "getAllSignatories" });
+      this._emit("error", err, { context: "getAllSignatories" });
       throw err;
     }
   }
@@ -2768,7 +2667,7 @@ export class MajikMessage {
     try {
       return MajikSignature.getIssuer(file, options);
     } catch (err) {
-      this.emit("error", err, { context: "getIssuer" });
+      this._emit("error", err, { context: "getIssuer" });
       throw err;
     }
   }
@@ -2798,7 +2697,7 @@ export class MajikMessage {
     try {
       return MajikSignature.extractFrom(file, options);
     } catch (err) {
-      this.emit("error", err, { context: "getFileSignatureInfo" });
+      this._emit("error", err, { context: "getFileSignatureInfo" });
       throw err;
     }
   }
@@ -2822,7 +2721,7 @@ export class MajikMessage {
     try {
       return MajikSignature.getEnvelopeInfo(file, options);
     } catch (err) {
-      this.emit("error", err, { context: "getEnvelopeInfo" });
+      this._emit("error", err, { context: "getEnvelopeInfo" });
       throw err;
     }
   }
@@ -2854,7 +2753,7 @@ export class MajikMessage {
       throw new Error("No active account — call setActiveAccount() first");
 
     try {
-      const key = MajikKeyStore.get(id);
+      const key = this.keyManager.get(id);
       if (!key) throw new Error(`Account not found in keystore: "${id}"`);
 
       return MajikSignature.seal(file, key, {
@@ -2862,7 +2761,7 @@ export class MajikMessage {
         timestamp: options?.timestamp,
       });
     } catch (err) {
-      this.emit("error", err, { context: "seal" });
+      this._emit("error", err, { context: "seal" });
       throw err;
     }
   }
@@ -2883,7 +2782,7 @@ export class MajikMessage {
     try {
       return MajikSignature.verifySeal(file, options);
     } catch (err) {
-      this.emit("error", err, { context: "verifySeal" });
+      this._emit("error", err, { context: "verifySeal" });
       throw err;
     }
   }
@@ -2903,7 +2802,7 @@ export class MajikMessage {
     try {
       return MajikSignature.getSealInfo(file, options);
     } catch (err) {
-      this.emit("error", err, { context: "getSealInfo" });
+      this._emit("error", err, { context: "getSealInfo" });
       throw err;
     }
   }
@@ -2919,7 +2818,7 @@ export class MajikMessage {
     try {
       return MajikSignature.isSealed(file, options);
     } catch (err) {
-      this.emit("error", err, { context: "isSealed" });
+      this._emit("error", err, { context: "isSealed" });
       throw err;
     }
   }
@@ -2948,7 +2847,7 @@ export class MajikMessage {
 
     // Option B: contact ID looked up from the contact directory
     if (options.contactID) {
-      const contact = this.contacts.getContact(options.contactID);
+      const contact = this._contacts.getContact(options.contactID);
       if (!contact) {
         throw new Error(`No contact found for id "${options.contactID}"`);
       }
@@ -2956,7 +2855,7 @@ export class MajikMessage {
       // Own accounts are in the keystore — get their signing keys directly
       const ownAccount = this.getOwnAccountById(options.contactID);
       if (ownAccount) {
-        const key = MajikKeyStore.get(options.contactID);
+        const key = this.keyManager.get(options.contactID);
         if (key?.hasSigningKeys) {
           return MajikSignature.publicKeysFromMajikKey(key);
         }
@@ -2979,7 +2878,7 @@ export class MajikMessage {
 
     // Option C: raw base64 public key — look up via contact directory
     if (options.publicKeyBase64) {
-      const contact = await this.contacts.getContactByPublicKeyBase64(
+      const contact = await this._contacts.getContactByPublicKeyBase64(
         options.publicKeyBase64,
       );
       if (!contact) {
@@ -3004,230 +2903,53 @@ export class MajikMessage {
     return null;
   }
 
-  // ── Serialization ─────────────────────────────────────────────────────────
+  // ==========================================================================
+  // ── RESET ─────────────────────────────────────────────────────────────────
+  // ==========================================================================
 
-  async toJSON(): Promise<MajikMessageJSON> {
-    const json: MajikMessageJSON = {
-      id: this.id,
-      contacts: await this.contacts.toJSON(),
-      envelopeCache: this.envelopeCache.toJSON(),
-    };
-
+  /**
+   * Wipe all data from every adapter and reset in-memory state.
+   * The client remains usable — call hydrate() or add new accounts after reset.
+   */
+  async resetData(): Promise<void> {
     try {
-      const accounts: Awaited<ReturnType<MajikContact["toJSON"]>>[] = [];
-      for (const id of this.ownAccountsOrder) {
-        const acct = this.ownAccounts.get(id);
-        if (acct) accounts.push(await acct.toJSON());
-      }
-      json.ownAccounts = { accounts, order: [...this.ownAccountsOrder] };
-    } catch (e) {
-      console.warn("Failed to serialize ownAccounts:", e);
-    }
+      await this._keys.adapter.clear();
+      await this._contacts.clear();
+      await this._state.clear();
 
-    return json;
-  }
-
-  static async fromJSON<T extends MajikMessage>(
-    this: new (config: MajikMessageConfig, id?: string) => T,
-    json: MajikMessageJSON,
-  ): Promise<T> {
-    // const migratedJSON = migrateMajikMessageJSON(json);
-
-    // ── Step 2: restore MajikContactManager (directory + groups together) ─
-    const contactManager = await MajikContactManager.fromJSON(json.contacts);
-
-    const envelopeCache = EnvelopeCache.fromJSON(
-      json.envelopeCache as EnvelopeCacheJSON,
-    );
-
-    const instance = new this({ contactManager, envelopeCache }, json.id);
-
-    try {
-      if (json.ownAccounts && Array.isArray(json.ownAccounts.accounts)) {
-        for (const acct of json.ownAccounts.accounts) {
-          try {
-            const raw = base64ToArrayBuffer((acct as any).publicKeyBase64);
-            const publicKey = await crypto.subtle.importKey(
-              "raw",
-              raw,
-              KEY_ALGO,
-              true,
-              [],
-            );
-            const contact = MajikContact.create(
-              (acct as any).id,
-              publicKey,
-              (acct as any).fingerprint,
-              (acct as any).meta,
-            );
-            instance.ownAccounts.set(contact.id, contact);
-          } catch (e) {
-            console.info(
-              "Fallback restoring own account (raw-key wrapper)",
-              (acct as any).id,
-              e,
-            );
-          }
-        }
-
-        if (Array.isArray(json.ownAccounts.order)) {
-          instance.ownAccountsOrder = [...json.ownAccounts.order];
-        }
-
-        // Fallback: populate from contacts if accounts array failed
-        if (instance.ownAccounts.size === 0) {
-          for (const id of instance.ownAccountsOrder) {
-            const c = instance.contacts.getContact(id);
-            if (c) instance.ownAccounts.set(id, c);
-          }
-        }
-
-        // Ensure own accounts are in contacts
-        instance.ownAccountsOrder.forEach((id) => {
-          const c = instance.ownAccounts.get(id);
-          if (c && !instance.contacts.hasContact(c.id)) {
-            instance.contacts.addContact(c);
-          }
-        });
-      }
-    } catch (e) {
-      console.warn("Error restoring ownAccounts:", e);
-    }
-
-    return instance;
-  }
-
-  // ── Persistence ───────────────────────────────────────────────────────────
-
-  private attachAutosaveHandlers(): void {
-    if (typeof window === "undefined") return;
-    try {
-      window.addEventListener("beforeunload", () => void this.saveState());
-    } catch {
-      /* ignore */
-    }
-    this.startAutosave();
-  }
-
-  startAutosave(): void {
-    if (this.autosaveIntervalId || typeof window === "undefined") return;
-    this.autosaveIntervalId = window.setInterval(
-      () => void this.saveState(),
-      this.autosaveIntervalMs,
-    ) as unknown as number;
-  }
-
-  stopAutosave(): void {
-    if (!this.autosaveIntervalId || typeof window === "undefined") return;
-    window.clearInterval(this.autosaveIntervalId);
-    this.autosaveIntervalId = null;
-  }
-
-  private scheduleAutosave(): void {
-    if (typeof window === "undefined") return;
-    if (this.autosaveTimer) window.clearTimeout(this.autosaveTimer);
-    this.autosaveTimer = window.setTimeout(() => {
-      void this.saveState();
-      this.autosaveTimer = null;
-    }, this.autosaveDebounceMs) as unknown as number;
-  }
-
-  async saveState(): Promise<void> {
-    try {
-      const json = await this.toJSON();
-      await idbSaveBlob(
-        "majik-message-state",
-        autoSaveMajikFileData(json),
-        this.userProfile,
-      );
-    } catch (err) {
-      console.error("Failed to save MajikMessage state:", err);
-    }
-  }
-
-  async loadState(): Promise<void> {
-    try {
-      const saved = await idbLoadBlob("majik-message-state", this.userProfile);
-      if (!saved?.data) return;
-      const loaded = await loadSavedMajikFileData(saved.data);
-      // Pass raw parsed object — fromJSON handles migration internally
-      const restored = await MajikMessage.fromJSON(
-        loaded.j as MajikMessageJSON,
-      );
-      this.id = restored.id;
-      this.contacts = restored.contacts;
-      this.envelopeCache = restored.envelopeCache;
-      this.ownAccounts = restored.ownAccounts;
-      this.ownAccountsOrder = [...restored.ownAccountsOrder];
-    } catch (err) {
-      console.error("Failed to load MajikMessage state:", err);
-    }
-  }
-
-  static async loadOrCreate<T extends MajikMessage>(
-    this: MajikMessageStatic<T>,
-    config: MajikMessageConfig,
-    userProfile = "default",
-  ): Promise<T> {
-    try {
-      const saved = await idbLoadBlob("majik-message-state", userProfile);
-      if (saved?.data) {
-        const loaded = await loadSavedMajikFileData(saved.data);
-        const instance = (await this.fromJSON(
-          loaded.j as MajikMessageJSON,
-        )) as T;
-        instance.attachAutosaveHandlers();
-        return instance;
-      }
-    } catch (err) {
-      console.warn("Error loading saved MajikMessage state:", err);
-    }
-
-    const created = new this(config);
-    await created.saveState();
-    created.attachAutosaveHandlers();
-    return created;
-  }
-
-  async resetData(userProfile = "default"): Promise<void> {
-    try {
-      await this.clearCachedEnvelopes();
-
-      for (const id of [...this.ownAccountsOrder]) {
-        await MajikKeyStore.deleteIdentity(id).catch(() => {});
+      if (this._db) {
+        await this._db.vacuum();
+        await this._db.optimize();
       }
 
-      this.ownAccounts.clear();
-      this.ownAccountsOrder = [];
+      this._ownAccounts.clear();
+      this._ownAccountsOrder = [];
 
-      try {
-        this.contacts.clear();
-      } catch {
-        /* ignore */
-      }
+      this._keys = new MajikKeyManager(this._keys.adapter);
 
-      try {
-        await MajikKeyStore.deleteAll();
-      } catch {
-        /* ignore */
-      }
-
-      this.id = arrayToBase64(randomBytes(32));
-
-      try {
-        await clearAllBlobs(userProfile);
-      } catch {
-        /* ignore */
-      }
-
-      this.stopAutosave();
-      this.startAutosave();
-
-      this.emit("active-account-change", null);
+      this._emit("active-account-change", null);
     } catch (err) {
       throw new Error(
         `Failed to reset data: ${err instanceof Error ? err.message : err}`,
       );
+    }
+  }
+
+  // ==========================================================================
+  // ── PRIVATE HELPERS ───────────────────────────────────────────────────────
+  // ==========================================================================
+
+  private _registerOwnAccount(contact: MajikContact): void {
+    if (!this._ownAccounts.has(contact.id)) {
+      this._ownAccounts.set(contact.id, contact);
+      this._ownAccountsOrder.push(contact.id);
+      this._scheduleOrderSave();
+    }
+    if (!this._contacts.hasContact(contact.id)) {
+      this._contacts.addContact(contact);
+    }
+    if (!this.getActiveAccount()) {
+      void this.setActiveAccount(contact.id, true);
     }
   }
 }

@@ -1,5 +1,4 @@
 import { KEY_ALGO } from "../crypto/constants";
-import { MessageEnvelope } from "../messages/message-envelope";
 import { MAJIK_API_RESPONSE } from "../types";
 import { base64ToArrayBuffer } from "../utils/utilities";
 import {
@@ -209,18 +208,6 @@ export class MajikContactDirectory {
     const contact = this.getContact(id);
     if (!contact) throw new MajikContactDirectoryError("Contact not found");
     return contact.isMajikahRegistered();
-  }
-
-  /**
-   * Checks if a given envelope corresponds to a known contact
-   */
-  hasContactForEnvelope(envelope: MessageEnvelope): boolean {
-    try {
-      const fingerprint = envelope.extractFingerprint();
-      return this.hasFingerprint(fingerprint);
-    } catch {
-      return false;
-    }
   }
 
   /* ================================
