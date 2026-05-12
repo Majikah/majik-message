@@ -29,6 +29,10 @@
         "enable": true,
         "scope": ["**"]
       },
+      "headers": {
+        "Cross-Origin-Opener-Policy": "same-origin",
+        "Cross-Origin-Embedder-Policy": "require-corp"
+      },
       "csp": {
         "default-src": [
           "'self'",
@@ -118,6 +122,8 @@
           "blob:",
           "data:",
           "asset:",
+          "ipc:",
+          "http://ipc.localhost",
           "https://asset.localhost",
           "https://gydzizwxtftlmsdaiouw.supabase.co",
           "https://www.googleapis.com",

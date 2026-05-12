@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type JSX } from "react";
+import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
 
 import { toast } from "sonner";
 
@@ -14,13 +14,7 @@ import {
   UserIcon,
 } from "@phosphor-icons/react";
 import { useMajik } from "./components/majik-context-wrapper/use-majik";
-import {
-  jsonToSeed,
-  MajikKeyStore,
-  seedStringToArray,
-  type MnemonicJSON,
-} from "@majikah/majik-message";
-import type { MajikMessageDatabase } from "./components/majik-context-wrapper/majik-message-database";
+
 import DynamicPlaceholder from "./components/foundations/DynamicPlaceholder";
 import AccountsPanel from "./components/panels/AccountsPanel";
 
@@ -32,10 +26,6 @@ import {
   type RouterTabContent,
 } from "./components/functional/TabRouter";
 
-import DynamicPopUp from "./components/functional/DynamicPopUp";
-import CustomInputField from "./components/foundations/CustomInputField";
-import { SeedKeyInput } from "./components/foundations/SeedKeyInput";
-import { downloadBlob, isDevEnvironment } from "./utils/utils";
 import { useMajikah } from "./components/majikah-session-wrapper/use-majikah";
 
 import MajikMessageOnboardingGate from "./components/MajikMessageOnboardingGate";
@@ -43,14 +33,13 @@ import { launchTutorialOnboarding } from "./lib/shepherd-js/tutorials/tutorial-o
 import { useShepherd } from "./lib/shepherd-js/use-shepherd";
 
 import { listen } from "@tauri-apps/api/event";
-import { invoke } from "@tauri-apps/api/core";
-import { open, save } from "@tauri-apps/plugin-dialog";
-import { readTextFile, writeFile, readFile } from "@tauri-apps/plugin-fs";
+import { invoke, isTauri } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
+import { readFile } from "@tauri-apps/plugin-fs";
 
 import { useNavigate } from "react-router-dom";
 import { toggleTheme } from "./redux/slices/system";
 import { useDispatch } from "react-redux";
-import { sendNotification } from "@tauri-apps/plugin-notification";
 
 import { basename } from "@tauri-apps/api/path";
 import MajikahPanel from "./components/panels/MajikahPanel";
@@ -63,7 +52,29 @@ import { useFirebaseTauriPush } from "./lib/firebase/use-firebase-notifications"
 import { MajikContact } from "@majikah/majik-contact";
 import { useMajikahNotifications } from "./components/majikah-notification-wrapper/use-majikah-notifications";
 import { useMajikTutorials } from "./hooks/use-majik-tutorials";
-import DynamicAlertBanner from "./components/foundations/DynamicAlertBanner";
+
+import {
+  API_RESPONSE_SIGN_IN,
+  API_RESPONSE_SIGN_UP,
+} from "./components/majikah-session-wrapper/api-types";
+import { MajikMessageDatabase } from "./components/majik-context-wrapper/majik-message-database";
+import { CreateKeyModal } from "./components/panels/accounts/modals/CreateKeyModal";
+import { ImportKeyModal } from "./components/panels/accounts/modals/ImportKeyModal";
+import { ImportContactModal } from "./components/panels/contacts/modals";
+import { MajikahAuthModal } from "./components/panels/accounts/modals/MajikahAuthModal";
+
+type ModalKeyContext =
+  | "create-account"
+  | "replace-account"
+  | "import-account"
+  | "import-contact"
+  | "import-file-mjkb"
+  | "export-contacts"
+  | "export-backup"
+  | "export-majik-key"
+  | "validate-thread"
+  | "auth-majikah"
+  | null;
 
 const RootContainer = styled.div`
   display: flex;
@@ -93,8 +104,7 @@ function App(): JSX.Element {
 
   const { majik, loading, updateInstance } = useMajik();
   const { majikah } = useMajikah();
-  const userNotifications =
-    useMajikahNotifications();
+  const userNotifications = useMajikahNotifications();
 
   const [unlockId, setUnlockId] = useState<string | null>(null);
   const [unlockResolver, setUnlockResolver] = useState<
@@ -103,23 +113,9 @@ function App(): JSX.Element {
   const [unlocked, setUnlocked] = useState<boolean>(false);
   const [isUnlocking, setIsUnlocking] = useState(false);
 
-  const [isCreatingAccount, setIsCreatingAccount] = useState<boolean>(false);
-  const [isImportingAccount, setIsImportingAccount] = useState<boolean>(false);
-  const [isAddingContact, setIsAddingContact] = useState<boolean>(false);
+  const [modalKey, setModalKey] = useState<ModalKeyContext>(null);
 
   const [refreshKey, setRefreshKey] = useState<number>(0);
-
-  const [label, setLabel] = useState<string>("");
-  const [passphrase, setPassphrase] = useState<string>("");
-  const [mnemonic, setMnemonic] = useState<string>("");
-
-  const [mnemonicJSON, setMnemonicJSON] = useState<MnemonicJSON>({
-    id: "",
-    seed: Array(12).fill(""),
-    phrase: "",
-  });
-
-  const [inviteKey, setInviteKey] = useState<string>("");
 
   useFirebaseTauriPush({
     config: firebaseConfig,
@@ -130,10 +126,9 @@ function App(): JSX.Element {
       userNotifications.notifyActivity();
     },
   });
-
   useEffect(() => {
-    // Wire MajikKeyStore.onUnlockRequested to present our React modal
-    MajikKeyStore.onUnlockRequested = (id: string) => {
+    // Wire majik.keyManager.onUnlockRequested to present our React modal
+    majik.keyManager.onUnlockRequested = (id: string) => {
       return new Promise<string>((resolve) => {
         setUnlockId(id);
         setUnlockResolver(() => resolve);
@@ -141,23 +136,36 @@ function App(): JSX.Element {
     };
 
     return () => {
-      MajikKeyStore.onUnlockRequested = undefined;
+      majik.keyManager.onUnlockRequested = undefined;
     };
   }, []);
 
   useEffect(() => {
-    if (isDevEnvironment()) return;
+    if (!majikah) return;
 
-    const handleContextMenu = (e: MouseEvent) => {
-      e.preventDefault();
+    const handleSignIn = async () => {
+      if (!isTauri()) return;
+
+      invoke("set_auth_state", { signedIn: true })
+        .catch(console.error)
+        .finally(() => console.log("User Signed In", true));
     };
 
-    window.addEventListener("contextmenu", handleContextMenu);
+    const handleSignOut = async () => {
+      if (!isTauri()) return;
 
+      invoke("set_auth_state", { signedIn: false })
+        .catch(console.error)
+        .finally(() => console.log("User Signed Out", false));
+    };
+
+    majikah.on("sign-in", handleSignIn);
+    majikah.on("sign-out", handleSignOut);
     return () => {
-      window.removeEventListener("contextmenu", handleContextMenu);
+      majikah.off("sign-in", handleSignIn);
+      majikah.off("sign-out", handleSignOut);
     };
-  }, []);
+  }, [majikah]);
 
   useEffect(() => {
     if (!majik) return;
@@ -167,7 +175,7 @@ function App(): JSX.Element {
 
     try {
       // Try accessing private key
-      MajikKeyStore.getPrivateKey(active.id);
+      majik.keyManager.getPrivateKey(active.id);
 
       // If no error → already unlocked
       setUnlocked(true);
@@ -274,7 +282,8 @@ function App(): JSX.Element {
             });
             return;
           }
-          setIsCreatingAccount(true);
+          setModalKey("create-account");
+          navigate("/accounts");
         }),
         listen("trigger-import-account", async () => {
           if (userAccounts.length >= MAX_ACCOUNT_LIMIT) {
@@ -284,57 +293,43 @@ function App(): JSX.Element {
             });
             return;
           }
-          try {
-            const selected = await open({
-              multiple: false,
-              filters: [{ name: "Backup", extensions: ["json"] }],
-            });
-            if (!selected) return;
-
-            const raw = await readTextFile(selected as string);
-            const json = JSON.parse(raw) as MnemonicJSON;
-
-            if (!json) {
-              toast.error("Invalid Backup File", {
-                description:
-                  "There seems to be a problem with the backup file.",
-              });
-              return;
-            }
-
-            setMnemonicJSON(json);
-            setIsImportingAccount(true);
-            setRefreshKey((k) => k + 1);
-          } catch (error) {
-            console.error(error);
-            toast.error("Failed to import mnemonic backup", {
-              description: (error as any)?.message || String(error),
-            });
-          }
+          setModalKey("import-account");
+          navigate("/accounts");
         }),
         listen("trigger-import-contact", () => {
-          setIsAddingContact(true);
+          setModalKey("import-contact");
+          navigate("/contacts");
+        }),
+
+        listen("trigger-refresh-identities", async () => {
+          await majik.refreshIdentities();
+          setRefreshKey((prev) => prev + 1);
         }),
         listen("trigger-auth-sign-in", () => {
-          navigate("/majikah");
+          setModalKey("auth-majikah");
         }),
+
         listen("trigger-auth-sign-out", async () => {
           if (!majikah.isAuthenticated) return;
-          const user = majikah.user;
-          try {
+
+          const run = async (): Promise<string> => {
             await majikah.signOut();
-            toast.success("Signed Out", {
-              description: `Signed out from Majikah, ${user?.displayName || user?.email}.`,
-              id: "toast-success-sign-out",
-            });
-          } catch {
-            toast.error("Problem Signing Out", {
-              description: `There was a problem signing out, ${user?.displayName || user?.email}.`,
-              id: "toast-error-sign-out",
-            });
-          } finally {
-            navigate("/majikah");
-          }
+            toast.success("Signed Out");
+            majik.clearUser();
+            majik.clearAllCaches();
+
+            return "Signed out from Majikah.";
+          };
+
+          toast.promise(run(), {
+            loading: `Signing Out…`,
+            success: (m) => {
+              navigate("/muid");
+              return m;
+            },
+            error: (err) =>
+              err instanceof Error ? err.message : "Problem Signing Out.",
+          });
         }),
       ]);
 
@@ -361,120 +356,6 @@ function App(): JSX.Element {
     );
   }, [majikah.isAuthenticated]);
 
-  const handleCreate = async (): Promise<void> => {
-    if (!mnemonic?.trim()) {
-      toast.error("Failed to create account", {
-        description: "Mnemonic Seed Phrase must be a non-empty string.",
-        id: "toast-error-create",
-      });
-      return;
-    }
-
-    try {
-      let accountID = "Unknown";
-
-      if (!passphrase?.trim()) {
-        toast.error("Failed to create account", {
-          description: "Password must be a non-empty string.",
-          id: "toast-error-create",
-        });
-        return;
-      }
-
-      const createdAccount = await majik.createAccountFromMnemonic(
-        mnemonic.trim(),
-        passphrase,
-        label,
-      );
-      accountID = createdAccount.id;
-
-      const jsonData: MnemonicJSON = {
-        id: createdAccount.backup,
-        seed: seedStringToArray(mnemonic.trim()),
-        phrase: passphrase?.trim() ? passphrase.trim() : undefined,
-      };
-
-      const blob = new Blob([JSON.stringify(jsonData)], {
-        type: "application/json;charset=utf-8",
-      });
-
-      // Open the native save dialog
-      const filePath = await save({
-        defaultPath: `${label} | ${createdAccount.id} | SEED KEY`,
-        filters: [
-          {
-            name: "Backup JSON",
-            extensions: ["json"],
-          },
-        ],
-      });
-
-      // User cancelled the dialog
-      if (!filePath) {
-        downloadBlob(
-          blob,
-          "json",
-          `${label} | ${createdAccount.id} | SEED KEY`,
-        );
-      } else {
-        // Convert blob → Uint8Array and write to the chosen path
-        const arrayBuffer = await blob.arrayBuffer();
-        await writeFile(filePath, new Uint8Array(arrayBuffer));
-      }
-
-      toast.success("Account Created Successfully", {
-        description: `New account for ${label || accountID} created.`,
-        id: `toast-success-create-${label}`,
-      });
-
-      sendNotification({
-        title: "Account Created Successfully",
-        body: `New Account for ${label || accountID} created successfully.`,
-      });
-
-      window.location.reload();
-
-      setRefreshKey((prev) => prev + 1);
-    } catch (err) {
-      console.error(err);
-      toast.error("Account Creation Failed", {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        description: (err as any)?.message || err,
-        id: "error-majik-message-account-create",
-      });
-    }
-  };
-
-  const handleAddContact = async (): Promise<void> => {
-    if (!inviteKey?.trim()) {
-      toast.error("Invalid Invite Key", {
-        description: "Please provide a valid invite key.",
-        id: `toast-error-add-${inviteKey}`,
-      });
-      return;
-    }
-    try {
-      await majik.importContactFromString(inviteKey);
-      setRefreshKey((prev) => prev + 1);
-      toast.success("New Contact Added Succesfully", {
-        description: inviteKey,
-        id: `toast-success-add-${inviteKey}`,
-      });
-
-      sendNotification({
-        title: "New Contact Added Successfully",
-        body: inviteKey,
-      });
-      navigate("/contacts");
-    } catch (e) {
-      toast.error("Failed to Add New Contact", {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        description: (e as any)?.message || e,
-        id: "error-majik-add",
-      });
-    }
-  };
-
   const handleCancel = (): void => {
     if (unlockResolver) unlockResolver("");
     setUnlockId(null);
@@ -492,14 +373,13 @@ function App(): JSX.Element {
       id: "toast-success-unlock",
     });
   };
-
   const handleSubmit = async (pass: string): Promise<void> => {
     if (!majik || !unlockId || isUnlocking) return;
     if (unlockResolver) unlockResolver(pass);
     try {
       setIsUnlocking(true);
 
-      await MajikKeyStore.unlockIdentity(unlockId, pass);
+      await majik.unlockAccount(unlockId, pass);
 
       toast.success("Access granted", {
         description: "Your identity has been securely unlocked.",
@@ -521,72 +401,22 @@ function App(): JSX.Element {
     setRefreshKey((prev) => prev + 1);
   };
 
-  const handleUpdatePassphrase = (value: string): void => {
-    setPassphrase(value?.trim() ? value : "");
-  };
+  // ── ReplaceKey success ─────────────────────────────────────────────────────
+  const handleModalSuccess = useCallback(() => {
+    setRefreshKey((prev) => prev + 1);
+  }, [majik]);
 
-  const handleSeedKeyChange = (input: MnemonicJSON): void => {
-    if (!input) return;
-
-    const stringSeed = jsonToSeed(input);
-    setMnemonicJSON(input);
-    setMnemonic(stringSeed);
-  };
-
-  const resetForm = (): void => {
-    setLabel("");
-    setPassphrase("");
-    setMnemonic("");
-    setMnemonicJSON({
-      id: "",
-      seed: Array(12).fill(""),
-      phrase: "",
-    });
-  };
-
-  // ── Import mnemonic ────────────────────────────────────────────────────────
-  const handleLoadMnemonicAccount = async (): Promise<void> => {
-    if (!majik) {
-      toast.error("Problem Loading Majik Signature");
-      return;
-    }
-    if (!mnemonicJSON) {
-      toast.error("Invalid Backup File", {
-        description: "There seems to be a problem with the backup file.",
-      });
-      return;
-    }
-
-    if (!passphrase?.trim()) {
-      toast.error("Invalid Passphrase", {
-        description: "Please provide a valid passphrase.",
-      });
-      return;
-    }
-    try {
-      await majik.importAccountFromMnemonicBackup(
-        mnemonicJSON.id,
-        mnemonic.trim(),
-        passphrase || "",
-        label,
-      );
-      resetForm();
-      toast.success("Account imported from mnemonic backup");
-
-      sendNotification({
-        title: "Account Imported Successfully",
-        body: `New Account for ${label || mnemonicJSON.id} created successfully.`,
-      });
-      window.location.reload();
-      setRefreshKey((k) => k + 1);
-    } catch (e) {
-      console.error(e);
-      toast.error("Failed to import mnemonic backup", {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        description: (e as any)?.message || e,
-      });
-    }
-  };
+  const handleAuthSuccess = useCallback(
+    async (response: API_RESPONSE_SIGN_IN | API_RESPONSE_SIGN_UP) => {
+      navigate("/muid");
+      setRefreshKey((prev) => prev + 1);
+      setModalKey(null);
+      if (!!response.user) {
+        await majik.refreshIdentities();
+      }
+    },
+    [majik],
+  );
 
   if (loading) {
     return (
@@ -613,7 +443,9 @@ function App(): JSX.Element {
       element: (
         <ConversationSidePanel majik={majik} onUpdate={handleRefreshInstance} />
       ),
-      notification: <NotificationDot count={userNotifications.unreadChatCount} />,
+      notification: (
+        <NotificationDot count={userNotifications.unreadChatCount} />
+      ),
     },
     {
       id: "threads",
@@ -621,7 +453,9 @@ function App(): JSX.Element {
       name: "Threads",
       icon: LinkIcon,
       element: <EmailThreads majik={majik} onUpdate={handleRefreshInstance} />,
-      notification: <NotificationDot count={userNotifications.unreadThreadCount} />,
+      notification: (
+        <NotificationDot count={userNotifications.unreadThreadCount} />
+      ),
     },
     {
       id: "contacts",
@@ -653,8 +487,6 @@ function App(): JSX.Element {
     },
   ];
 
-  const atLimit = userAccounts.length >= MAX_ACCOUNT_LIMIT;
-
   return (
     <RootContainer>
       <MajikMessageOnboardingGate
@@ -679,133 +511,39 @@ function App(): JSX.Element {
           onReset={handleCancel}
           isUnlocking={isUnlocking}
         />
-        <DynamicPopUp
-          scrollable
-          isOpen={isCreatingAccount}
-          onOpenChange={setIsCreatingAccount}
-          modal={{
-            title: "Create Account",
-            description:
-              userAccounts.length >= MAX_ACCOUNT_LIMIT
-                ? "Max accounts reached."
-                : "Create a new account with a mnemonic seed phrase.",
-          }}
-          buttons={{
-            cancel: {
-              text: "Cancel",
-            },
-            confirm: {
-              text: "Save Changes",
-              isDisabled:
-                !label?.trim() || !mnemonic?.trim() || !passphrase?.trim(),
-              onClick: handleCreate,
-            },
-          }}
-        >
-          {/* Security warning */}
-          <DynamicAlertBanner
-            title="Keep this private"
-            description={`
-                Never share your seed phrase or backup JSON file with anyone.
-                Anyone who has them gains full access to your account. Store
-                your backup in a safe, offline location.
-          `}
-            level="danger"
-          />
-          <CustomInputField
-            onChange={(e) => setLabel(e)}
-            maxChar={100}
-            regex="letters"
-            label="Display Name"
-            required
-            importProp={{
-              type: "txt",
-            }}
-            currentValue={label}
-          />
-          <SeedKeyInput
-            importProp={{
-              type: "json",
-            }}
-            allowGenerate={true}
-            onUpdatePassphrase={handleUpdatePassphrase}
-            onChange={handleSeedKeyChange}
-            readonly
-            currentValue={{ ...mnemonicJSON, phrase: passphrase }}
-          />
-        </DynamicPopUp>
+        <CreateKeyModal
+          majik={majik}
+          onSuccess={handleModalSuccess}
+          open={modalKey === "create-account"}
+          onOpenChange={(change) =>
+            setModalKey(change ? "create-account" : null)
+          }
+        />
 
-        <DynamicPopUp
-          scrollable
-          isOpen={isImportingAccount}
-          onOpenChange={setIsImportingAccount}
-          modal={{
-            title: "Import Account",
-            description: atLimit
-              ? "Maximum account limit reached."
-              : "Import an account from a mnemonic seed phrase.",
-          }}
-          buttons={{
-            cancel: { text: "Cancel", onClick: resetForm },
-            confirm: {
-              text: "Import Account",
-              isDisabled:
-                !mnemonicJSON?.id?.trim() ||
-                !mnemonicJSON ||
-                mnemonicJSON.seed.length === 0 ||
-                !passphrase?.trim(),
-              onClick: handleLoadMnemonicAccount,
-            },
-          }}
-        >
-          <CustomInputField
-            onChange={(e) => setLabel(e)}
-            maxChar={100}
-            regex="letters"
-            label="Display Name"
-            currentValue={label}
-            sensitive
-          />
-          <SeedKeyInput
-            importProp={{ type: "json" }}
-            requireBackupKey
-            onUpdatePassphrase={handleUpdatePassphrase}
-            onChange={handleSeedKeyChange}
-            readonly={false}
-            currentValue={{ ...mnemonicJSON, phrase: passphrase }}
-          />
-        </DynamicPopUp>
+        <ImportKeyModal
+          majik={majik}
+          onSuccess={handleModalSuccess}
+          open={modalKey === "import-account"}
+          onOpenChange={(change) =>
+            setModalKey(change ? "import-account" : null)
+          }
+        />
 
-        <DynamicPopUp
-          scrollable
-          isOpen={isAddingContact}
-          onOpenChange={setIsAddingContact}
-          modal={{
-            title: "Add Contact",
-            description: "Add a new contact to your list.",
-          }}
-          buttons={{
-            cancel: {
-              text: "Cancel",
-            },
-            confirm: {
-              text: "Save Changes",
-              onClick: handleAddContact,
-            },
-          }}
-        >
-          <CustomInputField
-            currentValue={inviteKey}
-            onChange={(e) => setInviteKey(e)}
-            maxChar={10000}
-            label="Invite Key"
-            required
-            importProp={{
-              type: "txt",
-            }}
-            sensitive={true}
-          />
-        </DynamicPopUp>
+        <ImportContactModal
+          majik={majik}
+          onSuccess={handleModalSuccess}
+          open={modalKey === "import-contact"}
+          onOpenChange={(change) =>
+            setModalKey(change ? "import-contact" : null)
+          }
+        />
+
+        <MajikahAuthModal
+          onSuccessSignIn={handleAuthSuccess}
+          onSuccessSignUp={handleAuthSuccess}
+          open={modalKey === "auth-majikah"}
+          onOpenChange={(change) => setModalKey(change ? "auth-majikah" : null)}
+        />
       </MajikMessageOnboardingGate>
     </RootContainer>
   );

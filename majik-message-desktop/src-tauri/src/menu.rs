@@ -1,10 +1,15 @@
 //menu.rs
+use crate::AuthMenuState;
+
 use tauri::{
     menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu},
     AppHandle, Emitter, Manager, Runtime,
 };
 
-pub fn build_menu<R: Runtime>(app: &AppHandle<R>, is_signed_in: bool) -> tauri::Result<Menu<R>> {
+pub fn build_menu(
+    app: &AppHandle<tauri::Wry>,
+    is_signed_in: bool,
+) -> tauri::Result<Menu<tauri::Wry>> {
     // ── About ──────────────────────────────────────────────────────────────
 
     let about = PredefinedMenuItem::about(
@@ -36,6 +41,13 @@ pub fn build_menu<R: Runtime>(app: &AppHandle<R>, is_signed_in: bool) -> tauri::
     let import_account =
         MenuItem::with_id(app, "import-account", "Import Account", true, None::<&str>)?;
     let add_contact = MenuItem::with_id(app, "add-contact", "Add Contact", true, None::<&str>)?;
+    let refresh_identities = MenuItem::with_id(
+        app,
+        "refresh-identities",
+        "Refresh Identities",
+        is_signed_in,
+        None::<&str>,
+    )?;
     let minimize_to_tray = MenuItem::with_id(
         app,
         "minimize-to-tray",
@@ -45,6 +57,12 @@ pub fn build_menu<R: Runtime>(app: &AppHandle<R>, is_signed_in: bool) -> tauri::
     )?;
     let sign_in = MenuItem::with_id(app, "sign-in", "Sign In", !is_signed_in, None::<&str>)?;
     let sign_out = MenuItem::with_id(app, "sign-out", "Sign Out", is_signed_in, None::<&str>)?;
+
+    let auth_state = app.state::<AuthMenuState>();
+    *auth_state.sign_in.lock().unwrap() = Some(sign_in.clone());
+    *auth_state.sign_out.lock().unwrap() = Some(sign_out.clone());
+    *auth_state.refresh_identities.lock().unwrap() = Some(refresh_identities.clone());
+
     let exit = MenuItem::with_id(app, "exit", "Exit", true, None::<&str>)?;
 
     let account_menu = Submenu::with_items(
@@ -58,6 +76,8 @@ pub fn build_menu<R: Runtime>(app: &AppHandle<R>, is_signed_in: bool) -> tauri::
             &add_contact,
             &PredefinedMenuItem::separator(app)?,
             &minimize_to_tray,
+            &PredefinedMenuItem::separator(app)?,
+            &refresh_identities,
             &PredefinedMenuItem::separator(app)?,
             &sign_in,
             &sign_out,
@@ -172,6 +192,11 @@ pub fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, event_id: &str) {
                 let _ = win.hide();
             }
         }
+
+        "refresh-identities" => {
+            let _ = app.emit("trigger-refresh-identities", ());
+        }
+
         "sign-in" => {
             let _ = app.emit("trigger-auth-sign-in", ());
         }

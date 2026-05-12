@@ -14,7 +14,7 @@ import DynamicPlaceholder from "../foundations/DynamicPlaceholder";
 import { ChoiceButton } from "@/globals/buttons";
 import { useLocation, useNavigate } from "react-router-dom";
 import FileVault from "../functional/FileVault/FileVault";
-import { MajikKeyStore, type CompressionLevel } from "@majikah/majik-message";
+import { type CompressionLevel } from "@majikah/majik-message";
 import MajikContactListSelector from "../MajikContactListSelector";
 import PopUpFormButton from "../foundations/PopUpFormButton";
 import CustomInputField from "../foundations/CustomInputField";
@@ -386,7 +386,7 @@ const FilePanel: React.FC<FilePanelProps> = ({ majik }) => {
   const activeSignerInfo = useMemo((): SignerInfo | null => {
     const account = majik.getActiveAccount();
     if (!account) return null;
-    const key = MajikKeyStore.get(account.id);
+    const key = majik.getActiveAccountKey();
     if (!key?.hasSigningKeys) return null;
     return {
       signerId: key.fingerprint,
@@ -479,7 +479,7 @@ const FilePanel: React.FC<FilePanelProps> = ({ majik }) => {
       signatureStatus = { verdict: "unsigned" };
     } else {
       try {
-        const signerKey = MajikKeyStore.get(majik.getActiveAccount()!.id);
+        const signerKey = majik.getActiveAccountKey();
 
         if (signerKey?.hasSigningKeys) {
           const result = await MajikFile.verifySignedMJKB(rawBytes, signerKey);

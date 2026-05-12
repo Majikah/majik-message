@@ -18,25 +18,24 @@ import {
   UserIcon,
 } from "@phosphor-icons/react";
 
-import {
-  jsonToSeed,
-  seedStringToArray,
-  type MnemonicJSON,
-} from "@majikah/majik-message";
-
 import { launchTutorialAccounts } from "@src/lib/shepherd-js/tutorials/tutorial-accounts";
 import { useShepherd } from "@src/lib/shepherd-js/use-shepherd";
 import GuideHelper from "../functional/GuideHelper";
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeFile } from "@tauri-apps/plugin-fs";
 import { sendNotification } from "@tauri-apps/plugin-notification";
-import { MajikMessageDatabase } from "../majik-context-wrapper/majik-message-database";
 import { MajikContact } from "@majikah/majik-contact";
 import DropImportAccount from "../foundations/DropImportAccount";
 import DynamicAlertBanner from "../foundations/DynamicAlertBanner";
 import { MajikBytes } from "@majikah/majik-bytes";
 
 import JSZip from "jszip";
+import { MajikMessageDatabase } from "../majik-context-wrapper/majik-message-database";
+import {
+  jsonToSeed,
+  MnemonicJSON,
+  seedStringToArray,
+} from "@majikah/majik-message";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const MAX_ACCOUNT_LIMIT = 25;
@@ -255,7 +254,7 @@ const AccountsPanel: React.FC<AccountsPanelProps> = ({ majik, onUpdate }) => {
   const processCreateAccount = async (): Promise<string> => {
     let accountID = "Unknown";
 
-    const createdAccount = await majik.createAccountFromMnemonic(
+    const createdAccount = await majik.createAccount(
       mnemonic.trim(),
       passphrase,
       label,
@@ -403,7 +402,7 @@ IMPORTANT: Keep this file secure and private at all times. If lost or compromise
       majik.updateContactMeta(id, { label: newName });
       toast.success("Display Name Updated", {
         description: `Display name updated successfully.`,
-        id: "success-majik-message-account-label-update",
+        id: "success-majik-signature-client-account-label-update",
       });
       onUpdate?.(majik);
       setRefreshKey((prev) => prev + 1);
@@ -412,7 +411,7 @@ IMPORTANT: Keep this file secure and private at all times. If lost or compromise
       toast.error("Update Failed", {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         description: (err as any)?.message || err,
-        id: "error-majik-message-account-edit",
+        id: "error-majik-signature-client-account-edit",
       });
     }
   };
@@ -464,17 +463,7 @@ IMPORTANT: Keep this file secure and private at all times. If lost or compromise
   // ── Delete account ─────────────────────────────────────────────────────────
   const handleDelete = async (id: string): Promise<void> => {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (majik as any).keyStore?.deleteIdentity?.(id).catch?.(() => {});
-      try {
-        const { MajikKeyStore } = await import("@majikah/majik-message");
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        await (MajikKeyStore as any).deleteIdentity(id);
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      } catch (e) {
-        /* ignore */
-      }
-      majik.removeOwnAccount(id);
+      await majik.removeOwnAccount(id);
       onUpdate?.(majik);
       setRefreshKey((prev) => prev + 1);
     } catch (err) {
@@ -482,7 +471,7 @@ IMPORTANT: Keep this file secure and private at all times. If lost or compromise
       toast.error("Delete Failed", {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         description: (err as any)?.message || err,
-        id: "error-majik-message-account-delete",
+        id: "error-majik-signature-client-account-delete",
       });
     }
   };
@@ -492,24 +481,24 @@ IMPORTANT: Keep this file secure and private at all times. If lost or compromise
     input: PassphraseUpdateParams,
   ): Promise<void> => {
     try {
-      majik.updatePassphrase(
+      majik.keyManager.updatePassphrase(
+        input.id,
         input.passphrase.old,
         input.passphrase.new,
-        input.id,
       );
       onUpdate?.(majik);
       setRefreshKey((prev) => prev + 1);
       const name = await majik.getContactByID(input.id)?.getDisplayName();
       toast.success("Passphrase Updated", {
         description: `Passphrase for ${name} updated.`,
-        id: "success-majik-message-account-passphrase-update",
+        id: "success-majik-signature-client-account-passphrase-update",
       });
     } catch (err) {
       console.error(err);
       toast.error("Update Failed", {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         description: (err as any)?.message || err,
-        id: "error-majik-message-account-passphrase-update",
+        id: "error-majik-signature-client-account-passphrase-update",
       });
     }
   };
@@ -517,7 +506,7 @@ IMPORTANT: Keep this file secure and private at all times. If lost or compromise
   // ── Import mnemonic ────────────────────────────────────────────────────────
   const handleLoadMnemonicAccount = async (): Promise<void> => {
     if (!majik) {
-      toast.error("Problem Loading Majik Signature");
+      toast.error("Problem Loading Majik Buwiz");
       return;
     }
     if (!mnemonicJSON) {
@@ -886,7 +875,7 @@ IMPORTANT: Keep this file secure and private at all times. If lost or compromise
             </EmptyIcon>
             <EmptyTitle>No accounts yet</EmptyTitle>
             <EmptyHint>
-              Create or import an account to start using Majik Signature.
+              Create or import an account to start using Majik Buwiz.
             </EmptyHint>
           </EmptyState>
         )}

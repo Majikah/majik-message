@@ -44,7 +44,6 @@ import type {
 import UserFileQuota from "./UserFileQuota";
 import type { MajikMessageDatabase } from "../majik-context-wrapper/majik-message-database";
 import { toast } from "sonner";
-import { MajikKeyStore } from "@majikah/majik-message";
 import MajikContactListSelector from "../MajikContactListSelector";
 import moment from "moment";
 import {
@@ -2625,8 +2624,7 @@ const UserFiles: React.FC<UserFilesProps> = ({
                     {/* Add after ClampNotice, before InlineRecipientPicker */}
                     {scanPassed &&
                       (() => {
-                        const activeId = majik.getActiveAccount()?.id ?? "";
-                        const activeKey = MajikKeyStore.get(activeId);
+                        const activeKey = majik.getActiveAccountKey();
                         const hasSigning = activeKey?.hasSigningKeys ?? false;
                         const accountLabel =
                           majik.getActiveAccount()?.meta?.label ??

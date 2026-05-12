@@ -2,6 +2,7 @@ import path, { resolve } from "path";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { sqliteWasm } from "./plugins/sqlite-wasm";
 
 const host = process.env.TAURI_DEV_HOST;
 
@@ -9,11 +10,15 @@ export default defineConfig(({ mode }) => {
   const isProd = mode === "production";
 
   return {
-    plugins: [react(), tailwindcss()],
+    plugins: [react(), tailwindcss(), sqliteWasm()],
 
     clearScreen: false,
 
     server: {
+      headers: {
+        "Cross-Origin-Opener-Policy": "same-origin",
+        "Cross-Origin-Embedder-Policy": "require-corp",
+      },
       port: 1420,
       strictPort: true,
       host: host || false,
@@ -38,10 +43,21 @@ export default defineConfig(({ mode }) => {
       },
     },
 
+    preview: {
+      headers: {
+        "Cross-Origin-Opener-Policy": "same-origin",
+        "Cross-Origin-Embedder-Policy": "require-corp",
+      },
+    },
+
     optimizeDeps: {
       exclude: isProd
-        ? ["@majikah/majik-message", "@bokuweb/zstd-wasm"]
-        : ["@bokuweb/zstd-wasm"],
+        ? [
+            "@majikah/majik-message",
+            "@bokuweb/zstd-wasm",
+            "@sqlite.org/sqlite-wasm",
+          ]
+        : ["@bokuweb/zstd-wasm", "@sqlite.org/sqlite-wasm"],
     },
     esbuild: {
       target: "es2020",
@@ -56,6 +72,22 @@ export default defineConfig(({ mode }) => {
       emptyOutDir: true,
       rollupOptions: {
         input: resolve(__dirname, "index.html"),
+        external: [], // don't externalize
+        output: {
+          assetFileNames: (assetInfo) => {
+            // Don't hash sqlite wasm
+            if (assetInfo.name?.endsWith(".wasm")) {
+              return "assets/[name][extname]";
+            }
+            return "assets/[name]-[hash][extname]";
+          },
+          chunkFileNames: (chunkInfo) => {
+            if (chunkInfo.name?.includes("sqlite")) {
+              return "assets/[name].js";
+            }
+            return "assets/[name]-[hash].js";
+          },
+        },
       },
       // Tauri uses Chromium so you can target modern output
       target: "es2020",

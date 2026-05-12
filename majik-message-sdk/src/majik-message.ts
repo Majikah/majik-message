@@ -14,9 +14,7 @@ import {
   type EnvelopeCacheJSON,
 } from "./core/messages/envelope-cache";
 
-import { arrayToBase64, base64ToUint8Array } from "./core/utils/utilities";
-
-import { randomBytes } from "@stablelib/random";
+import { base64ToUint8Array } from "./core/utils/utilities";
 
 import type {
   DecryptFileOptions,
@@ -65,6 +63,7 @@ import {
   InMemoryClientStateAdapter,
   InMemoryKeystoreAdapter,
   MajikKeyStorageAdapter,
+  MajikMessageChatStorageAdapter,
   SQLiteDatabase,
 } from "./core/storage";
 import { MajikKeyManager } from "./core/crypto/keystore-manager";
@@ -73,23 +72,20 @@ import { ClientStateManager } from "./core/client-state-manager";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type MajikMessageEvents =
+  | "new-account"
+  | "removed-account"
+  | "active-account-change"
+  | "unlock"
+  | "lock"
+  | "new-contact"
+  | "removed-contact"
+  | "new-contact-group"
+  | "removed-contact-group"
+  | "contact-group-change"
   | "message"
   | "envelope"
   | "untrusted"
-  | "error"
-  | "new-account"
-  | "new-contact"
-  | "new-contact-group"
-  | "removed-account"
-  | "removed-contact"
-  | "removed-contact-group"
-  | "contact-group-change"
-  | "active-account-change";
-
-interface MajikMessageStatic<T extends MajikMessage> {
-  new (config: MajikMessageConfig, id?: string): T;
-  fromJSON(json: MajikMessageJSON): Promise<T>;
-}
+  | "error";
 
 export interface MajikMessageConfig {
   dbSQL?: SQLiteDatabase;
@@ -115,9 +111,12 @@ export interface MajikMessageConfig {
    */
   clientStateManager?: ClientStateManager;
 
+  // chatsManager?: MajikM
+
   adapters?: {
     contacts?: MajikContactManagerAdapters;
     keys?: MajikKeyStorageAdapter;
+    chats?: MajikMessageChatStorageAdapter;
     /**
      * Adapter for client-level state (account order, invoice defaults, etc.).
      * Defaults to IDB_ADAPTER_CLIENT_STATE in browser environments.
@@ -142,7 +141,6 @@ type EventCallback = (...args: any[]) => void;
 // ─── MajikMessage ─────────────────────────────────────────────────────────────
 
 export class MajikMessage {
-  private readonly _id: string;
   private _db: SQLiteDatabase | null;
 
   private _contacts: MajikContactManager;
@@ -163,8 +161,7 @@ export class MajikMessage {
 
   private _autosaveOrderTimer: number | null = null;
 
-  constructor(config: MajikMessageConfig, id?: string) {
-    this._id = id || arrayToBase64(randomBytes(32));
+  constructor(config: MajikMessageConfig) {
     this._db = config.dbSQL || null;
 
     this.envelopeCache = config.envelopeCache || new EnvelopeCache(undefined);
@@ -179,6 +176,9 @@ export class MajikMessage {
         config.adapters?.keys ?? new InMemoryKeystoreAdapter(),
       );
 
+    // this._chats =
+    // config.
+
     this._state =
       config.clientStateManager ??
       new ClientStateManager(
@@ -186,18 +186,20 @@ export class MajikMessage {
       );
 
     const events: MajikMessageEvents[] = [
+      "new-account",
+      "removed-account",
+      "active-account-change",
+      "unlock",
+      "lock",
+      "new-contact",
+      "removed-contact",
+      "new-contact-group",
+      "removed-contact-group",
+      "contact-group-change",
       "message",
       "envelope",
       "untrusted",
       "error",
-      "new-account",
-      "new-contact",
-      "new-contact-group",
-      "removed-account",
-      "removed-contact",
-      "removed-contact-group",
-      "contact-group-change",
-      "active-account-change",
     ];
     events.forEach((e) => this._listeners.set(e, []));
   }
@@ -609,6 +611,30 @@ export class MajikMessage {
     return true;
   }
 
+  async unlockAccount(id: string, passphrase: string): Promise<void> {
+    try {
+      await this._keys.unlock(id, passphrase);
+      this._emit("unlock", id);
+    } catch (err) {
+      this._emit("error", err, { context: "unlockAccount", id });
+      throw err;
+    }
+  }
+
+  lockAccount(id: string): void {
+    this._keys.lock(id);
+    this._emit("lock", id);
+  }
+
+  lockAllAccounts(): void {
+    this._keys.lockAll();
+    for (const id of this._ownAccountsOrder) this._emit("lock", id);
+  }
+
+  async verifyPassphrase(id: string, passphrase: string): Promise<boolean> {
+    return this._keys.isPassphraseValid(id, passphrase);
+  }
+
   listOwnAccounts(majikahOnly = false): MajikContact[] {
     let accounts = this._ownAccountsOrder
       .map((id) => this._ownAccounts.get(id))
@@ -645,6 +671,18 @@ export class MajikMessage {
     return this._contacts.getContact(id) ?? null;
   }
 
+  hasContact(id: string): boolean {
+    if (!id?.trim()) throw new Error("Invalid contact ID");
+    return this._contacts.hasContact(id);
+  }
+
+  async hasContactByPublicKeyBase64(
+    publicKey: MajikMessagePublicKey,
+  ): Promise<boolean> {
+    if (!publicKey?.trim()) throw new Error("Invalid contact public key");
+    return await this._contacts.hasContactByPublicKeyBase64(publicKey);
+  }
+
   async getContactByPublicKey(
     publicKeyBase64: string,
   ): Promise<MajikContact | null> {
@@ -660,9 +698,7 @@ export class MajikMessage {
     return this._contacts.getContactsByIds(ids, strict);
   }
 
-  async getContactsByPublicKey(
-    publicKeys: string[],
-  ): Promise<MajikContact[]> {
+  async getContactsByPublicKey(publicKeys: string[]): Promise<MajikContact[]> {
     if (!publicKeys?.length)
       throw new Error("At least 1 public key is required");
     return await this._contacts.getContactsByPublicKeys(publicKeys);
@@ -749,8 +785,11 @@ export class MajikMessage {
     this._emit("removed-contact", id);
   }
 
-  listContacts(includeOwnAccounts = false): MajikContact[] {
-    const contacts = this._contacts.listContacts(true);
+  listContacts(
+    includeOwnAccounts = false,
+    majikahOnly: boolean = false,
+  ): MajikContact[] {
+    const contacts = this._contacts.listContacts(true, majikahOnly);
     if (includeOwnAccounts) return contacts;
     const ownIds = new Set(this.listOwnAccounts().map((a) => a.id));
     return contacts.filter((c) => !ownIds.has(c.id));

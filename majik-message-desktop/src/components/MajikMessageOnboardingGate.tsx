@@ -559,7 +559,7 @@ const MajikMessageOnboardingGate: React.FC<MajikMessageOnboardingGateProps> = ({
     const download = prepareDownloadAnchor("json", `${label} | SEED KEY`);
 
     const run = async (): Promise<string> => {
-      const created = await majik.createAccountFromMnemonic(
+      const created = await majik.createAccount(
         mnemonic.trim(),
         passphrase,
         label,

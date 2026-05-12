@@ -6,7 +6,7 @@ import { MAJIKAH_SQL_TABLES } from "../sql-schema";
 import { StorageSource } from "../storage-adapter";
 import { MajikMessageChatStorageAdapter } from "./_types";
 
-export class SQLiteInvoiceAdapter implements MajikMessageChatStorageAdapter {
+export class SQLiteMessageChatsAdapter implements MajikMessageChatStorageAdapter {
   constructor(private db: SQLiteDatabase) {}
 
   async save(

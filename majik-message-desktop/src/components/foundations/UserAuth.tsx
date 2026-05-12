@@ -20,6 +20,9 @@ import * as AlertDialog from "@radix-ui/react-alert-dialog";
 import DuoButton from "./DuoButton";
 import CustomInputField from "./CustomInputField";
 import { Asset_Logo_150px } from "@/assets";
+import { useMajik } from "../majik-context-wrapper/use-majik";
+import { MajikUser } from "@thezelijah/majik-user";
+import { useNavigate } from "react-router-dom";
 
 const RootContainer = styled.div`
   display: flex;
@@ -28,6 +31,12 @@ const RootContainer = styled.div`
   background: transparent;
   padding: 2rem;
   width: 100%;
+`;
+
+const HeaderText = styled.p`
+  margin: 25px 0px;
+  width: 100%;
+  text-align: center;
 `;
 
 const AuthCard = styled.div`
@@ -181,50 +190,54 @@ const ErrorMessage = styled.div`
   margin-bottom: 1rem;
 `;
 
-const ScrollContainer = styled.div`
+interface ScrollContainerProps {
+  $expand?: boolean;
+}
+
+const ScrollContainer = styled.div<ScrollContainerProps>`
   width: inherit;
-  flex: 1;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch; // IMPORTANT for iOS
-  touch-action: pan-y; // Allows drag scroll
+  flex: ${({ $expand }) => ($expand ? "unset" : "1")};
   display: flex;
   flex-direction: column;
-  max-height: 400px;
+  position: relative;
+
+  /* Default (scrollable) behavior */
+  overflow-y: ${({ $expand }) => ($expand ? "visible" : "auto")};
+  max-height: ${({ $expand }) => ($expand ? "none" : "400px")};
+
+  -webkit-overflow-scrolling: ${({ $expand }) => ($expand ? "auto" : "touch")};
+  touch-action: ${({ $expand }) => ($expand ? "auto" : "pan-y")};
 
   @media (max-width: 768px) {
     padding: 0px;
   }
 
-  /* Custom Scrollbar Styling */
-  &::-webkit-scrollbar {
-    width: 4px; /* Width of the entire scrollbar */
-  }
+  /* Only apply scrollbar styling when scroll is enabled */
+  ${({ $expand, theme }) =>
+    !$expand &&
+    `
+    &::-webkit-scrollbar {
+      width: 4px;
+    }
 
-  &::-webkit-scrollbar-track {
-    background: rgba(0, 0, 0, 0); /* Background color of the scrollbar track */
-    border-radius: 24px; /* Rounded corners of the scrollbar track */
-  }
+    &::-webkit-scrollbar-track {
+      background: rgba(0, 0, 0, 0);
+      border-radius: 24px;
+    }
 
-  &::-webkit-scrollbar-thumb {
-    background-color: rgba(0, 0, 0, 0); /* Color of the scrollbar thumb */
-    border-radius: 24px; /* Rounded corners of the scrollbar thumb */
-    border: 2px solid ${({ theme }) => theme.colors.textSecondary}; /* Space around the thumb */
-  }
+    &::-webkit-scrollbar-thumb {
+      background-color: rgba(0, 0, 0, 0);
+      border-radius: 24px;
+      border: 2px solid ${theme.colors.textSecondary};
+    }
 
-  &::-webkit-scrollbar-thumb:hover {
-    background-color: rgba(
-      0,
-      0,
-      0,
-      0
-    ); /* Color when hovering over the scrollbar thumb */
-  }
+    &::-webkit-scrollbar-thumb:hover {
+      background-color: rgba(0, 0, 0, 0);
+    }
 
-  /* Custom Scrollbar for Firefox */
-  scrollbar-width: thin; /* Makes the scrollbar thinner */
-  scrollbar-color: ${({ theme }) => theme.colors.primary} rgba(0, 0, 0, 0); /* Thumb and track colors */
-
-  position: relative;
+    scrollbar-width: thin;
+    scrollbar-color: ${theme.colors.primary} rgba(0, 0, 0, 0);
+  `}
 `;
 
 const OtpInput = styled.input`
@@ -257,15 +270,24 @@ interface UserAuthProps {
   onSignIn?: (response: API_RESPONSE_SIGN_IN) => void;
   onSignUp?: (response: API_RESPONSE_SIGN_UP) => void;
   onResetPassword?: () => void;
+  message?: string;
+  showLogo?: boolean;
+  redirectToProfile?: boolean;
+  expand?: boolean;
 }
 
 const UserAuth: React.FC<UserAuthProps> = ({
   onSignIn,
   onSignUp,
   onResetPassword,
+  message,
+  showLogo = true,
+  redirectToProfile = false,
+  expand = false,
 }) => {
+  const navigate = useNavigate();
   const { majikah, reloadSession } = useMajikah();
-  // const { majik } = useMajik();
+  const { majik } = useMajik();
   const [mode, setMode] = useState<AuthMode>("signin");
   const [email, setEmail] = useState<string>("");
   const [password, setPassword] = useState<string>("");
@@ -305,7 +327,11 @@ const UserAuth: React.FC<UserAuthProps> = ({
 
       if (signInResponse !== null && signInResponse.session) {
         onSignIn?.(signInResponse);
-        // majik.user = MajikUser.fromJSON(signInResponse.user);
+        majik.user = MajikUser.fromJSON(signInResponse.user);
+        if (redirectToProfile) {
+          await navigate(`/muid`);
+          await reloadSession?.();
+        }
         return `Welcome back, ${userName}! ${signInResponse.message}`;
       }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -490,16 +516,22 @@ const UserAuth: React.FC<UserAuthProps> = ({
   return (
     <RootContainer>
       <AuthCard>
-        <LogoContainer>
-          <Logo>
-            <img src={Asset_Logo_150px} alt="Majik Message Logo" />
-          </Logo>
-          <BrandName>Majik Message</BrandName>
-          <CompanyName>by Majikah</CompanyName>
-        </LogoContainer>
+        {showLogo && (
+          <LogoContainer>
+            <Logo>
+              <img src={Asset_Logo_150px} alt="Majik Message Logo" />
+            </Logo>
+            <BrandName>Majik Message</BrandName>
+            <CompanyName>by Majikah</CompanyName>
+          </LogoContainer>
+        )}
+
+        {!!message && message.trim() !== "" ? (
+          <HeaderText>{message}</HeaderText>
+        ) : null}
 
         {error && <ErrorMessage>{error}</ErrorMessage>}
-        <ScrollContainer>
+        <ScrollContainer $expand={expand}>
           <FormContainer>
             <CustomInputField
               label="Email"

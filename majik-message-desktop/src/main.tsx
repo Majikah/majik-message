@@ -20,6 +20,13 @@ import { NotificationsProvider } from "./components/majikah-notification-wrapper
 
 // const Router = import.meta.env.VITE_TAURI ? HashRouter : BrowserRouter
 
+const worker = new Worker(new URL("./sqlite-worker.ts", import.meta.url), {
+  type: "module",
+});
+
+// optional: expose globally or via singleton
+export default worker;
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <ReduxProvider>

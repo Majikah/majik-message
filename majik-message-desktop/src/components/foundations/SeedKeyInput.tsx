@@ -10,7 +10,7 @@ import React, { type JSX, useEffect, useId, useState } from "react";
 import styled from "styled-components";
 import { Tooltip } from "react-tooltip";
 import CustomInputField from "./CustomInputField";
-import { MajikKeyStore, MnemonicJSON } from "@majikah/majik-message";
+import { MajikKeyManager, MnemonicJSON } from "@majikah/majik-message";
 
 /* -------------------------------
  * Styled Components
@@ -309,7 +309,7 @@ export const SeedKeyInput: React.FC<SeedKeyInputProps> = ({
   };
 
   const handleGenerateMnemonic = (): void => {
-    const m = MajikKeyStore.generateMnemonic();
+    const m = MajikKeyManager.generateMnemonic();
 
     const seedArray = seedStringToArray(m);
     setWords(seedArray);
@@ -465,7 +465,6 @@ export const SeedKeyInput: React.FC<SeedKeyInputProps> = ({
     </Root>
   );
 };
-
 
 function seedStringToArray(seed: string): string[] {
   return seed

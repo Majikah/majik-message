@@ -680,7 +680,7 @@ const GroupManagerDrawer: React.FC<GroupManagerDrawerProps> = ({
         } else {
           updatedGroup.clearPhoto();
         }
-        majik["scheduleAutosave"]?.();
+
       }
       onUpdate();
       toast.success("Group updated", { id: `grp-save-${group.id}` });

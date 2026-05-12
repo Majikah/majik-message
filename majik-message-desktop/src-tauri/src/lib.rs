@@ -9,22 +9,48 @@ use std::path::PathBuf;
 mod menu;
 mod tray;
 
-#[tauri::command]
-fn set_auth_state(app: tauri::AppHandle, signed_in: bool) -> Result<(), String> {
-    let menu = app.menu().ok_or("No menu")?;
+use std::sync::Mutex;
+use tauri::menu::MenuItem;
 
-    // Just toggle the enabled state on the two items that care about auth
-    if let Some(item) = menu.get("sign-in") {
-        item.as_menuitem()
-            .ok_or("sign-in not a MenuItem")?
-            .set_enabled(!signed_in)
-            .map_err(|e| e.to_string())?;
+pub struct AuthMenuState {
+    pub sign_in: Mutex<Option<MenuItem<tauri::Wry>>>,
+    pub sign_out: Mutex<Option<MenuItem<tauri::Wry>>>,
+    pub refresh_identities: Mutex<Option<MenuItem<tauri::Wry>>>,
+}
+
+#[tauri::command]
+fn open_devtools(window: tauri::webview::WebviewWindow) {
+    window.open_devtools();
+}
+
+#[tauri::command]
+fn set_auth_state(state: tauri::State<AuthMenuState>, signed_in: bool) -> Result<(), String> {
+    println!("SET AUTH STATE CALLED: {}", signed_in);
+
+    if let Some(sign_in) = state.sign_in.lock().unwrap().as_ref() {
+        sign_in.set_enabled(!signed_in).map_err(|e| e.to_string())?;
+
+        println!("UPDATED sign-in");
+    } else {
+        println!("SIGN-IN HANDLE MISSING");
     }
-    if let Some(item) = menu.get("sign-out") {
-        item.as_menuitem()
-            .ok_or("sign-out not a MenuItem")?
+
+    if let Some(sign_out) = state.sign_out.lock().unwrap().as_ref() {
+        sign_out.set_enabled(signed_in).map_err(|e| e.to_string())?;
+
+        println!("UPDATED sign-out");
+    } else {
+        println!("SIGN-OUT HANDLE MISSING");
+    }
+
+    if let Some(refresh_identities) = state.refresh_identities.lock().unwrap().as_ref() {
+        refresh_identities
             .set_enabled(signed_in)
             .map_err(|e| e.to_string())?;
+
+        println!("UPDATED refresh-identities");
+    } else {
+        println!("REFRESH-IDENTITIES HANDLE MISSING");
     }
 
     Ok(())
@@ -38,6 +64,7 @@ fn get_instance_id(instance_id: tauri::State<String>) -> String {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -60,7 +87,16 @@ pub fn run() {
                 })
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![set_auth_state, get_instance_id])
+        .manage(AuthMenuState {
+            sign_in: Mutex::new(None),
+            sign_out: Mutex::new(None),
+            refresh_identities: Mutex::new(None),
+        })
+        .invoke_handler(tauri::generate_handler![
+            open_devtools,
+            get_instance_id,
+            set_auth_state, // 👈 must be here
+        ])
         .setup(|app| {
             // 🧠 Get instance ID (default = "default")
             let instance_id = env::var("TAURI_INSTANCE_ID").unwrap_or_else(|_| "default".into());

@@ -100,8 +100,7 @@ const UnlockModal: React.FC<UnlockModalProps> = ({
   };
 
   const handleReset = async (): Promise<void> => {
-    const userProfile: string = import.meta.env.VITE_USER_PROFILE;
-    await majik.resetData(userProfile);
+    await majik.resetData();
     onReset?.();
     navigate("/accounts");
   };
