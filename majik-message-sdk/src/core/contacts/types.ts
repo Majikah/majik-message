@@ -7,6 +7,8 @@ import {
   SerializedMajikContactGroup,
 } from "@majikah/majik-contact";
 
+export type ContactManagerQueryMode = "id" | "public_key";
+
 export interface MajikContactManagerJSON {
   contacts: MajikContactDirectoryData;
   groups: MajikContactGroupManagerData;

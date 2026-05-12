@@ -655,6 +655,40 @@ export class MajikMessage {
     );
   }
 
+  getContactsByID(ids: string[], strict = false): MajikContact[] {
+    if (!ids?.length) throw new Error("At least 1 id is required");
+    return this._contacts.getContactsByIds(ids, strict);
+  }
+
+  async getContactsByPublicKey(
+    publicKeys: string[],
+  ): Promise<MajikContact[]> {
+    if (!publicKeys?.length)
+      throw new Error("At least 1 public key is required");
+    return await this._contacts.getContactsByPublicKeys(publicKeys);
+  }
+
+  async getMajikRecipientsByPublicKey(
+    publicKeys: string[],
+    strict?: boolean,
+  ): Promise<MajikRecipient[]> {
+    return await this._contacts.getMajikRecipients(
+      "public_key",
+      publicKeys,
+      strict,
+    );
+  }
+
+  async getExpectedSignersByPublicKey(
+    publicKeys: string[],
+    strict?: boolean,
+  ): Promise<ExpectedSigner[]> {
+    return await this._contacts.getExpectedSigners(
+      "public_key",
+      publicKeys,
+      strict,
+    );
+  }
   async exportContactAsJSON(id: string): Promise<string | null> {
     if (!id?.trim()) throw new Error("Invalid contact ID");
     return this._contacts.exportContactAsJSON(id);
@@ -674,7 +708,16 @@ export class MajikMessage {
     base64Str: string,
   ): Promise<MAJIK_API_RESPONSE> {
     if (!base64Str?.trim()) throw new Error("Invalid contact string");
-    return this._contacts.importContactFromString(base64Str);
+
+    const response = await this._contacts.importContactFromString(base64Str);
+
+    if (response.success) {
+      this._emit("new-contact", response.data);
+    } else {
+      this._emit("error", response.message);
+    }
+
+    return response;
   }
 
   async exportContactCompressed(contact: MajikContact): Promise<string> {

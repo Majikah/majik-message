@@ -1,5 +1,8 @@
 import { MajikMessageChatJSON } from "../../database/chat/types";
+
 import { SQLiteDatabase } from "../sql-db-manager";
+
+import { MAJIKAH_SQL_TABLES } from "../sql-schema";
 import { StorageSource } from "../storage-adapter";
 import { MajikMessageChatStorageAdapter } from "./_types";
 
@@ -8,12 +11,12 @@ export class SQLiteInvoiceAdapter implements MajikMessageChatStorageAdapter {
 
   async save(
     message: MajikMessageChatJSON,
-    source: StorageSource = "local",
+    source: StorageSource = `local`,
   ): Promise<void> {
-    const resolvedSource: StorageSource = source ?? "local";
+    const resolvedSource: StorageSource = source ?? `local`;
 
     await this.db.run(
-      `INSERT OR REPLACE INTO majik_message_chats 
+      `INSERT OR REPLACE INTO ${MAJIKAH_SQL_TABLES.MAJIK_MESSAGE_CHATS} 
      (id, json, created_at, source)
      VALUES (?, ?, ?, ?)`,
       [message.id, JSON.stringify(message), message.timestamp, resolvedSource],
@@ -26,11 +29,11 @@ export class SQLiteInvoiceAdapter implements MajikMessageChatStorageAdapter {
   ): Promise<MajikMessageChatJSON | null> {
     const row = source
       ? await this.db.get<{ json: string }>(
-          "SELECT json FROM majik_messages WHERE id = ? AND source = ?",
+          `SELECT json FROM ${MAJIKAH_SQL_TABLES.MAJIK_MESSAGE_CHATS} WHERE id = ? AND source = ?`,
           [id, source],
         )
       : await this.db.get<{ json: string }>(
-          "SELECT json FROM majik_messages WHERE id = ?",
+          `SELECT json FROM ${MAJIKAH_SQL_TABLES.MAJIK_MESSAGE_CHATS} WHERE id = ?`,
           [id],
         );
 
@@ -40,10 +43,12 @@ export class SQLiteInvoiceAdapter implements MajikMessageChatStorageAdapter {
   async list(source?: StorageSource): Promise<MajikMessageChatJSON[]> {
     const rows = source
       ? await this.db.all<{ json: string }>(
-          "SELECT json FROM majik_messages WHERE source = ?",
+          `SELECT json FROM ${MAJIKAH_SQL_TABLES.MAJIK_MESSAGE_CHATS} WHERE source = ?`,
           [source],
         )
-      : await this.db.all<{ json: string }>("SELECT json FROM majik_messages");
+      : await this.db.all<{ json: string }>(
+          `SELECT json FROM ${MAJIKAH_SQL_TABLES.MAJIK_MESSAGE_CHATS}`,
+        );
 
     return rows.map((r) => JSON.parse(r.json));
   }
@@ -54,11 +59,11 @@ export class SQLiteInvoiceAdapter implements MajikMessageChatStorageAdapter {
 
     if (source) {
       await this.db.run(
-        "DELETE FROM majik_messages WHERE id = ? AND source = ?",
+        `DELETE FROM ${MAJIKAH_SQL_TABLES.MAJIK_MESSAGE_CHATS} WHERE id = ? AND source = ?`,
         [id, source],
       );
     } else {
-      await this.db.run("DELETE FROM majik_messages WHERE id = ?", [id]);
+      await this.db.run(`DELETE FROM ${MAJIKAH_SQL_TABLES.MAJIK_MESSAGE_CHATS} WHERE id = ?`, [id]);
     }
 
     return true;
@@ -66,22 +71,22 @@ export class SQLiteInvoiceAdapter implements MajikMessageChatStorageAdapter {
 
   async clear(source?: StorageSource): Promise<void> {
     if (source) {
-      await this.db.run("DELETE FROM majik_messages WHERE source = ?", [
+      await this.db.run(`DELETE FROM ${MAJIKAH_SQL_TABLES.MAJIK_MESSAGE_CHATS} WHERE source = ?`, [
         source,
       ]);
     } else {
-      await this.db.run("DELETE FROM majik_messages");
+      await this.db.run(`DELETE FROM ${MAJIKAH_SQL_TABLES.MAJIK_MESSAGE_CHATS}`);
     }
   }
 
   async count(source?: StorageSource): Promise<number> {
     const row = source
       ? await this.db.get<{ n: number }>(
-          "SELECT COUNT(*) as n FROM majik_messages WHERE source = ?",
+          `SELECT COUNT(*) as n FROM ${MAJIKAH_SQL_TABLES.MAJIK_MESSAGE_CHATS} WHERE source = ?`,
           [source],
         )
       : await this.db.get<{ n: number }>(
-          "SELECT COUNT(*) as n FROM majik_messages",
+          `SELECT COUNT(*) as n FROM ${MAJIKAH_SQL_TABLES.MAJIK_MESSAGE_CHATS}`,
         );
 
     return row?.n ?? 0;
@@ -90,26 +95,26 @@ export class SQLiteInvoiceAdapter implements MajikMessageChatStorageAdapter {
   async exists(id: string, source?: StorageSource): Promise<boolean> {
     const row = source
       ? await this.db.get(
-          "SELECT 1 FROM majik_messages WHERE id = ? AND source = ?",
+          `SELECT 1 FROM ${MAJIKAH_SQL_TABLES.MAJIK_MESSAGE_CHATS} WHERE id = ? AND source = ?`,
           [id, source],
         )
-      : await this.db.get("SELECT 1 FROM majik_messages WHERE id = ?", [id]);
+      : await this.db.get(`SELECT 1 FROM ${MAJIKAH_SQL_TABLES.MAJIK_MESSAGE_CHATS} WHERE id = ?`, [id]);
 
     return !!row;
   }
 
   async bulkSave(
     messages: MajikMessageChatJSON[],
-    source: StorageSource = "local",
+    source: StorageSource = `local`,
   ): Promise<void> {
     if (messages.length === 0) return;
 
-    const resolvedSource: StorageSource = source ?? "local";
+    const resolvedSource: StorageSource = source ?? `local`;
 
     await this.db.transaction(async (tx) => {
       for (const msg of messages) {
         await tx.run(
-          `INSERT OR REPLACE INTO majik_message_chats 
+          `INSERT OR REPLACE INTO ${MAJIKAH_SQL_TABLES.MAJIK_MESSAGE_CHATS} 
          (id, json, created_at, source)
          VALUES (?, ?, ?, ?, ?, ?)`,
           [msg.id, JSON.stringify(msg), msg.timestamp, resolvedSource],
@@ -125,11 +130,11 @@ export class SQLiteInvoiceAdapter implements MajikMessageChatStorageAdapter {
       for (const id of ids) {
         if (source) {
           await tx.run(
-            "DELETE FROM majik_messages WHERE id = ? AND source = ?",
+            `DELETE FROM ${MAJIKAH_SQL_TABLES.MAJIK_MESSAGE_CHATS} WHERE id = ? AND source = ?`,
             [id, source],
           );
         } else {
-          await tx.run("DELETE FROM majik_messages WHERE id = ?", [id]);
+          await tx.run(`DELETE FROM ${MAJIKAH_SQL_TABLES.MAJIK_MESSAGE_CHATS} WHERE id = ?`, [id]);
         }
       }
     });
