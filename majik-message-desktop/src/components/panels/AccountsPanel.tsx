@@ -281,7 +281,7 @@ const AccountsPanel: React.FC<AccountsPanelProps> = ({ majik, onUpdate }) => {
 
     const pngBuffer = await mbyteFile.arrayBuffer();
 
-    // Placeholder for your 3rd item (a string for the txt file)
+
     const readmeContent = `
 Majik Key Backup\n
 IMPORTANT: Keep this file secure and private at all times. If lost or compromised, your account access may be permanently at risk.\n\n
@@ -506,7 +506,7 @@ IMPORTANT: Keep this file secure and private at all times. If lost or compromise
   // ── Import mnemonic ────────────────────────────────────────────────────────
   const handleLoadMnemonicAccount = async (): Promise<void> => {
     if (!majik) {
-      toast.error("Problem Loading Majik Buwiz");
+      toast.error("Problem Loading Majik Message");
       return;
     }
     if (!mnemonicJSON) {
@@ -875,7 +875,7 @@ IMPORTANT: Keep this file secure and private at all times. If lost or compromise
             </EmptyIcon>
             <EmptyTitle>No accounts yet</EmptyTitle>
             <EmptyHint>
-              Create or import an account to start using Majik Buwiz.
+              Create or import an account to start using Majik Message.
             </EmptyHint>
           </EmptyState>
         )}

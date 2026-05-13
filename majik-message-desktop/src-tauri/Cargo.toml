@@ -1,6 +1,6 @@
 [package]
 name = "majik-message-desktop"
-version = "1.4.7"
+version = "1.5.0"
 description = "Encrypt and decrypt files and messages on any website. Secure chats with post-quantum ML keypairs and Argon2id-protected seed accounts. Open source."
 authors = ["you"]
 edition = "2021"

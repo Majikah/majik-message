@@ -81,8 +81,8 @@ async function init() {
 
   const openResult = await promiser("open", {
     filename: hasOPFS
-      ? "file:majikah_majik_buwiz.db?vfs=opfs"
-      : "file:majikah_majik_buwiz.db?vfs=memdb",
+      ? "file:majikah_majik_message.db?vfs=opfs"
+      : "file:majikah_majik_message.db?vfs=memdb",
   });
 
   dbId = openResult.result.dbId;

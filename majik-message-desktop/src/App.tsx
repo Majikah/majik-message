@@ -154,6 +154,8 @@ function App(): JSX.Element {
     const handleSignOut = async () => {
       if (!isTauri()) return;
 
+      majik.clearUser();
+
       invoke("set_auth_state", { signedIn: false })
         .catch(console.error)
         .finally(() => console.log("User Signed Out", false));

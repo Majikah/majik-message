@@ -10,7 +10,59 @@ export default defineConfig(({ mode }) => {
   const isProd = mode === "production";
 
   return {
-    plugins: [react(), tailwindcss(), sqliteWasm()],
+    plugins: [
+      react(),
+      tailwindcss(),
+      sqliteWasm(),
+      // {
+      //   name: "sqlite-wasm-no-hash",
+      //   renderChunk(code, chunk) {
+      //     // Apply to ALL chunks, not just sqlite-worker chunks
+      //     return {
+      //       code: code
+      //         .replace(/sqlite-worker-[a-zA-Z0-9_-]+\.js/g, "sqlite-worker.js")
+      //         .replace(
+      //           /sqlite3-opfs-async-proxy-[a-zA-Z0-9_-]+\.js/g,
+      //           "sqlite3-opfs-async-proxy.js",
+      //         )
+      //         .replace(/sqlite3-[a-zA-Z0-9_-]+\.wasm/g, "sqlite3.wasm"),
+      //       map: null,
+      //     };
+      //   },
+      //   generateBundle(_, bundle) {
+      //     for (const [fileName, chunk] of Object.entries(bundle)) {
+      //       if (fileName.includes("sqlite3") && fileName.endsWith(".wasm")) {
+      //         // rename it in the bundle to remove hash
+      //         const newName = "assets/sqlite3.wasm";
+      //         if (fileName !== newName) {
+      //           bundle[newName] = { ...chunk, fileName: newName } as any;
+      //           delete bundle[fileName];
+      //         }
+      //       }
+
+      //       // Fix sqlite3-opfs-async-proxy.js
+      //       if (
+      //         fileName.includes("sqlite3-opfs-async-proxy") &&
+      //         fileName.endsWith(".js")
+      //       ) {
+      //         const newName = "assets/sqlite3-opfs-async-proxy.js";
+      //         if (fileName !== newName) {
+      //           bundle[newName] = { ...chunk, fileName: newName } as any;
+      //           delete bundle[fileName];
+      //         }
+      //       }
+
+      //       if (fileName.match(/sqlite-worker-\w+\.js$/)) {
+      //         const newName = "assets/sqlite-worker.js";
+      //         if (fileName !== newName) {
+      //           bundle[newName] = { ...chunk, fileName: newName } as any;
+      //           delete bundle[fileName];
+      //         }
+      //       }
+      //     }
+      //   },
+      // },
+    ],
 
     clearScreen: false,
 
