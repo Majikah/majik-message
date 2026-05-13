@@ -2000,27 +2000,6 @@ export class MajikMessage {
     return this.keyManager.isPassphraseValid(target.id, passphrase);
   }
 
-  // ── Events ────────────────────────────────────────────────────────────────
-
-  on(event: MajikMessageEvents, callback: EventCallback): void {
-    this._listeners.get(event)?.push(callback);
-  }
-
-  off(event: MajikMessageEvents, callback?: EventCallback): void {
-    const cbs = this._listeners.get(event);
-    if (!cbs?.length) return;
-    if (callback) {
-      const i = cbs.indexOf(callback);
-      if (i !== -1) cbs.splice(i, 1);
-    } else {
-      this._listeners.set(event, []);
-    }
-  }
-
-  private _emit(event: MajikMessageEvents, ...args: any[]): void {
-    this._listeners.get(event)?.forEach((cb) => cb(...args));
-  }
-
   // ── Content & File Signing ────────────────────────────────────────────────
 
   /**
@@ -3033,5 +3012,26 @@ export class MajikMessage {
     if (!this.getActiveAccount()) {
       void this.setActiveAccount(contact.id, true);
     }
+  }
+
+  // ── Events ────────────────────────────────────────────────────────────────
+
+  on(event: MajikMessageEvents, callback: EventCallback): void {
+    this._listeners.get(event)?.push(callback);
+  }
+
+  off(event: MajikMessageEvents, callback?: EventCallback): void {
+    const cbs = this._listeners.get(event);
+    if (!cbs?.length) return;
+    if (callback) {
+      const i = cbs.indexOf(callback);
+      if (i !== -1) cbs.splice(i, 1);
+    } else {
+      this._listeners.set(event, []);
+    }
+  }
+
+  private _emit(event: MajikMessageEvents, ...args: any[]): void {
+    this._listeners.get(event)?.forEach((cb) => cb(...args));
   }
 }

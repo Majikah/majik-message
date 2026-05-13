@@ -1,7 +1,8 @@
-import React from 'react'
-import styled from 'styled-components'
-import StyledIconButton from '../foundations/StyledIconButton'
-import { BookOpenTextIcon, QuestionIcon } from '@phosphor-icons/react'
+import React from "react";
+import styled from "styled-components";
+import StyledIconButton from "../foundations/StyledIconButton";
+import { BookOpenTextIcon, QuestionIcon } from "@phosphor-icons/react";
+import { open } from "@tauri-apps/plugin-shell";
 
 const RootContainer = styled.div`
   display: flex;
@@ -13,23 +14,29 @@ const RootContainer = styled.div`
 
   @media (max-width: 768px) {
   }
-`
+`;
 
 type GuideHelperProps = {
-  docsPath?: string
-  startTour?: () => void
-  id?: string
-}
+  docsPath?: string;
+  startTour?: () => void;
+  id?: string;
+};
 
-const GuideHelper: React.FC<GuideHelperProps> = ({ docsPath, startTour, id }) => {
+const GuideHelper: React.FC<GuideHelperProps> = ({
+  docsPath,
+  startTour,
+  id,
+}) => {
   const handleReadDocs = (): void => {
-    if (!docsPath || docsPath.trim() === '') return
+    if (!docsPath || docsPath.trim() === "") return;
 
     const url =
-      docsPath.startsWith('http://') || docsPath.startsWith('https://') ? docsPath : `/${docsPath}`
+      docsPath.startsWith("http://") || docsPath.startsWith("https://")
+        ? docsPath
+        : `/${docsPath}`;
 
-    window.open(url, '_blank')
-  }
+    open(url);
+  };
 
   return (
     <RootContainer>
@@ -44,7 +51,7 @@ const GuideHelper: React.FC<GuideHelperProps> = ({ docsPath, startTour, id }) =>
         />
       ) : null}
 
-      {!!docsPath && docsPath.trim() !== '' ? (
+      {!!docsPath && docsPath.trim() !== "" ? (
         <StyledIconButton
           icon={QuestionIcon}
           size={20}
@@ -55,7 +62,7 @@ const GuideHelper: React.FC<GuideHelperProps> = ({ docsPath, startTour, id }) =>
         />
       ) : null}
     </RootContainer>
-  )
-}
+  );
+};
 
-export default GuideHelper
+export default GuideHelper;
