@@ -22,6 +22,7 @@ export const theme: DefaultTheme = {
       extraboldItalic: "'FiraSans-ExtraBold-Italic', sans-serif",
       blackItalic: "'FiraSans-Black-Italic', sans-serif",
       numbers: "'RobotoFlex-VariableFont', sans-serif",
+      mono: "'Fira Mono', 'JetBrains Mono', monospace",
     },
     sizes: {
       header: "2em",

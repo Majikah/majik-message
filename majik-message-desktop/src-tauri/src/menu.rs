@@ -33,7 +33,95 @@ pub fn build_menu(
     let encrypt_file = MenuItem::with_id(app, "encrypt-file", "Encrypt File", true, None::<&str>)?;
     let decrypt_file = MenuItem::with_id(app, "decrypt-file", "Decrypt File", true, None::<&str>)?;
 
-    let file_menu = Submenu::with_items(app, "File", true, &[&encrypt_file, &decrypt_file])?;
+    // Import Chats submenu
+    // let import_chats_mjki =
+    //     MenuItem::with_id(app, "import-chats-mjki", "from MJKI", true, None::<&str>)?;
+    // let import_chats_backup = MenuItem::with_id(
+    //     app,
+    //     "import-chats-backup",
+    //     "from Backup",
+    //     true,
+    //     None::<&str>,
+    // )?;
+    // let import_chats_submenu = Submenu::with_items(
+    //     app,
+    //     "Invoice",
+    //     true,
+    //     &[&import_chats_mjki, &import_chats_backup],
+    // )?;
+
+    // Import Invoice submenu
+    let import_contact_card = MenuItem::with_id(
+        app,
+        "import-contact",
+        "from Contact Card",
+        true,
+        None::<&str>,
+    )?;
+    let import_contact_backup = MenuItem::with_id(
+        app,
+        "import-contact-backup",
+        "from Backup",
+        true,
+        None::<&str>,
+    )?;
+    let import_contact_submenu = Submenu::with_items(
+        app,
+        "Contact",
+        true,
+        &[&import_contact_card, &import_contact_backup],
+    )?;
+    let import_app_data =
+        MenuItem::with_id(app, "import-app-data", "App Data", true, None::<&str>)?;
+
+    let import_file_submenu = Submenu::with_items(
+        app,
+        "Import",
+        true,
+        &[
+            &import_contact_submenu,
+            // &import_chats_submenu,
+            &import_app_data,
+        ],
+    )?;
+
+    // Export submenu
+    let export_contacts =
+        MenuItem::with_id(app, "export-contacts", "Contacts", true, None::<&str>)?;
+    // let export_chat_backup =
+    //     MenuItem::with_id(app, "export-chat-backup", "Backup", true, None::<&str>)?;
+    // let export_chat_csv = MenuItem::with_id(app, "export-chat-csv", "CSV", true, None::<&str>)?;
+    // // let export_chat_submenu = Submenu::with_items(
+    // //     app,
+    // //     "Invoices",
+    // //     true,
+    // //     &[&export_chat_backup, &export_chat_csv],
+    // // )?;
+    let export_app_data =
+        MenuItem::with_id(app, "export-app-data", "App Data", true, None::<&str>)?;
+    let export_submenu = Submenu::with_items(
+        app,
+        "Export",
+        true,
+        &[
+            &export_contacts,
+            //  &export_chat_submenu,
+            &export_app_data,
+        ],
+    )?;
+
+    let file_menu = Submenu::with_items(
+        app,
+        "File",
+        true,
+        &[
+            &encrypt_file,
+            &decrypt_file,
+            &PredefinedMenuItem::separator(app)?,
+            &import_file_submenu,
+            &export_submenu,
+        ],
+    )?;
 
     // ── Account ────────────────────────────────────────────────────────────
     let create_account =
@@ -95,9 +183,33 @@ pub fn build_menu(
         None::<&str>,
     )?;
 
-    let preferences_menu = Submenu::with_items(app, "Preferences", true, &[&toggle_dark_mode])?;
+    let user_preferences = MenuItem::with_id(
+        app,
+        "user-preferences",
+        "User Preferences",
+        true,
+        None::<&str>,
+    )?;
+
+    let preferences_menu = Submenu::with_items(
+        app,
+        "Preferences",
+        true,
+        &[
+            &toggle_dark_mode,
+            &PredefinedMenuItem::separator(app)?,
+            &user_preferences,
+        ],
+    )?;
 
     // ── Tools ──────────────────────────────────────────────────────────────
+    let export_majik_key = MenuItem::with_id(
+        app,
+        "export-majik-key",
+        "Export Majik Key",
+        true,
+        None::<&str>,
+    )?;
     let validate_thread = MenuItem::with_id(
         app,
         "validate-thread",
@@ -116,6 +228,7 @@ pub fn build_menu(
         "Tools",
         true,
         &[
+            &export_majik_key,
             &validate_thread,
             &PredefinedMenuItem::separator(app)?,
             &launch_web_app,
@@ -177,6 +290,29 @@ pub fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, event_id: &str) {
         "decrypt-file" => {
             let _ = app.emit("trigger-decrypt-file", ());
         }
+
+        // "import-chats-mjki" => {
+        //     let _ = app.emit("trigger-import-chats-mjki", ());
+        // }
+        // "import-chats-backup" => {
+        //     let _ = app.emit("trigger-import-chats-backup", ());
+        // }
+        "import-app-data" => {
+            let _ = app.emit("trigger-import-app-data", ());
+        }
+        "export-contacts" => {
+            let _ = app.emit("trigger-export-contacts", ());
+        }
+        // "export-chats-backup" => {
+        //     let _ = app.emit("trigger-export-chats-backup", ());
+        // }
+        // "export-chats-csv" => {
+        //     let _ = app.emit("trigger-export-chats-csv", ());
+        // }
+        "export-app-data" => {
+            let _ = app.emit("trigger-export-app-data", ());
+        }
+
         // ── Account ─────────────────────────────────────────────────────────
         "create-account" => {
             let _ = app.emit("trigger-create-account", ());
@@ -187,6 +323,15 @@ pub fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, event_id: &str) {
         "add-contact" => {
             let _ = app.emit("trigger-import-contact", ());
         }
+
+        "import-contact" => {
+            let _ = app.emit("trigger-import-contact", ());
+        }
+
+        "import-contact-backup" => {
+            let _ = app.emit("trigger-import-contact-backup", ());
+        }
+
         "minimize-to-tray" => {
             if let Some(win) = app.get_webview_window("main") {
                 let _ = win.hide();
@@ -212,7 +357,14 @@ pub fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, event_id: &str) {
             let _ = app.emit("trigger-toggle-dark-mode", ());
         }
 
+        "user-preferences" => {
+            let _ = app.emit("trigger-user-preferences", ());
+        }
+
         // ── Tools ────────────────────────────────────────────────────────────
+        "export-majik-key" => {
+            let _ = app.emit("trigger-export-majik-key", ());
+        }
         "validate-thread" => {
             open_url(app, "https://message.majikah.solutions/threads/validate");
         }

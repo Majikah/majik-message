@@ -23,6 +23,7 @@ import { Asset_Logo_150px } from "@/assets";
 import { useMajik } from "../majik-context-wrapper/use-majik";
 import { MajikUser } from "@thezelijah/majik-user";
 import { useNavigate } from "react-router-dom";
+import DynamicAlertBanner from "./DynamicAlertBanner";
 
 const RootContainer = styled.div`
   display: flex;
@@ -556,6 +557,12 @@ const UserAuth: React.FC<UserAuthProps> = ({
               onChange={setPassword}
               placeholder="••••••••"
               disabled={isLoading}
+            />
+
+            <DynamicAlertBanner
+              title="Majik Key and Majikah accounts are separate"
+              description="Majik Key passphrases are not the same as your Majikah account password. Every local Majik Key can have its own passphrase."
+              level="info"
             />
 
             {mode === "signup" && (

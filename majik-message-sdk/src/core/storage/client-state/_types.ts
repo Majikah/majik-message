@@ -29,7 +29,7 @@ export interface ClientStateEntry {
 
 export const CLIENT_STATE_KEYS = {
   ACCOUNT_ORDER: "user_account_order",
-  // INVOICE_DEFAULTS: "invoice_defaults",
+  USER_APP_PREFERENCES: "user_app_preferences",
 } as const;
 
 export type ClientStateKey =
@@ -44,6 +44,28 @@ export type ClientStateKey =
  * account. Stored as a JSON array: `["id1", "id2", ...]`.
  */
 export type AccountOrderValue = string[];
+
+
+/**
+ * User-configured app-wide preferences.
+ */
+export interface UserAppPreferences {
+  chats: ChatsPreferences;
+  // dashboard: DashboardPreferences;
+  privacy: PrivacyPreferences;
+}
+
+export interface ChatsPreferences {
+  autosave?: boolean;
+}
+
+// export interface DashboardPreferences {
+//   autodecrypt?: boolean;
+// }
+
+export interface PrivacyPreferences {
+  shareAnalytics?: boolean;
+}
 
 // ---------------------------------------------------------------------------
 // Adapter interface

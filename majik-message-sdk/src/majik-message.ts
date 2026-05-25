@@ -17,6 +17,7 @@ import {
 import { base64ToUint8Array } from "./core/utils/utilities";
 
 import type {
+  AppBackUpData,
   DecryptFileOptions,
   EncryptFileOptions,
   EncryptFileResult,
@@ -65,9 +66,17 @@ import {
   MajikKeyStorageAdapter,
   MajikMessageChatStorageAdapter,
   SQLiteDatabase,
+  UserAppPreferences,
 } from "./core/storage";
 import { MajikKeyManager } from "./core/crypto/keystore-manager";
 import { ClientStateManager } from "./core/client-state-manager";
+import { MajikCompressedJSON } from "@majikah/majik-cjson";
+import {
+  MAJIK_MESSAGE_BACKUP_MAGIC,
+  MAJIK_MESSAGE_BACKUP_MAGIC_SIZE,
+} from "./core/backup/constants";
+import { prependMagic, readBackupBlob } from "./core/backup/utils";
+import { AppDataSnapshot, ContactManagerSnapshot } from "./core/backup/types";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -85,6 +94,7 @@ type MajikMessageEvents =
   | "message"
   | "envelope"
   | "untrusted"
+  | "restore-backup"
   | "error";
 
 export interface MajikMessageConfig {
@@ -199,6 +209,7 @@ export class MajikMessage {
       "message",
       "envelope",
       "untrusted",
+      "restore-backup",
       "error",
     ];
     events.forEach((e) => this._listeners.set(e, []));
@@ -442,6 +453,43 @@ export class MajikMessage {
   }
 
   // ==========================================================================
+  // ── USER APP PREFERENCES ──────────────────────────────────────────────────────
+  // ==========================================================================
+
+  /**
+   * Retrieve persisted user app prefernces, or `null` if none have been saved.
+   */
+  async getUserAppPreferences(): Promise<UserAppPreferences> {
+    return this._state.getUserAppPreferences();
+  }
+
+  /**
+   * Persist user app prefernces.
+   */
+  async setUserAppPreferences(preferences: UserAppPreferences): Promise<void> {
+    await this._state.setUserAppPreferences(preferences);
+  }
+
+  /**
+   * Remove persisted user app prefernces.
+   */
+  async removeUserAppPreferences(): Promise<void> {
+    await this._state.removeUserAppPreferences();
+  }
+
+  /**
+   * Reset persisted user app prefernces to default settings.
+   */
+  async resetUserAppPreferences(): Promise<void> {
+    await this._state.resetUserAppPreferences();
+  }
+
+  async isAnalyticsEnabled(): Promise<boolean> {
+    const appPreferences = await this._state.getUserAppPreferences();
+    return appPreferences.privacy.shareAnalytics ?? false;
+  }
+
+  // ==========================================================================
   // ── ACCOUNT MANAGEMENT ────────────────────────────────────────────────────
   // ==========================================================================
 
@@ -633,6 +681,40 @@ export class MajikMessage {
 
   async verifyPassphrase(id: string, passphrase: string): Promise<boolean> {
     return this._keys.isPassphraseValid(id, passphrase);
+  }
+
+  async updatePassphrase(
+    id: string,
+    currentPassphrase: string,
+    newPassphrase: string,
+  ): Promise<void> {
+    try {
+      await this._keys.updatePassphrase(id, currentPassphrase, newPassphrase);
+    } catch (err) {
+      this._emit("error", err, { context: "updatePassphrase", id });
+      throw err;
+    }
+  }
+
+  async replacePassphrase(
+    backup: string,
+    mnemonic: string,
+    newPassphrase: string,
+    id: string,
+    label?: string,
+  ): Promise<MajikKey> {
+    try {
+      return await this._keys.replacePassphrase(
+        backup,
+        mnemonic,
+        newPassphrase,
+        id,
+        label,
+      );
+    } catch (err) {
+      this._emit("error", err, { context: "replacePassphrase", id });
+      throw err;
+    }
   }
 
   listOwnAccounts(majikahOnly = false): MajikContact[] {
@@ -3012,6 +3094,407 @@ export class MajikMessage {
     if (!this.getActiveAccount()) {
       void this.setActiveAccount(contact.id, true);
     }
+  }
+
+  // ==========================================================================
+  // ── Backup App Data ───────────────────────────────────────────────────────
+  // ==========================================================================
+
+  // backupChatMessages(): Blob {
+  //   const chatMessages = this.list();
+  //   const listJSON = chatMessages.map((inv) => inv.toJSON());
+  //   const cj = MajikCompressedJSON.create<MajikInvoiceJSON>(listJSON);
+  //   const payload = cj.toBinary();
+  //   const stamped = prependMagic(MAJIK_MESSAGE_BACKUP_MAGIC.chatMessages, payload);
+  //   return new Blob([stamped as BlobPart], {
+  //     type: "application/octet-stream",
+  //   });
+  // }
+
+  async backupContacts(): Promise<Blob> {
+    // Use toJSON() so groups are included alongside contacts
+    const managerJSON = await this._contacts.toJSON();
+    const cj = MajikCompressedJSON.create<MajikContactManagerJSON>(managerJSON);
+    const payload = cj.toBinary();
+    const stamped = prependMagic(MAJIK_MESSAGE_BACKUP_MAGIC.contacts, payload);
+    return new Blob([stamped as BlobPart], {
+      type: "application/octet-stream",
+    });
+  }
+
+  async backupAppData(): Promise<Blob> {
+    // const chatMessages = this.listInvoices();
+    // const chatMessagesJSON = chatMessages.map((inv) => inv.toJSON());
+    const contactsJSON = await this._contacts.toJSON();
+
+    const userPref = await this.getUserAppPreferences();
+
+    const backupJSON: AppBackUpData = {
+      contacts: contactsJSON,
+      // chats: chatMessagesJSON,
+
+      preferences: userPref ?? undefined,
+    };
+
+    const cj = MajikCompressedJSON.create<AppBackUpData>(backupJSON);
+    const payload = cj.toBinary();
+    const stamped = prependMagic(MAJIK_MESSAGE_BACKUP_MAGIC.appData, payload);
+    return new Blob([stamped as BlobPart], {
+      type: "application/octet-stream",
+    });
+  }
+
+  // ==========================================================================
+  // ── Restore App Data ──────────────────────────────────────────────────────
+  // ==========================================================================
+
+  // ── Private parsers (no side-effects) ─────────────────────────────────────
+
+  // private async _parseChatMessagesBackup(
+  //   input: Blob | ArrayBufferLike | ArrayBufferView,
+  // ): Promise<MajikMessageChat[]> {
+  //   const payload = await readBackupBlob(
+  //     input,
+  //     MAJIK_MESSAGE_BACKUP_MAGIC.chats,
+  //     "chatMessages",
+  //   );
+  //   const cj =
+  //     await MajikCompressedJSON.fromMJKCJSON<MajikMessageChatJSON[]>(payload);
+  //   return cj.payload.map((json) => MajikMessageChat.fromJSON(json));
+  // }
+
+  /**
+   * Parses a contacts backup blob into a ContactManagerSnapshot —
+   * the raw JSON plus pre-hydrated contact instances and group list.
+   * No side-effects; nothing is written to the live store.
+   */
+  private async _parseContactsBackup(
+    input: Blob | ArrayBufferLike | ArrayBufferView,
+  ): Promise<ContactManagerSnapshot> {
+    const payload = await readBackupBlob(
+      input,
+      MAJIK_MESSAGE_BACKUP_MAGIC.contacts,
+      "contacts",
+    );
+    const cj =
+      await MajikCompressedJSON.fromMJKCJSON<MajikContactManagerJSON>(payload);
+
+    const managerJSON = cj.payload;
+
+    // Hydrate a throw-away manager so callers get real instances, not raw JSON
+    const tempManager = await MajikContactManager.fromJSON(managerJSON);
+
+    const contacts = tempManager.listContacts(false);
+    // listGroups(false) = user groups only, no system groups
+    const groups = tempManager.listGroups(false);
+
+    return { managerJSON, contacts, groups };
+  }
+
+  // ── Public restore (saves to store) ───────────────────────────────────────
+
+  // async restoreChatMessages(
+  //   input: Blob | ArrayBufferLike | ArrayBufferView,
+  // ): Promise<{ restored: number }> {
+  //   const chatMessages = await this._parseChatMessagesBackup(input);
+  //   await Promise.all(chatMessages.map((inv) => this._chatMessages.save(inv)));
+  //   return { restored: chatMessages.length };
+  // }
+
+  /**
+   * Restores contacts (and optionally groups) from a contacts backup blob.
+   *
+   * @param overwriteContacts  When true, existing contacts with matching IDs
+   *                           are replaced. When false, only new contacts are
+   *                           added and duplicates are skipped.
+   * @param includeGroups      When true, user-defined groups from the backup
+   *                           are merged into the live store. System groups
+   *                           (Favorites, Blocked) are never overwritten.
+   */
+  async restoreContacts(
+    input: Blob | ArrayBufferLike | ArrayBufferView,
+    options: {
+      overwriteContacts?: boolean;
+      includeGroups?: boolean;
+    } = {},
+  ): Promise<{ contacts: number; groups: number }> {
+    const { overwriteContacts = true, includeGroups = true } = options;
+
+    const { contacts, groups } = await this._parseContactsBackup(input);
+
+    let contactCount = 0;
+    for (const contact of contacts) {
+      const exists = !!this._contacts.getContact(contact.id);
+      if (exists && !overwriteContacts) continue;
+      await this.addContact(contact);
+      contactCount++;
+    }
+
+    let groupCount = 0;
+    if (includeGroups) {
+      for (const group of groups) {
+        // Skip system groups — Favorites / Blocked must never be replaced
+        if (group.isSystem) continue;
+
+        if (!this._contacts.hasGroup(group.id)) {
+          await this._contacts.addGroup(group);
+        } else {
+          // Merge membership only — don't clobber name/meta
+          for (const memberId of group.listMemberIds()) {
+            // Only add members that were actually restored
+            if (this._contacts.hasContact(memberId)) {
+              await this._contacts.addContactToGroupIfAbsent(
+                group.id,
+                memberId,
+              );
+            }
+          }
+        }
+        groupCount++;
+      }
+    }
+
+    return { contacts: contactCount, groups: groupCount };
+  }
+
+  // ── Public read (no side-effects) ─────────────────────────────────────────
+
+  // async readInvoicesBackup(
+  //   input: Blob | ArrayBufferLike | ArrayBufferView,
+  // ): Promise<MajikInvoice[]> {
+  //   return this._parseInvoicesBackup(input);
+  // }
+
+  /**
+   * Parses a contacts backup without writing anything to the live store.
+   * Returns contacts and user-defined groups for the caller to preview.
+   */
+  async readContactsBackup(
+    input: Blob | ArrayBufferLike | ArrayBufferView,
+  ): Promise<ContactManagerSnapshot> {
+    return this._parseContactsBackup(input);
+  }
+
+  /**
+   * Restores all data from a full backup blob produced by `backupAppData()`.
+   * Contacts and groups are restored before chatMessages so recipients resolve
+   * correctly.
+   */
+  async restoreAppData(blob: Blob): Promise<{
+    contacts: number;
+    groups: number;
+    chatMessages: number;
+  }> {
+    const payload = await readBackupBlob(
+      blob,
+      MAJIK_MESSAGE_BACKUP_MAGIC.appData,
+      "app data",
+    );
+    const cj = await MajikCompressedJSON.fromMJKCJSON<AppBackUpData>(payload);
+    const data = cj.payload;
+
+    // 1. Contacts
+    const tempManager = await MajikContactManager.fromJSON(data.contacts);
+    const contacts = tempManager.listContacts(false);
+    const groups = tempManager.listGroups(false);
+
+    for (const contact of contacts) {
+      await this._contacts.addContact(contact);
+    }
+
+    for (const group of groups) {
+      if (group.isSystem) continue;
+      if (!this._contacts.hasGroup(group.id)) {
+        await this._contacts.addGroup(group);
+      } else {
+        for (const memberId of group.listMemberIds()) {
+          if (this._contacts.hasContact(memberId)) {
+            await this._contacts.addContactToGroupIfAbsent(group.id, memberId);
+          }
+        }
+      }
+    }
+
+    // 2. Chats
+    // await Promise.all(
+    //   (data.chatMessages ?? []).map((json) => {
+    //     const invoice = MajikInvoice.fromJSON(json);
+    //     return this._chatMessages.save(invoice);
+    //   }),
+    // );
+
+    if (data.preferences) {
+      await this.setUserAppPreferences(data.preferences);
+    }
+
+    return {
+      contacts: contacts.length,
+      groups: groups.filter((g) => !g.isSystem).length,
+      chatMessages: data.chatMessages?.length ?? 0,
+    };
+  }
+
+  /**
+   * Probes the first bytes of a blob and returns which backup type it is,
+   * without fully parsing it. Useful for file-picker validation UI.
+   *
+   * @returns `"chats" | "contacts" | "appData" | "unknown"`
+   */
+  static async probeBackupType(
+    blob: Blob,
+  ): Promise<"chats" | "contacts" | "appData" | "unknown"> {
+    const header = new Uint8Array(
+      await blob.slice(0, MAJIK_MESSAGE_BACKUP_MAGIC_SIZE).arrayBuffer(),
+    );
+
+    for (const [type, magic] of Object.entries(MAJIK_MESSAGE_BACKUP_MAGIC) as [
+      keyof typeof MAJIK_MESSAGE_BACKUP_MAGIC,
+      Uint8Array,
+    ][]) {
+      if (magic.every((byte, i) => header[i] === byte)) return type;
+    }
+
+    return "unknown";
+  }
+
+  // ── Private parser ─────────────────────────────────────────────────────────
+
+  /**
+   * Parses an app data backup blob into an AppDataSnapshot.
+   * No side-effects; nothing is written to the live store.
+   */
+  private async _parseAppDataBackup(
+    input: Blob | ArrayBufferLike | ArrayBufferView,
+  ): Promise<AppDataSnapshot> {
+    const payload = await readBackupBlob(
+      input,
+      MAJIK_MESSAGE_BACKUP_MAGIC.appData,
+      "app data",
+    );
+    const cj = await MajikCompressedJSON.fromMJKCJSON<AppBackUpData>(payload);
+    const data = cj.payload;
+
+    const tempManager = await MajikContactManager.fromJSON(data.contacts);
+    const contacts = tempManager.listContacts(false);
+    const groups = tempManager.listGroups(false);
+    const chatMessages = (data.chatMessages ?? []).map((json) =>
+      MajikMessageChat.fromJSON(json),
+    );
+
+    return {
+      chats: chatMessages,
+      contacts,
+      groups,
+
+      preferences: data.preferences ?? null,
+      // Keep raw manager JSON for the restore path
+      _contactsManagerJSON: data.contacts,
+    };
+  }
+
+  // ── Public read (no side-effects) ─────────────────────────────────────────
+
+  /**
+   * Parses an app data backup without writing anything to the live store.
+   * Returns a full snapshot for the caller to preview and selectively restore.
+   */
+  async readAppDataBackup(
+    input: Blob | ArrayBufferLike | ArrayBufferView,
+  ): Promise<AppDataSnapshot> {
+    return this._parseAppDataBackup(input);
+  }
+
+  // ── Public restore (selective) ────────────────────────────────────────────
+
+  /**
+   * Restores selected sections from an app data backup snapshot.
+   * The caller controls exactly which domains are written.
+   */
+  async restoreAppDataSelective(
+    snapshot: AppDataSnapshot,
+    options: {
+      chatMessages?: boolean;
+      contacts?: boolean;
+      groups?: boolean;
+      invoiceDefaults?: boolean;
+      preferences?: boolean;
+      overwriteContacts?: boolean;
+    } = {},
+  ): Promise<{
+    chatMessages: number;
+    contacts: number;
+    groups: number;
+    invoiceDefaults: boolean;
+    preferences: boolean;
+  }> {
+    const {
+      // chatMessages: doChatMessages = true,
+      contacts: doContacts = true,
+      groups: doGroups = true,
+      preferences: doPreferences = true,
+      overwriteContacts = true,
+    } = options;
+
+    let invoiceCount = 0;
+    let contactCount = 0;
+    let groupCount = 0;
+    let defaultsRestored = false;
+    let preferencesRestored = false;
+
+    // 1. Contacts first — chatMessages may reference them
+    if (doContacts) {
+      for (const contact of snapshot.contacts) {
+        const exists = !!this._contacts.getContact(contact.id);
+        if (exists && !overwriteContacts) continue;
+        await this.addContact(contact);
+        contactCount++;
+      }
+    }
+
+    // 2. Groups — only members that landed in the store are linked
+    if (doGroups) {
+      for (const group of snapshot.groups) {
+        if (group.isSystem) continue;
+        if (!this._contacts.hasGroup(group.id)) {
+          await this.addGroup(group);
+        } else {
+          for (const memberId of group.listMemberIds()) {
+            if (this._contacts.hasContact(memberId)) {
+              await this._contacts.addContactToGroupIfAbsent(
+                group.id,
+                memberId,
+              );
+            }
+          }
+        }
+        groupCount++;
+      }
+    }
+
+    // 3. Chats
+    // if (doChatMessages) {
+    //   await Promise.all(
+    //     snapshot.chats.map((inv) => this._chatMessages.save(inv)),
+    //   );
+    //   invoiceCount = snapshot.chatMessages.length;
+    // }
+
+    // 5. App preferences
+    if (doPreferences && snapshot.preferences) {
+      await this.setUserAppPreferences(snapshot.preferences);
+      preferencesRestored = true;
+    }
+    const restoredData = {
+      chatMessages: invoiceCount,
+      contacts: contactCount,
+      groups: groupCount,
+      invoiceDefaults: defaultsRestored,
+      preferences: preferencesRestored,
+    };
+
+    this._emit("restore-backup", restoredData);
+
+    return restoredData;
   }
 
   // ── Events ────────────────────────────────────────────────────────────────

@@ -39,6 +39,7 @@ import StyledIconButton from "@/components/foundations/StyledIconButton";
 
 import { IncomingCallBanner } from "@/components/majikah-session-wrapper/calls/IncomingCallBanner";
 import { MajikCallOverlay } from "@/components/majikah-session-wrapper/calls/MajikCallOverlay";
+import DynamicAlertBanner from "@/components/foundations/DynamicAlertBanner";
 
 // ─── Animations ───────────────────────────────────────────────────────────────
 const slideIn = keyframes`
@@ -326,6 +327,11 @@ const ConversationSidePanel: React.FC<ConversationSidePanelProps> = ({
             To use <strong>Chats</strong>, you need a registered Majik Key
             (local seed phrase account). Create a new account and register it
             online, or select an existing one to continue.
+            <DynamicAlertBanner
+              title="Majik Message Identity Required"
+              description="  To use Chats, you need a registered Majik Key (local seed phrase account). Create a new account and register it online, or select an existing one to continue."
+              level="warning"
+            />
             <IdentityRow>
               <MajikMessageIdentitySelector onChange={refreshConversations} />
             </IdentityRow>

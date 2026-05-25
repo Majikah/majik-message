@@ -123,8 +123,8 @@ const HiddenFileInput = styled.input`
 
 // ─── Drag-and-drop import sub-component ──────────────────────────────────────
 interface DropImportProps {
-  passphrase: string;
-  onPassphraseChange: (v: string) => void;
+  passphrase?: string;
+  onPassphraseChange?: (v: string) => void;
   mnemonicJSON: MnemonicJSON | undefined;
   onFileLoaded: (json: MnemonicJSON, filename: string) => void;
   onClear: () => void;
@@ -270,12 +270,12 @@ export const DropImportAccount: React.FC<DropImportProps> = ({
         onChange={handleBrowse}
       />
 
-      {hasFile && (
+      {hasFile && onPassphraseChange && (
         <CustomInputField
           onChange={(e) => onPassphraseChange(e)}
           maxChar={500}
           regex="alphanumeric"
-          label="New Password"
+          label="New Passphrase"
           currentValue={passphrase}
           importProp={{
             type: "txt",

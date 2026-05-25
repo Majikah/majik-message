@@ -34,8 +34,8 @@ import { useShepherd } from "./lib/shepherd-js/use-shepherd";
 
 import { listen } from "@tauri-apps/api/event";
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
-import { readFile } from "@tauri-apps/plugin-fs";
+import { open, save } from "@tauri-apps/plugin-dialog";
+import { readFile, writeFile } from "@tauri-apps/plugin-fs";
 
 import { useNavigate } from "react-router-dom";
 import { toggleTheme } from "./redux/slices/system";
@@ -62,18 +62,30 @@ import { CreateKeyModal } from "./components/panels/accounts/modals/CreateKeyMod
 import { ImportKeyModal } from "./components/panels/accounts/modals/ImportKeyModal";
 import { ImportContactModal } from "./components/panels/contacts/modals";
 import { MajikahAuthModal } from "./components/panels/accounts/modals/MajikahAuthModal";
+import { ImportAppDataModal } from "./components/panels/modals/ImportAppDataModal";
+import { ImportContactBackupModal } from "./components/panels/contacts/modals/ImportContactBackupModal";
+import { AppSettingsModal } from "./components/panels/settings/AppSettingsModal";
+import { ExportAccountKeyModal } from "./components/panels/accounts/modals/ExportAccountKeyModal";
+import {
+  AppDataSnapshot,
+  ContactManagerSnapshot,
+} from "@majikah/majik-message/dist/core/backup/types";
+import { sendNotification } from "@tauri-apps/plugin-notification";
 
 type ModalKeyContext =
   | "create-account"
   | "replace-account"
   | "import-account"
   | "import-contact"
+  | "import-contact-backup"
   | "import-file-mjkb"
   | "export-contacts"
   | "export-backup"
+  | "restore-backup"
   | "export-majik-key"
   | "validate-thread"
   | "auth-majikah"
+  | "user-preferences"
   | null;
 
 const RootContainer = styled.div`
@@ -116,6 +128,12 @@ function App(): JSX.Element {
   const [modalKey, setModalKey] = useState<ModalKeyContext>(null);
 
   const [refreshKey, setRefreshKey] = useState<number>(0);
+
+  const [pendingContactBackupSnapshot, setPendingContactBackupSnapshot] =
+    useState<ContactManagerSnapshot | null>(null);
+
+  const [pendingAppDataSnapshot, setPendingAppDataSnapshot] =
+    useState<AppDataSnapshot | null>(null);
 
   useFirebaseTauriPush({
     config: firebaseConfig,
@@ -211,7 +229,48 @@ function App(): JSX.Element {
 
     const register = async () => {
       const unlisteners = await Promise.all([
+        listen("trigger-export-contacts", async () => {
+          if (!unlocked) {
+            toast.error("Account Locked", {
+              description: "Unlock your Majik Key first.",
+              id: "toast-error-locked",
+            });
+            return;
+          }
+          const backupBlob = await majik.backupContacts();
+          const blobBuffer = await backupBlob.arrayBuffer();
+
+          const backupFileName = `${activeAccount?.meta.label || activeAccount?.id || "User"}  - Contacts Backup`;
+
+          const filePath = await save({
+            defaultPath: backupFileName,
+            filters: [{ name: "Majik Backup", extensions: ["mjkbackup"] }],
+          });
+
+          if (!filePath) {
+            toast.info("Backup cancelled");
+            return;
+          } else {
+            await writeFile(filePath, new Uint8Array(blobBuffer));
+          }
+
+          toast.success("Contacts Backup Saved", {
+            description: `${backupFileName} exported successfully.`,
+          });
+
+          sendNotification({
+            title: "Contacts Backup Saved",
+            body: backupFileName,
+          });
+        }),
         listen("trigger-encrypt-file", async () => {
+          if (!unlocked) {
+            toast.error("Account Locked", {
+              description: "Unlock your Majik Key first.",
+              id: "toast-error-locked",
+            });
+            return;
+          }
           try {
             const selected = await open({
               multiple: false,
@@ -240,6 +299,13 @@ function App(): JSX.Element {
         }),
 
         listen("trigger-decrypt-file", async () => {
+          if (!unlocked) {
+            toast.error("Account Locked", {
+              description: "Unlock your Majik Key first.",
+              id: "toast-error-locked",
+            });
+            return;
+          }
           try {
             const selected = await open({
               multiple: false,
@@ -273,10 +339,43 @@ function App(): JSX.Element {
           dispatch(toggleTheme());
         }),
 
+        listen("trigger-user-preferences", () => {
+          if (!unlocked) {
+            toast.error("Account Locked", {
+              description: "Unlock your Majik Key first.",
+              id: "toast-error-locked",
+            });
+            return;
+          }
+          setModalKey("user-preferences");
+        }),
+
+        // ─────────────────────────────────────────────────────────────
+        // Tools
+        // ─────────────────────────────────────────────────────────────
+
+        listen("trigger-export-majik-key", async () => {
+          if (!unlocked) {
+            toast.error("Account Locked", {
+              description: "Unlock your Majik Key first.",
+              id: "toast-error-locked",
+            });
+            return;
+          }
+          setModalKey("export-majik-key");
+        }),
+
         listen("trigger-start-tutorial", () => {
           launchTutorialOnboarding(tour);
         }),
         listen("trigger-create-account", async () => {
+          if (!unlocked) {
+            toast.error("Account Locked", {
+              description: "Unlock your Majik Key first.",
+              id: "toast-error-locked",
+            });
+            return;
+          }
           if (userAccounts.length >= MAX_ACCOUNT_LIMIT) {
             toast.error("Account Limit Reached", {
               description: `You have reached the maximum limit of ${MAX_ACCOUNT_LIMIT} accounts.`,
@@ -288,6 +387,13 @@ function App(): JSX.Element {
           navigate("/accounts");
         }),
         listen("trigger-import-account", async () => {
+          if (!unlocked) {
+            toast.error("Account Locked", {
+              description: "Unlock your Majik Key first.",
+              id: "toast-error-locked",
+            });
+            return;
+          }
           if (userAccounts.length >= MAX_ACCOUNT_LIMIT) {
             toast.error("Account Limit Reached", {
               description: `You have reached the maximum limit of ${MAX_ACCOUNT_LIMIT} accounts.`,
@@ -298,20 +404,125 @@ function App(): JSX.Element {
           setModalKey("import-account");
           navigate("/accounts");
         }),
+
         listen("trigger-import-contact", () => {
+          if (!unlocked) {
+            toast.error("Account Locked", {
+              description: "Unlock your Majik Key first.",
+              id: "toast-error-locked",
+            });
+            return;
+          }
           setModalKey("import-contact");
           navigate("/contacts");
         }),
 
+        listen("trigger-import-contact-backup", async () => {
+          if (!unlocked) {
+            toast.error("Account Locked", {
+              description: "Unlock your Majik Key first.",
+              id: "toast-error-locked",
+            });
+            return;
+          }
+          try {
+            const selected = await open({
+              multiple: false,
+              filters: [{ name: "Majik Backup", extensions: ["mjkbackup"] }],
+            });
+            if (!selected) return;
+
+            const uint8 = await readFile(selected as string);
+            const snapshot = await majik.readContactsBackup(uint8);
+
+            if (snapshot.contacts.length === 0) {
+              toast.warning("Empty backup", {
+                description:
+                  "No contacts were found in the selected backup file.",
+              });
+              return;
+            }
+
+            setPendingContactBackupSnapshot(snapshot);
+            setModalKey("import-contact-backup");
+          } catch (error) {
+            console.error(error);
+            toast.error("Failed to read contact backup", {
+              description: (error as any)?.message || String(error),
+            });
+          }
+        }),
+
+        listen("trigger-import-app-data", async () => {
+          if (!unlocked) {
+            toast.error("Account Locked", {
+              description: "Unlock your Majik Key first.",
+              id: "toast-error-locked",
+            });
+            return;
+          }
+          try {
+            const selected = await open({
+              multiple: false,
+              filters: [{ name: "Majik Backup", extensions: ["mjkbackup"] }],
+            });
+            if (!selected) return;
+
+            const uint8 = await readFile(selected as string);
+            const snapshot = await majik.readAppDataBackup(uint8);
+
+            const hasAnything =
+              (snapshot.chats && snapshot.chats.length > 0) ||
+              snapshot.contacts.length > 0 ||
+              snapshot.preferences !== null;
+
+            if (!hasAnything) {
+              toast.warning("Empty backup", {
+                description: "This backup file appears to contain no data.",
+              });
+              return;
+            }
+
+            setPendingAppDataSnapshot(snapshot);
+            setModalKey("restore-backup");
+          } catch (error) {
+            console.error(error);
+            toast.error("Failed to read backup file", {
+              description: (error as any)?.message || String(error),
+            });
+          }
+        }),
+
         listen("trigger-refresh-identities", async () => {
+          if (!unlocked) {
+            toast.error("Account Locked", {
+              description: "Unlock your Majik Key first.",
+              id: "toast-error-locked",
+            });
+            return;
+          }
           await majik.refreshIdentities();
           setRefreshKey((prev) => prev + 1);
         }),
         listen("trigger-auth-sign-in", () => {
+          if (!unlocked) {
+            toast.error("Account Locked", {
+              description: "Unlock your Majik Key first.",
+              id: "toast-error-locked",
+            });
+            return;
+          }
           setModalKey("auth-majikah");
         }),
 
         listen("trigger-auth-sign-out", async () => {
+          if (!unlocked) {
+            toast.error("Account Locked", {
+              description: "Unlock your Majik Key first.",
+              id: "toast-error-locked",
+            });
+            return;
+          }
           if (!majikah.isAuthenticated) return;
 
           const run = async (): Promise<string> => {
@@ -333,6 +544,41 @@ function App(): JSX.Element {
               err instanceof Error ? err.message : "Problem Signing Out.",
           });
         }),
+
+        listen("trigger-export-app-data", async () => {
+          if (!unlocked) {
+            toast.error("Account Locked", {
+              description: "Unlock your Majik Key first.",
+              id: "toast-error-locked",
+            });
+            return;
+          }
+          const backupBlob = await majik.backupAppData();
+          const blobBuffer = await backupBlob.arrayBuffer();
+
+          const backupFileName = `${activeAccount?.meta.label || activeAccount?.id || "User"}  - App Data Backup`;
+
+          const filePath = await save({
+            defaultPath: backupFileName,
+            filters: [{ name: "Majik Backup", extensions: ["mjkbackup"] }],
+          });
+
+          if (!filePath) {
+            toast.info("Backup cancelled");
+            return;
+          } else {
+            await writeFile(filePath, new Uint8Array(blobBuffer));
+          }
+
+          toast.success("App Data Backup Saved", {
+            description: `${backupFileName} exported successfully.`,
+          });
+
+          sendNotification({
+            title: "App Data Backup Saved",
+            body: backupFileName,
+          });
+        }),
       ]);
 
       // If the effect was cleaned up while we were awaiting, immediately unlisten
@@ -348,9 +594,10 @@ function App(): JSX.Element {
 
     return () => {
       isCancelled = true;
+
       handlers.forEach((fn) => fn());
     };
-  }, [majik, majikah, userAccounts.length, dispatch]);
+  }, [majik, majikah, dispatch, navigate, tour, userAccounts.length, unlocked]);
 
   useEffect(() => {
     invoke("set_auth_state", { signedIn: majikah.isAuthenticated }).catch(
@@ -427,6 +674,11 @@ function App(): JSX.Element {
       </RootContainer>
     );
   }
+
+  const activeAccount = useMemo(() => {
+    return majik.getActiveAccount();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [majik, refreshKey]);
 
   const tabs: RouterTabContent[] = [
     {
@@ -513,6 +765,15 @@ function App(): JSX.Element {
           onReset={handleCancel}
           isUnlocking={isUnlocking}
         />
+
+        <AppSettingsModal
+          majik={majik}
+          onSuccess={handleModalSuccess}
+          open={modalKey === "user-preferences"}
+          onOpenChange={(change) =>
+            setModalKey(change ? "user-preferences" : null)
+          }
+        />
         <CreateKeyModal
           majik={majik}
           onSuccess={handleModalSuccess}
@@ -531,6 +792,14 @@ function App(): JSX.Element {
           }
         />
 
+        <ExportAccountKeyModal
+          majik={majik}
+          onSuccess={handleModalSuccess}
+          open={modalKey === "export-majik-key"}
+          onOpenChange={(change) =>
+            setModalKey(change ? "export-majik-key" : null)
+          }
+        />
         <ImportContactModal
           majik={majik}
           onSuccess={handleModalSuccess}
@@ -538,6 +807,28 @@ function App(): JSX.Element {
           onOpenChange={(change) =>
             setModalKey(change ? "import-contact" : null)
           }
+        />
+
+        <ImportContactBackupModal
+          open={modalKey === "import-contact-backup"}
+          onOpenChange={(change) => {
+            setModalKey(change ? "import-contact-backup" : null);
+            if (!change) setPendingContactBackupSnapshot(null);
+          }}
+          majik={majik}
+          snapshot={pendingContactBackupSnapshot}
+          onSuccess={handleModalSuccess}
+        />
+
+        <ImportAppDataModal
+          open={modalKey === "restore-backup"}
+          onOpenChange={(change) => {
+            setModalKey(change ? "restore-backup" : null);
+            if (!change) setPendingAppDataSnapshot(null);
+          }}
+          majik={majik}
+          snapshot={pendingAppDataSnapshot}
+          onSuccess={handleModalSuccess}
         />
 
         <MajikahAuthModal

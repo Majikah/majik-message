@@ -30,6 +30,7 @@ import {
   CLIENT_STATE_KEYS,
   ClientStateEntry,
   ClientStateStorageAdapter,
+  UserAppPreferences,
 } from "./storage/client-state/_types";
 import { InMemoryClientStateAdapter } from "./storage/client-state/adapter-memory";
 
@@ -287,4 +288,61 @@ export class ClientStateManager {
   async count(): Promise<number> {
     return this._adapter.count();
   }
+
+  /**
+   * Retrieve user app preferences.
+   * Returns `null` if none have been saved yet.
+   */
+  async getUserAppPreferences(): Promise<UserAppPreferences> {
+    const raw = await this.get(CLIENT_STATE_KEYS.USER_APP_PREFERENCES);
+    if (raw === null) {
+      await this.resetUserAppPreferences();
+      return DEFAULT_USER_APP_PREFERENCES;
+    }
+    try {
+      return JSON.parse(raw) as UserAppPreferences;
+    } catch (e) {
+      console.warn(
+        "ClientStateManager: Problem retrieving user app preferences: ",
+        e,
+      );
+      return DEFAULT_USER_APP_PREFERENCES;
+    }
+  }
+
+  /**
+   * Persist user app preferences.
+   */
+  async setUserAppPreferences(preferences: UserAppPreferences): Promise<void> {
+    await this.set(
+      CLIENT_STATE_KEYS.USER_APP_PREFERENCES,
+      JSON.stringify(preferences),
+    );
+  }
+
+  /**
+   * Persist user app preferences.
+   */
+  async resetUserAppPreferences(): Promise<void> {
+    await this.set(
+      CLIENT_STATE_KEYS.USER_APP_PREFERENCES,
+      JSON.stringify(DEFAULT_USER_APP_PREFERENCES),
+    );
+  }
+
+  /**
+   * Remove user app preferences.
+   */
+  async removeUserAppPreferences(): Promise<void> {
+    await this.remove(CLIENT_STATE_KEYS.USER_APP_PREFERENCES);
+  }
 }
+
+export const DEFAULT_USER_APP_PREFERENCES: UserAppPreferences = {
+  chats: {
+    autosave: false,
+  },
+  privacy: {
+    shareAnalytics: true,
+  },
+};

@@ -1,5 +1,5 @@
 // sqlite-worker.ts
-import { MAJIKAH_SQL_SCHEMA_FULL } from "@majikah/majik-message";
+import { MAJIKAH_SQL_SCHEMA_FULL_V_0 } from "@majikah/majik-message";
 import { sqlite3Worker1Promiser } from "@sqlite.org/sqlite-wasm";
 
 let promiser: any = null;
@@ -7,7 +7,8 @@ let dbId: string | null = null;
 let ready = false;
 const queue: MessageEvent[] = [];
 
-const SCHEMA = MAJIKAH_SQL_SCHEMA_FULL;
+const SCHEMA = MAJIKAH_SQL_SCHEMA_FULL_V_0;
+const PRODUCT_CODE = "majik_message";
 
 async function handleMessage(e: MessageEvent) {
   const { id, type, sql, params } = e.data;
@@ -81,8 +82,8 @@ async function init() {
 
   const openResult = await promiser("open", {
     filename: hasOPFS
-      ? "file:majikah_majik_message.db?vfs=opfs"
-      : "file:majikah_majik_message.db?vfs=memdb",
+      ? `file:majikah_${PRODUCT_CODE}.db?vfs=opfs`
+      : `file:majikah_${PRODUCT_CODE}.db?vfs=memdb`,
   });
 
   dbId = openResult.result.dbId;

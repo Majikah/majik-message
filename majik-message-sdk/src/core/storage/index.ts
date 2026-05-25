@@ -1,6 +1,6 @@
-export * from "./sql-schema";
+export * from "./sqlite/schema";
 
-export * from "./sql-db-manager";
+export * from "./sqlite/sql-db-manager";
 export * from "./storage-adapter";
 export * from "./idb-adapter";
 

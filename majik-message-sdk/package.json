@@ -2,7 +2,7 @@
   "name": "@majikah/majik-message",
   "type": "module",
   "description": "Post-quantum end-to-end encryption with ML-KEM-768. Seed phrase–based accounts. Auto-expiring messages. Offline-ready. Exportable encrypted messages. Tamper-proof threads with blockchain-like integrity. Quantum-resistant messaging.",
-  "version": "0.3.12",
+  "version": "0.3.13",
   "license": "Apache-2.0",
   "author": "Zelijah",
   "main": "./dist/index.js",
@@ -80,6 +80,7 @@
   },
   "dependencies": {
     "@bokuweb/zstd-wasm": "^0.0.27",
+    "@majikah/majik-cjson": "^0.0.3",
     "@majikah/majik-contact": "^0.0.4",
     "@majikah/majik-envelope": "^0.0.4",
     "@majikah/majik-file": "^0.1.4",

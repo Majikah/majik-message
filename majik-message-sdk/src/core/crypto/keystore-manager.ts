@@ -310,6 +310,72 @@ export class MajikKeyManager {
     await this._persist(key);
   }
 
+  /**
+   * Replace the passphrase for a stored account by re-importing from a mnemonic
+   * backup. Uses importFromMnemonicBackup() internally so the result is always
+   * fully upgraded (Argon2id + ML-KEM + Ed25519 + ML-DSA).
+   *
+   * @param backup   - The base64 backup string (MnemonicJSON.id field)
+   * @param mnemonic - The seed phrase (derived via jsonToSeed(mnemonicJSON))
+   * @param newPassphrase - The new passphrase to encrypt under
+   * @param expectedId    - The stored account ID to validate against
+   * @param label         - Optional: preserve existing label if not provided
+   */
+  async replacePassphrase(
+    backup: string,
+    mnemonic: string,
+    newPassphrase: string,
+    expectedId: string,
+    label?: string,
+  ): Promise<MajikKey> {
+    if (!backup?.trim())
+      throw new MajikKeyManagerError("replacePassphrase: backup is required");
+    if (!mnemonic?.trim())
+      throw new MajikKeyManagerError("replacePassphrase: mnemonic is required");
+    if (!newPassphrase?.trim())
+      throw new MajikKeyManagerError(
+        "replacePassphrase: newPassphrase is required",
+      );
+
+    // 1. Confirm the account we're replacing actually exists in the store
+    const existing = await this.load(expectedId);
+    if (!existing) {
+      throw new MajikKeyManagerError(
+        `replacePassphrase: no stored account found with id "${expectedId}"`,
+      );
+    }
+
+    // 2. Re-derive the full identity from the backup + mnemonic + NEW passphrase.
+    //    importFromMnemonicBackup verifies the mnemonic against the backup's
+    //    encrypted payload — if it doesn't match, it throws before touching storage.
+    const resolvedLabel = label ?? existing.label;
+    const freshKey = await MajikKey.importFromMnemonicBackup(
+      backup,
+      mnemonic,
+      newPassphrase,
+      resolvedLabel,
+    );
+
+    // 3. Cross-check: the re-derived fingerprint must match the stored account.
+    //    This guards against a valid-but-wrong backup being used.
+    if (freshKey.fingerprint !== existing.fingerprint) {
+      throw new MajikKeyManagerError(
+        `replacePassphrase: fingerprint mismatch — ` +
+          `backup fingerprint "${freshKey.fingerprint}" does not match ` +
+          `stored account "${existing.fingerprint}"`,
+      );
+    }
+
+    // 4. Atomic swap: remove old, persist new.
+    await this._adapter.remove(existing.id);
+    this._cache.delete(existing.id);
+
+    await this._persist(freshKey);
+    this._cache.set(freshKey.id, freshKey);
+
+    return freshKey;
+  }
+
   // ── ensureUnlocked ────────────────────────────────────────────────────────
 
   /**

@@ -1,159 +1,160 @@
 // styled.d.ts
-import 'styled-components'
+import "styled-components";
 
-declare module 'styled-components' {
+declare module "styled-components" {
   export interface DefaultTheme {
     typography: {
       fonts: {
-        thin: string
-        extralight: string
-        light: string
-        regular: string
-        medium: string
-        semibold: string
-        bold: string
-        extrabold: string
-        black: string
-        thinItalic: string
-        extralightItalic: string
-        lightItalic: string
-        regularItalic: string
-        mediumItalic: string
-        semiboldItalic: string
-        boldItalic: string
-        extraboldItalic: string
-        blackItalic: string
-        numbers: string
-      }
+        thin: string;
+        extralight: string;
+        light: string;
+        regular: string;
+        medium: string;
+        semibold: string;
+        bold: string;
+        extrabold: string;
+        black: string;
+        thinItalic: string;
+        extralightItalic: string;
+        lightItalic: string;
+        regularItalic: string;
+        mediumItalic: string;
+        semiboldItalic: string;
+        boldItalic: string;
+        extraboldItalic: string;
+        blackItalic: string;
+        numbers: string;
+        mono: string;
+      };
       sizes: {
-        header: string
-        body: string
-        label: string
-        title: string
-        helper: string
-        hint: string
-        tab: string
-        subject: string
-        xl: string
-      }
+        header: string;
+        body: string;
+        label: string;
+        title: string;
+        helper: string;
+        hint: string;
+        tab: string;
+        subject: string;
+        xl: string;
+      };
       weights: {
-        header: number
-        body: number
-        title: number
-        subject: number
-        light: number
-      }
+        header: number;
+        body: number;
+        title: number;
+        subject: number;
+        light: number;
+      };
       lineHeights: {
-        body: string
-        heading: string
-      }
+        body: string;
+        heading: string;
+      };
       letterSpacing: {
-        body: string
-        heading: string
-      }
-    }
+        body: string;
+        heading: string;
+      };
+    };
 
     colors: {
-      primary: string
-      primarySoft: string
-      accent: string
-      error: string
-      textPrimary: string
-      textSecondary: string
-      primaryBackground: string
-      secondaryBackground: string
+      primary: string;
+      primarySoft: string;
+      accent: string;
+      error: string;
+      textPrimary: string;
+      textSecondary: string;
+      primaryBackground: string;
+      secondaryBackground: string;
       brand: {
-        green: string
-        red: string
-        blue: string
-        white: string
-      }
-      disabled: string
-      semitransparent: string
+        green: string;
+        red: string;
+        blue: string;
+        white: string;
+      };
+      disabled: string;
+      semitransparent: string;
       static: {
-        white: string
-        black: string
-        grey: string
-      }
-    }
+        white: string;
+        black: string;
+        grey: string;
+      };
+    };
 
     gradients: {
-      primary: string
-      secondary: string
-      strong: string
-      glass: string
-    }
+      primary: string;
+      secondary: string;
+      strong: string;
+      glass: string;
+    };
 
     spacing: {
-      tight: string
-      small: string
-      medium: string
-      large: string
-      xlarge: string
-    }
+      tight: string;
+      small: string;
+      medium: string;
+      large: string;
+      xlarge: string;
+    };
 
     borders: {
       width: {
-        thin: string
-        medium: string
-        thick: string
-      }
+        thin: string;
+        medium: string;
+        thick: string;
+      };
       radius: {
-        small: string
-        medium: string
-        big: string
-        large: string
-        rounded: string
-      }
+        small: string;
+        medium: string;
+        big: string;
+        large: string;
+        rounded: string;
+      };
       color: {
-        primary: string
-        secondary: string
-      }
-    }
+        primary: string;
+        secondary: string;
+      };
+    };
 
     shadows: {
-      small: string
-      medium: string
-      large: string
-    }
+      small: string;
+      medium: string;
+      large: string;
+    };
 
     breakpoints: {
-      mobile: string
-      tablet: string
-      laptop: string
-      desktop: string
-    }
+      mobile: string;
+      tablet: string;
+      laptop: string;
+      desktop: string;
+    };
 
     zIndex: {
-      subroot: number
-      root: number
-      suboverlay: number
-      overlay: number
-      overlayContent: number
-      modal: number
-      dropdown: number
-      tooltip: number
-      topmost: number
-    }
+      subroot: number;
+      root: number;
+      suboverlay: number;
+      overlay: number;
+      overlayContent: number;
+      modal: number;
+      dropdown: number;
+      tooltip: number;
+      topmost: number;
+    };
 
     animations: {
       duration: {
-        short: string
-        medium: string
-        long: string
-      }
+        short: string;
+        medium: string;
+        long: string;
+      };
       easing: {
-        easeIn: string
-        easeOut: string
-        easeInOut: string
-      }
-    }
+        easeIn: string;
+        easeOut: string;
+        easeInOut: string;
+      };
+    };
 
     iconSizes: {
-      small: string
-      medium: string
-      large: string
-      xlarge: string
-    }
+      small: string;
+      medium: string;
+      large: string;
+      xlarge: string;
+    };
   }
 }

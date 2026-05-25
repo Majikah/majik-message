@@ -4,6 +4,9 @@ import type {
   MajikFileJSON,
   TempFileDuration,
 } from "@majikah/majik-file";
+import { MajikContactManagerJSON } from "./contacts/types";
+import { UserAppPreferences } from "./storage";
+import { MajikMessageChatJSON } from "./database/chat/types";
 
 export type ISODateString = string;
 
@@ -293,4 +296,11 @@ export interface DecryptFileOptions {
    * a second parse or round-trip.
    */
   metadata?: MajikFileJSON;
+}
+
+export interface AppBackUpData {
+  chatMessages?: MajikMessageChatJSON[];
+  contacts: MajikContactManagerJSON;
+  // invoiceDefaults?: InvoiceDefaults;
+  preferences?: UserAppPreferences;
 }

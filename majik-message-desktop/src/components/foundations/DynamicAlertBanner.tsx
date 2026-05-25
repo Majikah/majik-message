@@ -41,7 +41,7 @@ const levelTheme: Record<
   info: {
     bg: "rgba(24, 95, 165, 0.07)",
     border: "rgba(24, 95, 165, 0.20)",
-    color: "#185FA5",
+    color: "#2f7fcf",
   },
   success: {
     bg: "rgba(59, 109, 17, 0.07)",

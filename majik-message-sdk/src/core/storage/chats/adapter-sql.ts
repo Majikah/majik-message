@@ -1,6 +1,6 @@
 import { MajikMessageChatJSON } from "../../database/chat/types";
 
-import { SQLiteDatabase } from "../sql-db-manager";
+import { SQLiteDatabase } from "../sqlite/sql-db-manager";
 
 import { MAJIKAH_SQL_TABLES } from "../sql-schema";
 import { StorageSource } from "../storage-adapter";

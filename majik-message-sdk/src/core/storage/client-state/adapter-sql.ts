@@ -19,7 +19,7 @@
  */
 
 import type { ClientStateEntry, ClientStateStorageAdapter } from "./_types";
-import type { SQLiteDatabase } from "../sql-db-manager";
+import type { SQLiteDatabase } from "../sqlite/sql-db-manager";
 
 const TABLE = "majik_client_state";
 

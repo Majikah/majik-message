@@ -238,7 +238,7 @@ export const DropImportContact: React.FC<DropImportProps> = ({
       <HiddenFileInput
         ref={fileInputRef}
         type="file"
-        accept=".json,application/json"
+        accept=".json,application/json,.png"
         onChange={handleBrowse}
       />
     </DropZoneWrapper>

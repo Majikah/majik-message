@@ -1,6 +1,6 @@
 import { SerializedMajikContactGroup } from "@majikah/majik-contact";
 import { MajikContactGroupStorageAdapter } from "./_types";
-import { SQLiteDatabase } from "../../sql-db-manager";
+import { SQLiteDatabase } from "../../sqlite/sql-db-manager";
 import { MAJIKAH_SQL_TABLES } from "../../sql-schema";
 
 export class SQLiteContactGroupAdapter implements MajikContactGroupStorageAdapter {
