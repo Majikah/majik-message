@@ -18,9 +18,7 @@ pub fn build_menu(
         Some(AboutMetadata {
             name: Some("Majik Message".into()),
             version: Some(env!("CARGO_PKG_VERSION").into()),
-            copyright: Some(
-                "© 2026 Majikah Information Technology Solutions. All rights reserved.".into(),
-            ),
+            copyright: Some("© 2026 Majikah Solutions OPC. All rights reserved.".into()),
             website: Some("https://message.majikah.solutions".into()),
             icon: Some(app.default_window_icon().unwrap().clone()),
             license: Some("Apache 2.0".into()),
@@ -50,7 +48,7 @@ pub fn build_menu(
     //     &[&import_chats_mjki, &import_chats_backup],
     // )?;
 
-    // Import Invoice submenu
+    // Import submenu
     let import_contact_card = MenuItem::with_id(
         app,
         "import-contact",

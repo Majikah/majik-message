@@ -16,7 +16,6 @@ import { useNavigate } from "react-router-dom";
 import * as AlertDialog from "@radix-ui/react-alert-dialog";
 import {
   KeyIcon,
-  UploadSimpleIcon,
   LockKeyOpenIcon,
 } from "@phosphor-icons/react";
 
@@ -214,12 +213,7 @@ const UnlockModal: React.FC<UnlockModalProps> = React.memo(
       setPass("");
     }, [onSubmit, pass]);
 
-    /** Mode: backup — derive the passphrase from the loaded backup JSON */
-    const handleBackupUnlock = useCallback(() => {
-      if (!mnemonicJSON?.id?.trim() || !mnemonic) return;
-      // The backup's embedded passphrase (phrase field) is used as the key
-      onSubmit(mnemonicJSON.phrase ?? mnemonic);
-    }, [mnemonicJSON, mnemonic, onSubmit]);
+
 
     /** Mode: forgot — reset passphrase using backup then re-unlock */
     const handleForgotSubmit = useCallback(async () => {
@@ -316,13 +310,7 @@ const UnlockModal: React.FC<UnlockModalProps> = React.memo(
                 >
                   <KeyIcon size={12} /> Passphrase
                 </ModeToggleButton>
-                <ModeToggleButton
-                  $active={mode === "backup"}
-                  onClick={() => handleModeSwitch("backup")}
-                  type="button"
-                >
-                  <UploadSimpleIcon size={12} /> Load Backup
-                </ModeToggleButton>
+           
                 <ModeToggleButton
                   $active={mode === "forgot"}
                   onClick={() => handleModeSwitch("forgot")}
@@ -369,21 +357,7 @@ const UnlockModal: React.FC<UnlockModalProps> = React.memo(
                 </>
               )}
 
-              {/* ── Mode: Backup unlock ── */}
-              {mode === "backup" && (
-                <>
-                  <DynamicAlertBanner
-                    title="Unlock using your backup file"
-                    description="Load your PNG or JSON backup to unlock without entering your passphrase."
-                    level="info"
-                  />
-                  <DropImportAccount
-                    mnemonicJSON={mnemonicJSON}
-                    onFileLoaded={handleDropFileLoaded}
-                    onClear={resetBackupState}
-                  />
-                </>
-              )}
+      
 
               {/* ── Mode: Forgot passphrase ── */}
               {mode === "forgot" && (
@@ -442,18 +416,6 @@ const UnlockModal: React.FC<UnlockModalProps> = React.memo(
               />
             )}
 
-            {mode === "backup" && (
-              <DuoButton
-                textButtonA="Cancel"
-                textButtonB={isUnlocking ? "Unlocking…" : "Unlock with Backup"}
-                onClickButtonA={handleCancel}
-                onClickButtonB={handleBackupUnlock}
-                isDisabledButtonB={!backupReady || isUnlocking}
-                isDisabledButtonA={strict}
-                enableColumn
-                direction="column"
-              />
-            )}
 
             {mode === "forgot" && (
               <DuoButton

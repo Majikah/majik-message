@@ -5,12 +5,12 @@
 
   <Identity Name="Zelijah.MajikMessage"
             Publisher="CN=65775C45-41C6-4E6B-AB4A-FCD4E092A5E6"
-            Version="1.5.1.0"
+            Version="1.5.2.0"
             ProcessorArchitecture="x64" />
 
   <Properties>
     <DisplayName>Majik Message</DisplayName>
-    <PublisherDisplayName>Majikah Information Technology Solutions</PublisherDisplayName>
+    <PublisherDisplayName>Majikah Solutions OPC</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
   </Properties>
 

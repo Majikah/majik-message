@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Majik Message",
-  "version": "1.5.1",
+  "version": "1.5.2",
   "identifier": "com.majikah.majik-message",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -229,8 +229,8 @@
         "role": "Viewer"
       }
     ],
-    "publisher": "Majikah Information Technology Solutions",
-    "copyright": "© 2026 Majikah Information Technology Solutions. All rights reserved.",
+    "publisher": "Majikah Solutions OPC",
+    "copyright": "© 2026 Majikah Solutions OPC. All rights reserved.",
     "longDescription": "Post-quantum end-to-end encryption with ML-KEM-768. Seed phrase–based accounts. Auto-expiring messages. Offline-ready. Exportable encrypted messages. Tamper-proof threads with blockchain-like integrity. Quantum-resistant messaging.",
     "shortDescription": "True end-to-end post-quantum encryption. No phone numbers. No passwords. Just your seed phrase and complete privacy—safe from quantum computers."
   }

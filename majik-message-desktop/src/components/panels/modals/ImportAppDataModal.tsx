@@ -7,12 +7,12 @@ import styled from "styled-components";
 import DynamicPopUp from "@/components/functional/DynamicPopUp";
 
 import {
-  ReceiptIcon,
   UsersThreeIcon,
   IdentificationBadgeIcon,
   GearIcon,
   WarningCircleIcon,
   ArrowCounterClockwiseIcon,
+  ChatsCircleIcon,
 } from "@phosphor-icons/react";
 import { MajikMessageDatabase } from "@/components/majik-context-wrapper/majik-message-database";
 import { AppDataSnapshot } from "@majikah/majik-message/dist/core/backup/types";
@@ -267,7 +267,7 @@ const SECTIONS: SectionDef[] = [
   {
     key: "chats",
     label: "Chat Messages",
-    icon: <ReceiptIcon size={16} />,
+    icon: <ChatsCircleIcon size={16} />,
     sub: (s) =>
       s.chats?.length === 0
         ? "No chats in this backup"
@@ -477,7 +477,7 @@ export const ImportAppDataModal: React.FC<ImportAppDataModalProps> = memo(
                 {!!snapshot.chats && snapshot.chats.length > 0 && (
                   <>
                     <SummaryChip>
-                      <ReceiptIcon size={11} />
+                      <ChatsCircleIcon size={11} />
                       <span>{snapshot.chats?.length}</span> chats
                     </SummaryChip>
                     <SummaryDot />
