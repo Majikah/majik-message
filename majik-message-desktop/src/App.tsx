@@ -556,7 +556,7 @@ function App(): JSX.Element {
           const backupBlob = await majik.backupAppData();
           const blobBuffer = await backupBlob.arrayBuffer();
 
-          const backupFileName = `${activeAccount?.meta.label || activeAccount?.id || "User"}  - App Data Backup`;
+          const backupFileName = `${activeAccount?.meta.label || activeAccount?.id || "User"} - Majik Message - App Data Backup`;
 
           const filePath = await save({
             defaultPath: backupFileName,

@@ -493,7 +493,7 @@ export class MajikMessage {
   // ── ACCOUNT MANAGEMENT ────────────────────────────────────────────────────
   // ==========================================================================
 
-  generateMnemonic(strength: 128 | 256 = 128): string {
+  async generateMnemonic(strength: 128 | 256 = 128): Promise<string> {
     return MajikKeyManager.generateMnemonic(strength);
   }
 
