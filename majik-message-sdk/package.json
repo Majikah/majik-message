@@ -82,11 +82,11 @@
   "dependencies": {
     "@bokuweb/zstd-wasm": "^0.0.27",
     "@majikah/majik-cjson": "^0.0.3",
-    "@majikah/majik-contact": "^0.0.4",
-    "@majikah/majik-envelope": "^0.0.5",
-    "@majikah/majik-file": "^0.1.5",
-    "@majikah/majik-key": "^0.2.9",
-    "@majikah/majik-signature": "^0.0.25",
+    "@majikah/majik-contact": "^0.0.6",
+    "@majikah/majik-envelope": "^0.0.6",
+    "@majikah/majik-file": "^0.1.6",
+    "@majikah/majik-key": "^0.2.11",
+    "@majikah/majik-signature": "^0.0.28",
     "@noble/hashes": "^2.2.0",
     "@noble/post-quantum": "^0.6.1",
     "@scure/bip39": "^2.2.0",
@@ -99,9 +99,8 @@
     "@stablelib/x25519": "^2.0.1",
     "@thezelijah/majik-user": "^1.0.6",
     "ed2curve": "^0.3.0",
-    "fernet": "^0.3.3",
-    "fflate": "^0.8.2",
-    "nanoid": "^5.1.15"
+    "fflate": "^0.8.3",
+    "nanoid": "^5.1.16"
   },
   "devDependencies": {
     "@types/ed2curve": "^0.2.4",
