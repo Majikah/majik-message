@@ -1,13 +1,10 @@
 import { hash } from "@stablelib/sha256";
 import { MajikCompressor } from "../../compressor/majik-compressor";
-import {
-  MajikMessageAccountID,
-  MajikMessageChatID,
-  MajikMessagePublicKey,
-} from "../../types";
+import type { MajikMessageChatID } from "../../types";
 import { arrayToBase64, autogenerateID } from "../../utils/utilities";
 import { MajikMessageIdentity } from "../system/identity";
 import { MajikMessageChatJSON, RedisKey } from "./types";
+import { MajikKeyAddress, MajikKeyFingerprint } from "@majikah/majik-key";
 
 const MAX_MESSAGE_SIZE = 1024 * 1024; // 1MB
 
@@ -18,10 +15,10 @@ const MAX_MESSAGE_SIZE = 1024 * 1024; // 1MB
  */
 export class MajikMessageChat {
   private id: MajikMessageChatID;
-  private _account: MajikMessageAccountID;
+  private _account: MajikKeyFingerprint;
   private message: string;
-  private sender: MajikMessagePublicKey;
-  private recipients: MajikMessagePublicKey[];
+  private sender: MajikKeyAddress;
+  private recipients: MajikKeyAddress[];
   private timestamp: string;
   private expires_at: string;
   private read_by: string[];
@@ -33,10 +30,10 @@ export class MajikMessageChat {
 
   constructor(
     id: MajikMessageChatID,
-    account: MajikMessageAccountID,
+    account: MajikKeyFingerprint,
     message: string,
-    sender: MajikMessagePublicKey,
-    recipients: MajikMessagePublicKey[],
+    sender: MajikKeyAddress,
+    recipients: MajikKeyAddress[],
     timestamp: string,
     expires_at: string,
     read_by: string[] = [],
@@ -76,7 +73,7 @@ export class MajikMessageChat {
     return this.conversation_id;
   }
 
-  get account(): MajikMessageAccountID {
+  get account(): MajikKeyFingerprint {
     return this._account;
   }
 
@@ -170,7 +167,7 @@ export class MajikMessageChat {
   static async create(
     account: MajikMessageIdentity,
     message: string,
-    recipients: MajikMessagePublicKey[],
+    recipients: MajikKeyAddress[],
     expiresInMs: number = 24 * 60 * 60 * 1000,
     permanent: boolean = false,
   ): Promise<MajikMessageChat> {
@@ -248,7 +245,7 @@ export class MajikMessageChat {
    */
   static generateConversationID(message: MajikMessageChatJSON): string {
     // Get all participants (sender + recipients) directly from JSON
-    const participants = new Set<MajikMessagePublicKey>();
+    const participants = new Set<MajikKeyAddress>();
     participants.add(message.sender);
     message.recipients.forEach((r) => participants.add(r));
 
@@ -275,7 +272,7 @@ export class MajikMessageChat {
    */
   generateConversationID(): string {
     // Get all participants (sender + recipients)
-    const participants = new Set<MajikMessagePublicKey>();
+    const participants = new Set<MajikKeyAddress>();
     participants.add(this.getSender());
     this.getRecipients().forEach((r) => participants.add(r));
 
@@ -298,8 +295,8 @@ export class MajikMessageChat {
   /**
    * Get all participants for a message (sender + recipients)
    */
-  getParticipants(): MajikMessagePublicKey[] {
-    const participants = new Set<MajikMessagePublicKey>();
+  getParticipants(): MajikKeyAddress[] {
+    const participants = new Set<MajikKeyAddress>();
 
     // Add sender
     participants.add(this.getSender());
@@ -344,7 +341,7 @@ export class MajikMessageChat {
   // ============= ACCESS CONTROL =============
 
   // Check if user can access this message
-  canUserAccess(userPublicKey: MajikMessagePublicKey): boolean {
+  canUserAccess(userPublicKey: MajikKeyAddress): boolean {
     if (!userPublicKey || typeof userPublicKey !== "string") {
       return false;
     }
@@ -353,7 +350,7 @@ export class MajikMessageChat {
   }
 
   // Check if user is sender
-  isSender(userPublicKey: MajikMessagePublicKey): boolean {
+  isSender(userPublicKey: MajikKeyAddress): boolean {
     if (!userPublicKey || typeof userPublicKey !== "string") {
       return false;
     }
@@ -362,7 +359,7 @@ export class MajikMessageChat {
 
   // ============= RECIPIENT MANAGEMENT =============
 
-  addRecipient(recipientId: MajikMessagePublicKey): void {
+  addRecipient(recipientId: MajikKeyAddress): void {
     if (
       !recipientId ||
       typeof recipientId !== "string" ||
@@ -386,7 +383,7 @@ export class MajikMessageChat {
     this.conversation_id = this.generateConversationID();
   }
 
-  removeRecipient(recipientId: MajikMessagePublicKey): void {
+  removeRecipient(recipientId: MajikKeyAddress): void {
     if (
       !recipientId ||
       typeof recipientId !== "string" ||
@@ -418,7 +415,7 @@ export class MajikMessageChat {
     this.conversation_id = this.generateConversationID();
   }
 
-  hasRecipient(recipientId: MajikMessagePublicKey): boolean {
+  hasRecipient(recipientId: MajikKeyAddress): boolean {
     if (!recipientId || typeof recipientId !== "string") {
       return false;
     }
@@ -427,7 +424,7 @@ export class MajikMessageChat {
 
   // ============= READER MANAGEMENT =============
 
-  markAsRead(userPublicKey: MajikMessagePublicKey): boolean {
+  markAsRead(userPublicKey: MajikKeyAddress): boolean {
     if (
       !userPublicKey ||
       typeof userPublicKey !== "string" ||
@@ -458,7 +455,7 @@ export class MajikMessageChat {
   // Helper for batch marking as read
   static markMultipleAsRead(
     messages: MajikMessageChat[],
-    userPublicKey: MajikMessagePublicKey,
+    userPublicKey: MajikKeyAddress,
   ): { updated: MajikMessageChat[]; unchanged: MajikMessageChat[] } {
     const updated: MajikMessageChat[] = [];
     const unchanged: MajikMessageChat[] = [];
@@ -480,7 +477,7 @@ export class MajikMessageChat {
     return { updated, unchanged };
   }
 
-  hasUserRead(userPublicKey: MajikMessagePublicKey): boolean {
+  hasUserRead(userPublicKey: MajikKeyAddress): boolean {
     if (!userPublicKey || typeof userPublicKey !== "string") {
       return false;
     }
@@ -554,7 +551,7 @@ export class MajikMessageChat {
   }
 
   // Index: all messages in a participant's inbox
-  getRedisInboxIndexKey(publicKey: MajikMessagePublicKey): RedisKey {
+  getRedisInboxIndexKey(publicKey: MajikKeyAddress): RedisKey {
     return `inbox:${publicKey}`;
   }
 

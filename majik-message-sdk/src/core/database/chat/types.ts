@@ -1,16 +1,13 @@
-import {
-  MajikMessageAccountID,
-  MajikMessageChatID,
-  MajikMessagePublicKey,
-} from "../../types";
+import type { MajikKeyAddress, MajikKeyFingerprint } from "@majikah/majik-key";
+import type { MajikMessageChatID } from "../../types";
 
 export interface MajikMessageChatJSON {
   id: MajikMessageChatID;
   conversation_id: string;
-  account: MajikMessageAccountID;
+  account: MajikKeyFingerprint;
   message: string;
-  sender: MajikMessagePublicKey;
-  recipients: MajikMessagePublicKey[];
+  sender: MajikKeyAddress;
+  recipients: MajikKeyAddress[];
   timestamp: string;
   expires_at: string;
   read_by: string[];

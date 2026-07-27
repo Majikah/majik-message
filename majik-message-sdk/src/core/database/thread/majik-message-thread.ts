@@ -1,19 +1,15 @@
 import { v4 as uuidv4 } from "uuid";
 
 import { ThreadStatus } from "./enums";
-import {
-  ISODateString,
-  MajikMessageAccountID,
-  MajikMessagePublicKey,
-  MajikMessageThreadID,
-} from "../../types";
+import { ISODateString, MajikMessageThreadID } from "../../types";
 import { MajikUserID } from "@thezelijah/majik-user";
-import { sha256, sha512 } from "../../crypto/crypto-provider";
+import { sha256, sha512 } from "../../crypto/hash";
 import {
   MajikMessageMail,
   MajikMessageMailJSON,
 } from "./mail/majik-message-mail";
 import { MajikMessageIdentity } from "../system/identity";
+import { MajikKeyAddress, MajikKeyFingerprint } from "@majikah/majik-key";
 
 // ==================== Types & Interfaces ====================
 
@@ -28,14 +24,14 @@ export interface ThreadMetadata {
 }
 
 export interface DeletionApproval {
-  publicKey: MajikMessagePublicKey;
+  publicKey: MajikKeyAddress;
   approvalHash: string;
   timestamp: Date;
 }
 
 export interface MajikMessageThreadAnalytics {
   threadID: MajikMessageThreadID;
-  owner: MajikMessageAccountID;
+  owner: MajikKeyFingerprint;
   userID: MajikUserID;
   participantCount: number;
   messageCount: number;
@@ -58,7 +54,7 @@ export interface MajikMessageThreadAnalytics {
 
 export interface MajikMessageThreadSummary {
   id: MajikMessageThreadID;
-  participants: MajikMessagePublicKey[];
+  participants: MajikKeyAddress[];
   participant_count: number;
   latest_message: MajikMessageMailJSON | null;
   latest_message_timestamp: ISODateString | null;
@@ -74,7 +70,7 @@ export interface MajikMessageThreadSummary {
 export interface MajikMessageThreadJSON {
   id: MajikMessageThreadID;
   user_id: MajikUserID;
-  owner: MajikMessageAccountID;
+  owner: MajikKeyFingerprint;
   metadata: ThreadMetadata;
   timestamp: ISODateString;
   participants: string[];
@@ -184,10 +180,10 @@ function buildThreadHashInput(
 export class MajikMessageThread {
   private readonly _id: MajikMessageThreadID;
   private readonly _userID: MajikUserID;
-  private readonly _owner: MajikMessageAccountID; // Owner's identity account ID
+  private readonly _owner: MajikKeyFingerprint; // Owner's identity account ID
   private _metadata: ThreadMetadata;
   private readonly _timestamp: Date;
-  private readonly _participants: MajikMessagePublicKey[];
+  private readonly _participants: MajikKeyAddress[];
   private _status: ThreadStatus;
   private readonly _hash: string;
   private _thash: string | null;
@@ -199,7 +195,7 @@ export class MajikMessageThread {
   private constructor(
     id: MajikMessageThreadID,
     userID: MajikUserID,
-    owner: MajikMessageAccountID,
+    owner: MajikKeyFingerprint,
     metadata: ThreadMetadata,
     timestamp: Date,
     participants: string[],
@@ -235,7 +231,7 @@ export class MajikMessageThread {
     return this._userID;
   }
 
-  get owner(): MajikMessageAccountID {
+  get owner(): MajikKeyFingerprint {
     return this._owner;
   }
 
@@ -247,7 +243,7 @@ export class MajikMessageThread {
     return new Date(this._timestamp);
   }
 
-  get participants(): readonly MajikMessagePublicKey[] {
+  get participants(): readonly MajikKeyAddress[] {
     return [...this._participants];
   }
 
@@ -280,7 +276,7 @@ export class MajikMessageThread {
   public static create(
     userID: MajikUserID,
     owner: MajikMessageIdentity,
-    participants: MajikMessagePublicKey[],
+    participants: MajikKeyAddress[],
     metadata: ThreadMetadata = {},
   ): MajikMessageThread {
     try {
@@ -664,7 +660,7 @@ export class MajikMessageThread {
     userID: string,
     timestamp: Date,
     id: string,
-    participants: MajikMessagePublicKey[],
+    participants: MajikKeyAddress[],
   ): string {
     // Normalize participants (they should already be normalized, but ensure consistency)
     const normalized = MajikMessageThread.normalizeParticipants(participants);
@@ -677,7 +673,7 @@ export class MajikMessageThread {
   }
 
   private static generateApprovalHash(
-    publicKey: MajikMessagePublicKey,
+    publicKey: MajikKeyAddress,
     threadID: string,
     timestamp: Date,
   ): string {
@@ -827,7 +823,7 @@ export class MajikMessageThread {
 
   // ==================== Deletion Approval System ====================
 
-  public hasDeletionApproval(publicKey: MajikMessagePublicKey): boolean {
+  public hasDeletionApproval(publicKey: MajikKeyAddress): boolean {
     if (!this.isParticipant(publicKey)) return false;
 
     return this._deletionApprovals.some(
@@ -835,7 +831,7 @@ export class MajikMessageThread {
     );
   }
 
-  public requestDeletion(publicKey: MajikMessagePublicKey): void {
+  public requestDeletion(publicKey: MajikKeyAddress): void {
     try {
       // Validate public key is a participant
       if (!this._participants.includes(publicKey)) {
@@ -906,7 +902,7 @@ export class MajikMessageThread {
     }
   }
 
-  public revokeDeletionRequest(publicKey: MajikMessagePublicKey): void {
+  public revokeDeletionRequest(publicKey: MajikKeyAddress): void {
     try {
       const approvalIndex = this._deletionApprovals.findIndex(
         (approval) => approval.publicKey === publicKey,
@@ -1176,11 +1172,11 @@ export class MajikMessageThread {
 
   // ==================== Utility Methods ====================
 
-  public isOwner(accountID: MajikMessageAccountID): boolean {
+  public isOwner(accountID: MajikKeyFingerprint): boolean {
     return this._owner === accountID;
   }
 
-  public isParticipant(publicKey: MajikMessagePublicKey): boolean {
+  public isParticipant(publicKey: MajikKeyAddress): boolean {
     return this._participants.includes(publicKey);
   }
 

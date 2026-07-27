@@ -272,10 +272,10 @@ export class MajikContactManager {
     return this.directory.getContactByFingerprint(fingerprint);
   }
 
-  async getContactByPublicKeyBase64(
-    publicKeyBase64: string,
+  async getContactByAddress(
+    address: string,
   ): Promise<MajikContact | undefined> {
-    return await this.directory.getContactByPublicKeyBase64(publicKeyBase64);
+    return await this.directory.getContactByAddress(address);
   }
 
   getContactsByIds(ids: string[], strict = false): MajikContact[] {
@@ -313,7 +313,7 @@ export class MajikContactManager {
 
     const contacts = await Promise.all(
       uniqueKeys.map(async (key) => {
-        const contact = await this.directory.getContactByPublicKeyBase64(key);
+        const contact = await this.directory.getContactByAddress(key);
 
         if (!contact && strict) {
           throw new MajikContactManagerError(
@@ -436,8 +436,8 @@ export class MajikContactManager {
     return this.directory.hasFingerprint(fingerprint);
   }
 
-  async hasContactByPublicKeyBase64(publicKeyBase64: string): Promise<boolean> {
-    return this.directory.hasContactByPublicKeyBase64(publicKeyBase64);
+  async hasContactByPublicKeyBase64(address: string): Promise<boolean> {
+    return this.directory.hasContactByAddress(address);
   }
 
   listContacts(sortedByLabel = false, majikahOnly = false): MajikContact[] {
@@ -665,23 +665,23 @@ export class MajikContactManager {
     const contact = this.getContact(contactId);
     if (!contact) return null;
 
-    let publicKeyBase64: string;
+    let address: string;
     const anyPub: any = contact.publicKey;
     if (anyPub?.raw instanceof Uint8Array) {
-      publicKeyBase64 = arrayBufferToBase64(anyPub.raw.buffer);
+      address = arrayBufferToBase64(anyPub.raw.buffer);
     } else {
       const raw = await crypto.subtle.exportKey(
         "raw",
         contact.publicKey as CryptoKey,
       );
-      publicKeyBase64 = arrayBufferToBase64(raw);
+      address = arrayBufferToBase64(raw);
     }
 
     return JSON.stringify(
       {
         id: contact.id,
         label: contact.meta?.label || "",
-        publicKey: publicKeyBase64,
+        publicKey: address,
         fingerprint: contact.fingerprint,
         mlKey: contact.mlKey,
         edPublicKeyBase64: contact.edPublicKeyBase64,
@@ -755,22 +755,22 @@ export class MajikContactManager {
   }
 
   async exportContactCompressed(contact: MajikContact): Promise<string> {
-    let publicKeyBase64: string;
+    let address: string;
     const anyPub: any = contact.publicKey;
     if (anyPub?.raw instanceof Uint8Array) {
-      publicKeyBase64 = arrayBufferToBase64(anyPub.raw.buffer);
+      address = arrayBufferToBase64(anyPub.raw.buffer);
     } else {
       const raw = await crypto.subtle.exportKey(
         "raw",
         contact.publicKey as CryptoKey,
       );
-      publicKeyBase64 = arrayBufferToBase64(raw);
+      address = arrayBufferToBase64(raw);
     }
 
     const jsonObj: MajikContactCard = {
       id: contact.id,
       label: contact.meta?.label || "",
-      publicKey: publicKeyBase64,
+      publicKey: address,
       fingerprint: contact.fingerprint,
       mlKey: contact.mlKey,
       edPublicKeyBase64: contact.edPublicKeyBase64,

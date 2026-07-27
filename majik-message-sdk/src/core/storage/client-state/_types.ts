@@ -8,27 +8,18 @@
  * adapter only moves bytes.
  */
 
+import {
+  BASE_CLIENT_STATE_KEYS,
+  ClientStateEntry,
+} from "@majikah/majik-key-client";
 import { MajikStorageAdapter } from "../storage-adapter";
-
-// ---------------------------------------------------------------------------
-// Storage entry — the unit that adapters read and write
-// ---------------------------------------------------------------------------
-
-export interface ClientStateEntry {
-  /** Stable string key that identifies this piece of state. */
-  id: string;
-  /** JSON-serialised value. Always a string on the wire / in storage. */
-  value: string;
-  /** ISO 8601 datetime — set by the adapter on every write where supported. */
-  updatedAt?: string;
-}
 
 // ---------------------------------------------------------------------------
 // Well-known state keys
 // ---------------------------------------------------------------------------
 
 export const CLIENT_STATE_KEYS = {
-  ACCOUNT_ORDER: "user_account_order",
+  ...BASE_CLIENT_STATE_KEYS,
   USER_APP_PREFERENCES: "user_app_preferences",
 } as const;
 
@@ -45,7 +36,6 @@ export type ClientStateKey =
  */
 export type AccountOrderValue = string[];
 
-
 /**
  * User-configured app-wide preferences.
  */
@@ -53,6 +43,7 @@ export interface UserAppPreferences {
   chats: ChatsPreferences;
   // dashboard: DashboardPreferences;
   privacy: PrivacyPreferences;
+  security: SecurityPreferences;
 }
 
 export interface ChatsPreferences {
@@ -65,6 +56,15 @@ export interface ChatsPreferences {
 
 export interface PrivacyPreferences {
   shareAnalytics?: boolean;
+}
+export interface SecurityPreferences {
+  key?: KeyPreferences;
+}
+
+export interface KeyPreferences {
+  autoLockOnMinimize?: boolean;
+  autoLockInterval?: number;
+  onetimeUnlock?: boolean;
 }
 
 // ---------------------------------------------------------------------------

@@ -7,12 +7,9 @@ import type {
 import { MajikContactManagerJSON } from "./contacts/types";
 import { UserAppPreferences } from "./storage";
 import { MajikMessageChatJSON } from "./database/chat/types";
+import { MajikKeyAddress } from "@majikah/majik-key";
 
 export type ISODateString = string;
-
-export type MajikMessageAccountID = string;
-
-export type MajikMessagePublicKey = string;
 
 export type MajikMessageChatID = string;
 
@@ -200,7 +197,7 @@ export interface EncryptFileOptions {
    * Duplicates and the sender's own public key are silently discarded.
    * When empty or omitted, a single-recipient (self-encrypted) file is produced.
    */
-  recipients?: MajikMessagePublicKey[];
+  recipients?: MajikKeyAddress[];
   /**
    * Conversation ID — required when context is "chat_image".
    * Scopes the R2 key: images/chats/<conversationId>/<userId>_<hash>.mjkb

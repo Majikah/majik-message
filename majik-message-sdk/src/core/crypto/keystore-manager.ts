@@ -16,6 +16,7 @@ import { MajikKey, MajikKeyJSON, SerializedIdentity } from "@majikah/majik-key";
 import { KDF_VERSION } from "./constants";
 import { MajikKeyStorageAdapter } from "../storage/keystore/_types";
 import { InMemoryKeystoreAdapter } from "../storage/keystore/adapter-memory";
+import { MnemonicLanguage } from "@majikah/majik-key/dist/core/crypto/wordlist";
 
 // ─── Error ────────────────────────────────────────────────────────────────────
 
@@ -376,6 +377,20 @@ export class MajikKeyManager {
     return freshKey;
   }
 
+  async updateLabel(keyId: string, newLabel: string): Promise<void> {
+    // 1. Fetch the existing key
+    const key = this.get(keyId);
+    if (!key) {
+      throw new Error(`Key with ID ${keyId} not found in keystore.`);
+    }
+
+    // 2. Update the label on the key instance itself
+    const updated = key.updateLabel(newLabel);
+
+    await this._persist(updated);
+    this._cache.set(updated.id, updated);
+  }
+
   // ── ensureUnlocked ────────────────────────────────────────────────────────
 
   /**
@@ -412,8 +427,11 @@ export class MajikKeyManager {
 
   // ── Mnemonic / backup helpers ─────────────────────────────────────────────
 
-  static async generateMnemonic(strength: 128 | 256 = 128): Promise<string> {
-    return await MajikKey.generateMnemonic(strength);
+  static async generateMnemonic(
+    strength: 128 | 256 = 128,
+    language: MnemonicLanguage = "en",
+  ): Promise<string> {
+    return await MajikKey.generateMnemonic(strength, language);
   }
 
   async exportMnemonicBackup(id: string, mnemonic: string): Promise<string> {

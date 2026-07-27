@@ -2,17 +2,16 @@ import { v4 as uuidv4 } from "uuid";
 
 import {
   ISODateString,
-  MajikMessageAccountID,
   MajikMessageMailID,
-  MajikMessagePublicKey,
   MajikMessageThreadID,
 } from "../../../types";
-import { sha256 } from "../../../crypto/crypto-provider";
+import { sha256 } from "../../../crypto/hash";
 import { MajikMessageIdentity } from "../../system/identity";
 
 import { ThreadStatus } from "../enums";
 import { MajikMessageThread } from "../majik-message-thread";
 import { FileContext, MajikFile } from "@majikah/majik-file";
+import { MajikKeyAddress, MajikKeyFingerprint } from "@majikah/majik-key";
 
 // ==================== Types & Interfaces ====================
 
@@ -28,16 +27,16 @@ export interface MailMetadata {
 export interface MajikMessageMailJSON {
   id: MajikMessageMailID;
   thread_id: MajikMessageThreadID;
-  account: MajikMessageAccountID;
+  account: MajikKeyFingerprint;
   message: string;
-  sender: MajikMessagePublicKey;
-  recipients: MajikMessagePublicKey[];
+  sender: MajikKeyAddress;
+  recipients: MajikKeyAddress[];
   timestamp: ISODateString;
   metadata: MailMetadata;
   hash: string;
   p_hash: string; // Previous hash (blockchain-like)
   previous_mail_id?: MajikMessageMailID;
-  read_by: MajikMessagePublicKey[];
+  read_by: MajikKeyAddress[];
 }
 
 export interface MailAttachmentRef {
@@ -95,16 +94,16 @@ export class HashIntegrityError extends MajikMailError {
 export class MajikMessageMail {
   private readonly _id: MajikMessageMailID;
   private readonly _threadID: MajikMessageThreadID;
-  private readonly _account: MajikMessageAccountID;
+  private readonly _account: MajikKeyFingerprint;
   private _message: string; // Compressed message
-  private readonly _sender: MajikMessagePublicKey;
-  private _recipients: MajikMessagePublicKey[];
+  private readonly _sender: MajikKeyAddress;
+  private _recipients: MajikKeyAddress[];
   private readonly _timestamp: Date;
   private _metadata: MailMetadata;
   private readonly _hash: string; // Current item hash
   private readonly _p_hash: string; // Previous hash (blockchain link)
   private readonly _previousMailID?: MajikMessageMailID;
-  private _readBy: MajikMessagePublicKey[];
+  private _readBy: MajikKeyAddress[];
 
   // Maximum allowed length for the raw message
   private static readonly MAX_MESSAGE_LENGTH = 100000;
@@ -114,16 +113,16 @@ export class MajikMessageMail {
   private constructor(
     id: MajikMessageMailID,
     threadID: MajikMessageThreadID,
-    account: MajikMessageAccountID,
+    account: MajikKeyFingerprint,
     message: string,
-    sender: MajikMessagePublicKey,
-    recipients: MajikMessagePublicKey[],
+    sender: MajikKeyAddress,
+    recipients: MajikKeyAddress[],
     timestamp: Date,
     metadata: MailMetadata,
     hash: string,
     p_hash: string,
     previousMailID?: MajikMessageMailID,
-    readBy: MajikMessagePublicKey[] = [],
+    readBy: MajikKeyAddress[] = [],
     bypassValidation: boolean = false,
   ) {
     this._id = id;
@@ -155,19 +154,19 @@ export class MajikMessageMail {
     return this._threadID;
   }
 
-  get account(): MajikMessageAccountID {
+  get account(): MajikKeyFingerprint {
     return this._account;
   }
 
-  get sender(): MajikMessagePublicKey {
+  get sender(): MajikKeyAddress {
     return this._sender;
   }
 
-  get recipients(): readonly MajikMessagePublicKey[] {
+  get recipients(): readonly MajikKeyAddress[] {
     return [...this._recipients];
   }
 
-  get participants(): readonly MajikMessagePublicKey[] {
+  get participants(): readonly MajikKeyAddress[] {
     return [...this._recipients, this._sender];
   }
 
@@ -191,7 +190,7 @@ export class MajikMessageMail {
     return this._previousMailID;
   }
 
-  get readBy(): readonly MajikMessagePublicKey[] {
+  get readBy(): readonly MajikKeyAddress[] {
     return [...this._readBy];
   }
 
@@ -218,7 +217,7 @@ export class MajikMessageMail {
     thread: MajikMessageThread,
     identity: MajikMessageIdentity,
     message: string,
-    recipients: MajikMessagePublicKey[],
+    recipients: MajikKeyAddress[],
     metadata: MailMetadata = {},
     id?: MajikMessageMailID,
   ): Promise<MajikMessageMail> {
@@ -375,7 +374,7 @@ export class MajikMessageMail {
     previousMail: MajikMessageMail,
     identity: MajikMessageIdentity,
     message: string,
-    recipients: MajikMessagePublicKey[],
+    recipients: MajikKeyAddress[],
     metadata: MailMetadata = {},
     id?: MajikMessageMailID,
   ): Promise<MajikMessageMail> {
@@ -634,8 +633,8 @@ export class MajikMessageMail {
   private static generateHash(
     id: MajikMessageMailID,
     message: string,
-    sender: MajikMessagePublicKey,
-    recipients: MajikMessagePublicKey[],
+    sender: MajikKeyAddress,
+    recipients: MajikKeyAddress[],
     timestamp: Date,
   ): string {
     const recipientsStr = recipients.join(",");
@@ -968,7 +967,7 @@ export class MajikMessageMail {
    * @param recipientPublicKey - The public key of the recipient marking as read
    * @returns true if successfully marked, false if already read
    */
-  public markAsRead(recipientPublicKey: MajikMessagePublicKey): boolean {
+  public markAsRead(recipientPublicKey: MajikKeyAddress): boolean {
     try {
       if (
         !recipientPublicKey ||
@@ -1013,7 +1012,7 @@ export class MajikMessageMail {
    * @param recipientPublicKey - The public key of the recipient marking as unread
    * @returns true if successfully unmarked, false if wasn't read
    */
-  public markAsUnread(recipientPublicKey: MajikMessagePublicKey): boolean {
+  public markAsUnread(recipientPublicKey: MajikKeyAddress): boolean {
     try {
       if (
         !recipientPublicKey ||
@@ -1058,7 +1057,7 @@ export class MajikMessageMail {
   /**
    * Checks if a specific user has read this mail.
    */
-  public hasUserRead(recipientPublicKey: MajikMessagePublicKey): boolean {
+  public hasUserRead(recipientPublicKey: MajikKeyAddress): boolean {
     if (!recipientPublicKey || typeof recipientPublicKey !== "string") {
       return false;
     }
@@ -1078,7 +1077,7 @@ export class MajikMessageMail {
   /**
    * Gets the list of recipients who haven't read this mail yet.
    */
-  public getUnreadRecipients(): MajikMessagePublicKey[] {
+  public getUnreadRecipients(): MajikKeyAddress[] {
     return this._recipients.filter(
       (recipient) => !this._readBy.includes(recipient),
     );
@@ -1099,7 +1098,7 @@ export class MajikMessageMail {
   /**
    * Checks if a user can access this mail (is sender or recipient).
    */
-  public canUserAccess(userPublicKey: MajikMessagePublicKey): boolean {
+  public canUserAccess(userPublicKey: MajikKeyAddress): boolean {
     if (!userPublicKey || typeof userPublicKey !== "string") {
       return false;
     }
@@ -1110,7 +1109,7 @@ export class MajikMessageMail {
   /**
    * Checks if a user is the sender of this mail.
    */
-  public isSender(userPublicKey: MajikMessagePublicKey): boolean {
+  public isSender(userPublicKey: MajikKeyAddress): boolean {
     if (!userPublicKey || typeof userPublicKey !== "string") {
       return false;
     }
@@ -1120,7 +1119,7 @@ export class MajikMessageMail {
   /**
    * Checks if a user is a recipient of this mail.
    */
-  public isRecipient(userPublicKey: MajikMessagePublicKey): boolean {
+  public isRecipient(userPublicKey: MajikKeyAddress): boolean {
     if (!userPublicKey || typeof userPublicKey !== "string") {
       return false;
     }
