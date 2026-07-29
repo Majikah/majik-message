@@ -32,12 +32,14 @@ import {
   type MajikIdentity,
 } from "@majikah/majik-envelope";
 import {
-  MajikFile,
+  MajikMessageFile,
   MajikFileError,
-  MajikFileJSON,
+  MajikMessageFileJSON,
   type MajikFileIdentity,
   type MajikFileRecipient,
-} from "@majikah/majik-file";
+} from "@majikah/majik-message-file";
+
+
 
 import {
   ExpectedSigner,
@@ -1035,20 +1037,20 @@ export class MajikMessage extends MajikKeyClient<
     // Accounts imported before ML-DSA signing key support won't have
     // hasSigningKeys. We fall back to unsigned create() so the upload never
     // fails for legacy accounts — the file is encrypted but not signed.
-    let file: MajikFile;
+    let file: MajikMessageFile;
 
     if (signingKey?.hasSigningKeys) {
-      file = await MajikFile.createAndSign(createOptions, signingKey, {
+      file = await MajikMessageFile.createAndSign(createOptions, signingKey, {
         // Carry the MIME type into the signature envelope's contentType field
         // so verifiers see a human-readable format label (e.g. "application/pdf").
         contentType:
           mimeType ??
           (originalName
-            ? (MajikFile.inferMimeType(originalName) ?? undefined)
+            ? (MajikMessageFile.inferMimeType(originalName) ?? undefined)
             : undefined),
       });
     } else {
-      file = await MajikFile.create(createOptions);
+      file = await MajikMessageFile.create(createOptions);
     }
 
     return {
@@ -1072,7 +1074,7 @@ export class MajikMessage extends MajikKeyClient<
    * Flow:
    *  1. If `accountId` is provided, that account is tried first.
    *  2. For group files, every own account is tried in sequence.
-   *  3. Delegates to MajikFile.decryptWithMetadata() for binary parsing,
+   *  3. Delegates to MajikMessageFile.decryptWithMetadata() for binary parsing,
    *     ML-KEM decapsulation, AES-256-GCM decryption, and decompression.
    *
    * @returns Raw plaintext bytes, original filename, MIME type, and
@@ -1126,7 +1128,7 @@ export class MajikMessage extends MajikKeyClient<
       try {
         const identity = await this._resolveFileIdentity(account.id);
 
-        return await MajikFile.decryptWithMetadata(
+        return await MajikMessageFile.decryptWithMetadata(
           source,
           {
             fingerprint: identity.fingerprint,
@@ -1152,10 +1154,10 @@ export class MajikMessage extends MajikKeyClient<
     );
   }
 
-  // ── MajikFile Signature Methods ───────────────────────────────────────────
+  // ── MajikMessageFile Signature Methods ───────────────────────────────────────────
 
   /**
-   * Sign an already-created MajikFile using the active (or specified) account
+   * Sign an already-created MajikMessageFile using the active (or specified) account
    * and attach the signature to the instance.
    *
    * Use this for deferred signing — when a file was created via create() and
@@ -1173,7 +1175,7 @@ export class MajikMessage extends MajikKeyClient<
    *     .eq("id", file.id);
    */
   async signMajikFile(
-    file: MajikFile,
+    file: MajikMessageFile,
     options?: {
       accountId?: string;
       contentType?: string;
@@ -1207,7 +1209,7 @@ export class MajikMessage extends MajikKeyClient<
   }
 
   /**
-   * Full binary verification of a MajikFile — decrypts first, then verifies
+   * Full binary verification of a MajikMessageFile — decrypts first, then verifies
    * the signature against the recovered plaintext bytes.
    *
    * Stronger than verifyMajikFile() because it proves both:
@@ -1227,7 +1229,7 @@ export class MajikMessage extends MajikKeyClient<
    *   if (result.valid) console.log("Plaintext verified");
    */
   async verifyMajikFileBinary(
-    file: MajikFile,
+    file: MajikMessageFile,
     options?: {
       contactID?: string;
       publicKeyBase64?: string;
@@ -1275,7 +1277,7 @@ export class MajikMessage extends MajikKeyClient<
 
   /**
    * Check whether the active (or specified) account is the signer of a
-   * MajikFile by comparing fingerprints.
+   * MajikMessageFile by comparing fingerprints.
    *
    * This is a fast, synchronous fingerprint comparison — it does NOT
    * cryptographically verify the signature. Use verifyMajikFile() for proof.
@@ -1294,7 +1296,7 @@ export class MajikMessage extends MajikKeyClient<
    *     showResignButton();
    *   }
    */
-  isActiveAccountSigner(file: MajikFile, accountId?: string): boolean {
+  isActiveAccountSigner(file: MajikMessageFile, accountId?: string): boolean {
     const id = accountId ?? this.getActiveAccount()?.id;
     if (!id) return false;
 
@@ -1310,7 +1312,7 @@ export class MajikMessage extends MajikKeyClient<
   }
 
   /**
-   * Return a rich metadata object describing who signed a MajikFile,
+   * Return a rich metadata object describing who signed a MajikMessageFile,
    * without performing cryptographic verification.
    *
    * Combines getSignatureInfo() with a contact directory and keystore lookup
@@ -1330,7 +1332,7 @@ export class MajikMessage extends MajikKeyClient<
    *     console.log("at", info.timestamp);
    *   }
    */
-  getMajikFileSignerInfo(file: MajikFile): {
+  getMajikFileSignerInfo(file: MajikMessageFile): {
     signerId: string;
     timestamp: string;
     contentType?: string;
@@ -1363,7 +1365,7 @@ export class MajikMessage extends MajikKeyClient<
   }
 
   /**
-   * Remove the signature from a MajikFile and persist the change.
+   * Remove the signature from a MajikMessageFile and persist the change.
    *
    * A convenience wrapper around file.removeSignature() that handles the
    * Supabase update in one call. Useful for admin flows or when re-signing
@@ -1375,7 +1377,7 @@ export class MajikMessage extends MajikKeyClient<
    * Note: removing a signature does not re-encrypt or modify the R2 binary —
    * only the Supabase metadata row changes.
    *
-   * @returns The updated MajikFileJSON with signature: null.
+   * @returns The updated MajikMessageFileJSON with signature: null.
    *
    * @example
    *   const updatedRow = majik.unsignMajikFile(file);
@@ -1384,13 +1386,13 @@ export class MajikMessage extends MajikKeyClient<
    *     .update({ signature: null, last_update: updatedRow.last_update })
    *     .eq("id", file.id);
    */
-  unsignMajikFile(file: MajikFile): MajikFileJSON {
+  unsignMajikFile(file: MajikMessageFile): MajikMessageFileJSON {
     file.removeSignature();
     return file.toJSON();
   }
 
   /**
-   * Re-sign a MajikFile — removes any existing signature, then signs
+   * Re-sign a MajikMessageFile — removes any existing signature, then signs
    * with the active (or specified) account.
    *
    * Idempotent: calling this multiple times always produces a fresh signature
@@ -1411,7 +1413,7 @@ export class MajikMessage extends MajikKeyClient<
    *     .eq("id", file.id);
    */
   async resignMajikFile(
-    file: MajikFile,
+    file: MajikMessageFile,
     options?: {
       accountId?: string;
       contentType?: string;

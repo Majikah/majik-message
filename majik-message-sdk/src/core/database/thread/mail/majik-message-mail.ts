@@ -10,7 +10,7 @@ import { MajikMessageIdentity } from "../../system/identity";
 
 import { ThreadStatus } from "../enums";
 import { MajikMessageThread } from "../majik-message-thread";
-import { FileContext, MajikFile } from "@majikah/majik-file";
+import { FileContext, MajikMessageFile } from "@majikah/majik-message-file";
 import { MajikKeyAddress, MajikKeyFingerprint } from "@majikah/majik-key";
 
 // ==================== Types & Interfaces ====================
@@ -40,7 +40,7 @@ export interface MajikMessageMailJSON {
 }
 
 export interface MailAttachmentRef {
-  /** MajikFile UUID — used to fetch the .mjkb from R2 via your file service */
+  /** MajikMessageFile UUID — used to fetch the .mjkb from R2 via your file service */
   fileId: string;
   /** SHA-256 hex of original bytes — for dedup checks */
   fileHash: string;
@@ -52,7 +52,7 @@ export interface MailAttachmentRef {
   sizeOriginal: number;
   /** R2 key — lets the Worker fetch directly without a DB lookup */
   r2Key: string;
-  /** context from MajikFile — so the UI knows if it's a thread_attachment */
+  /** context from MajikMessageFile — so the UI knows if it's a thread_attachment */
   context: FileContext;
 }
 
@@ -528,13 +528,13 @@ export class MajikMessageMail {
   // In MajikMessageMail
 
   /**
-   * Attach a MajikFile to this mail.
+   * Attach a MajikMessageFile to this mail.
    * Automatically wires thread_id and thread_message_id from the instance.
    *
    * @throws MailValidationError if the file context is not "thread_attachment"
    * @throws MailOperationError if this file is already attached (by fileId or fileHash)
    */
-  attachFile(file: MajikFile): MailAttachmentRef {
+  attachFile(file: MajikMessageFile): MailAttachmentRef {
     // Enforce context — only thread attachments belong on mail
     if (file.context !== "thread_attachment") {
       throw new MailValidationError(

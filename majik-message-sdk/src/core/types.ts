@@ -1,9 +1,9 @@
 import type {
   FileContext,
-  MajikFile,
-  MajikFileJSON,
+  MajikMessageFile,
+  MajikMessageFileJSON,
   TempFileDuration,
-} from "@majikah/majik-file";
+} from "@majikah/majik-message-file";
 import { MajikContactManagerJSON } from "./contacts/types";
 import { UserAppPreferences } from "./storage";
 import { MajikMessageChatJSON } from "./database/chat/types";
@@ -124,7 +124,7 @@ export interface MajikKeyMetadata {
   hasMlKem: boolean;
 }
 
-// ─── MajikFile integration types ─────────────────────────────────────────────
+// ─── MajikMessageFile integration types ─────────────────────────────────────────────
 
 // ─── Compression Level Type ───────────────────────────────────────────────────
 
@@ -170,7 +170,7 @@ export type CompressionLevel =
 /**
  * Options for MajikMessage.encryptFile().
  *
- * Wraps MajikFile.CreateOptions in MajikMessage terms — callers pass contact
+ * Wraps MajikMessageFile.CreateOptions in MajikMessage terms — callers pass contact
  * IDs rather than raw key material. The orchestrator resolves everything from
  * MajikKeyStore and the contact directory internally.
  */
@@ -205,7 +205,7 @@ export interface EncryptFileOptions {
   conversationId?: string;
   /**
    * Store under files/public/ with 15-day auto-deletion by R2 lifecycle policy.
-   * Requires expiresAt. Use MajikFile.buildExpiryDate() to generate.
+   * Requires expiresAt. Use MajikMessageFile.buildExpiryDate() to generate.
    * @default false
    */
   isTemporary?: boolean;
@@ -249,16 +249,16 @@ export interface EncryptFileOptions {
  */
 export interface EncryptFileResult {
   /**
-   * The fully-initialised MajikFile instance.
+   * The fully-initialised MajikMessageFile instance.
    * Use file.toMJKB()  → Blob  for R2 upload.
    * Use file.toJSON()  → row   for Supabase insert.
    */
-  file: MajikFile;
+  file: MajikMessageFile;
   /**
    * Supabase-ready metadata row. Equivalent to file.toJSON().
    * Provided as a convenience so callers do not need to call toJSON() themselves.
    */
-  metadata: MajikFileJSON;
+  metadata: MajikMessageFileJSON;
   /**
    * .mjkb Blob for R2 upload. Equivalent to file.toMJKB().
    */
@@ -287,12 +287,12 @@ export interface DecryptFileOptions {
    */
   accountId?: string;
   /**
-   * The MajikFileJSON metadata row from Supabase.
+   * The MajikMessageFileJSON metadata row from Supabase.
    * When provided, the signature field is automatically threaded into
    * decryptWithMetadata() so the returned signature is populated without
    * a second parse or round-trip.
    */
-  metadata?: MajikFileJSON;
+  metadata?: MajikMessageFileJSON;
 }
 
 export interface AppBackUpData {
