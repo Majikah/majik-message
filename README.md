@@ -5,6 +5,8 @@
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18996348.svg)](https://doi.org/10.5281/zenodo.18996348)
 [![Static Badge](https://img.shields.io/badge/IANA-vnd.majikah.bundle-green)](https://www.iana.org/assignments/media-types/application/vnd.majikah.bundle)
 
+
+
 **Majik Message** is a post-quantum secure messaging platform built on cryptographic identity. Your account *is* your encryption keys—no phone numbers, no passwords, just your 12-word seed phrase and complete privacy. Safe from quantum computers.
 
 ![npm](https://img.shields.io/npm/v/@majikah/majik-message) ![npm downloads](https://img.shields.io/npm/dm/@majikah/majik-message) ![npm bundle size](https://img.shields.io/bundlephobia/min/%40majikah%2Fmajik-message) [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0) ![TypeScript](https://img.shields.io/badge/TypeScript-Ready-blue)
@@ -13,7 +15,7 @@
 
 [Read more about Majik Message here](https://majikah.solutions/products/majik-message)
 
-[![Majik Message Thumbnail](https://github.com/user-attachments/assets/6355cbd3-63e4-4a95-a370-64ba27cbb4a7)](https://message.majikah.solutions)
+[![Majik Message Thumbnail](https://github.com/user-attachments/assets/d433c6b8-1841-4fa1-a6da-b348029d1dbe)](https://message.majikah.solutions)
 
 > Click the image to try Majik Message live.
 
@@ -603,7 +605,6 @@ Once enabled, any page you load will be automatically scanned for quantum-safe e
 | File/Image Sharing                | ✓ Supported                    |
 | Voice Messages                    | ✓ Supported                    |
 | P2P Audio Calling                 | ✓ Supported                    |
-
 
 ---
 
