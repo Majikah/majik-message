@@ -78,7 +78,8 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "build": "tsc",
     "prepublishOnly": "npm run build",
-    "bump": "npm version patch && git push && git push --tags"
+    "bump": "npm version patch && git push && git push --tags",
+    "package": "npm run build && npm version patch && git push && git push --tags"
   },
   "dependencies": {
     "@bokuweb/zstd-wasm": "^0.0.27",
