@@ -397,7 +397,7 @@ export class MajikMessage extends MajikKeyClient<
   }
 
   // ==========================================================================
-  // ── ACCOUNT MANAGEMENT ────────────────────────────────────────────────────
+  // ── ACCOUNT MANAGEMENT (overrides / additions on top of MajikKeyClient) ──
   // ==========================================================================
 
   isContactMajikahRegistered(id: string): boolean {
@@ -414,6 +414,31 @@ export class MajikMessage extends MajikKeyClient<
 
   async hasOwnIdentity(fingerprint: string): Promise<boolean> {
     return this.keyManager.has(fingerprint);
+  }
+
+  /**
+   * Update the metadata (e.g., label) of an owned account.
+   * This updates both the contact directory and the local ownAccounts cache.
+   */
+  async updateOwnAccountMeta(
+    id: string,
+    meta: Partial<MajikContactMeta>,
+  ): Promise<void> {
+    if (!this._ownAccounts.has(id)) {
+      throw new Error(`Account not found in own accounts: "${id}"`);
+    }
+
+    // 1. Update the contact record in the shared directory
+    await this._contacts.updateContactMeta(id, meta);
+    if (meta.label && meta.label.trim()) {
+      await this.keyManager.updateLabel(id, meta.label);
+    }
+
+    // 2. Fetch the updated contact and sync the local _ownAccounts map
+    const updatedContact = this._contacts.getContact(id);
+    if (updatedContact) {
+      this._ownAccounts.set(id, updatedContact);
+    }
   }
 
   // ==========================================================================
