@@ -430,14 +430,12 @@ export class MajikMessage extends MajikKeyClient<
     return this._contacts.hasContact(id);
   }
 
-  async hasContactByPublicKeyBase64(
-    publicKey: MajikKeyAddress,
-  ): Promise<boolean> {
+  async hasContactByAddress(publicKey: MajikKeyAddress): Promise<boolean> {
     if (!publicKey?.trim()) throw new Error("Invalid contact public key");
-    return await this._contacts.hasContactByPublicKeyBase64(publicKey);
+    return await this._contacts.hasContactByAddress(publicKey);
   }
 
-  async getContactByPublicKey(
+  async getContactByAddress(
     address: MajikKeyAddress,
   ): Promise<MajikContact | null> {
     if (!address?.trim()) throw new Error("Invalid public key address");
