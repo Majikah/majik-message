@@ -75,7 +75,6 @@
   },
   "scripts": {
     "update": "npm install @majikah/majik-key@latest @majikah/majik-key-client@latest @majikah/majik-envelope@latest @majikah/majik-contact@latest @majikah/majik-message-file@latest",
-    "test": "echo \"Error: no test specified\" && exit 1",
     "build": "tsc",
     "prepublishOnly": "npm run build",
     "bump": "npm version patch && git push && git push --tags",
