@@ -2,7 +2,7 @@
   "name": "@majikah/majik-message",
   "type": "module",
   "description": "Post-quantum end-to-end encryption with ML-KEM-768. Seed phrase–based accounts. Auto-expiring messages. Offline-ready. Exportable encrypted messages. Tamper-proof threads with blockchain-like integrity. Quantum-resistant messaging.",
-  "version": "0.4.5",
+  "version": "0.4.6",
   "license": "Apache-2.0",
   "author": "Zelijah",
   "main": "./dist/index.js",
