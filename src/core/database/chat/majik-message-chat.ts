@@ -268,7 +268,7 @@ export class MajikMessageChat {
   /**
    * Generate a deterministic conversation ID from a message
    * Automatically includes sender and all recipients, normalized by alphabetical order
-   * then hashes with SHA-256 and encodes as base64
+   * then hashes with SHA-256 and encodes as hex
    */
   generateConversationID(): string {
     // Get all participants (sender + recipients)
@@ -287,9 +287,11 @@ export class MajikMessageChat {
     const data = encoder.encode(combined);
 
     const hashedID = hash(data);
-    const hashBase64 = arrayToBase64(hashedID);
+    const hashHex = Array.from(hashedID)
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("");
 
-    return `conv_${hashBase64}`;
+    return `conv_${hashHex}`;
   }
 
   /**
